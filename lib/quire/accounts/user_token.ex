@@ -1,5 +1,5 @@
 defmodule Quire.Accounts.UserToken do
-  use Ecto.Schema
+  use Quire.Schema
   import Ecto.Query
   alias Quire.Accounts.UserToken
 
@@ -11,10 +11,6 @@ defmodule Quire.Accounts.UserToken do
   @magic_link_validity_in_minutes 15
   @change_email_validity_in_days 7
   @session_validity_in_days 14
-
-  # UUID v7 — see the note in Quire.Accounts.User.
-  @primary_key {:id, Ecto.UUID, autogenerate: [version: 7]}
-  @foreign_key_type :binary_id
   schema "users_tokens" do
     field :token, :binary
     field :context, :string

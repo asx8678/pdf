@@ -1,13 +1,6 @@
 defmodule Quire.Accounts.User do
-  use Ecto.Schema
+  use Quire.Schema
   import Ecto.Changeset
-
-  # UUID v7, not v4. `:binary_id` autogenerates a v4 in the application, which
-  # scatters B-tree inserts and defeats the index-locality rationale in §3.7.
-  # Ecto.UUID's type is :uuid rather than :binary_id, so Ecto omits the id from
-  # the INSERT and the column's DEFAULT uuidv7() fires database-side too.
-  @primary_key {:id, Ecto.UUID, autogenerate: [version: 7]}
-  @foreign_key_type :binary_id
   schema "users" do
     field :email, :string
     field :password, :string, virtual: true, redact: true

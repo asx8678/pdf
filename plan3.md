@@ -650,12 +650,26 @@ instead of scattering them, which matters for the append-only
 `document_revisions` and `edit_operations` tables that this design leans on
 hardest. PG18 ships `uuidv7()` as a built-in function — a core function, not
 an extension — so no extension and no Elixir-side library is strictly
-required. **Recommended pattern:** generate in Elixir (via
-`Uniq.UUID.uuid7/0`) so that `Repo.insert_all/3` and changeset inserts behave
-identically and nothing depends on a DB round-trip for an ID, and set
-`DEFAULT uuidv7()` on the column as a backstop for hand-written SQL and
-migrations. Do not mix the two silently — pick Elixir-side generation as the
-rule and document the default as a safety net.
+required.
+
+**⚠️ `--binary-id` alone yields UUID v4.** `mix phx.new --binary-id`
+and `mix phx.gen.auth --binary-id` emit `@primary_key {:id, :binary_id,
+autogenerate: true}`, which calls `Ecto.UUID.bingenerate/0` —
+i.e. **UUID v4**. A v4 primary key scatters B-tree inserts and defeats the
+index-locality rationale this design leans on hardest (§3.7). Every schema
+**must** override this.
+
+**Project pattern — `Quire.Schema`.** The `Quire.Schema` `__using__` macro
+sets `@primary_key {:id, Ecto.UUID, autogenerate: [version: 7]}` and
+`@foreign_key_type :binary_id`. Ecto 3.14.1+ provides UUID v7 generation,
+timestamp extraction and version introspection natively, so the `uniq`
+Hex package is deliberately absent. The `Ecto.UUID` type is `:uuid` rather
+than `:binary_id`, which means Ecto omits the id from the INSERT and the
+column's `DEFAULT uuidv7()` fires database-side as a backstop for
+hand-written SQL and migrations.
+
+Do not mix the two silently — `Quire.Schema` is the rule and the DB
+default is the safety net.
 
 **`RETURNING` can see `OLD` and `NEW`.** PG18 lets an `UPDATE ... RETURNING`
 reference both the pre- and post-update row. This is a direct fit for §7.4's
@@ -785,11 +799,15 @@ revision.
 
 ## 5. Data model
 
-Ecto schemas, PostgreSQL 18. All IDs are `binary_id` holding **UUID v7** —
-generated Elixir-side with `Uniq.UUID.uuid7/0`, with `DEFAULT uuidv7()` on
-the column as a backstop (§3.7). Time-ordered keys keep inserts on the
-right-hand edge of the B-tree, which is what the append-only
-`document_revisions` and `edit_operations` tables need.
+Ecto schemas, PostgreSQL 18. All IDs are `:uuid` holding **UUID v7** —
+generated Elixir-side by `Ecto.UUID.autogenerate(version: 7)`, with
+`DEFAULT uuidv7()` on the column as a backstop (§3.7). Every schema uses the
+`Quire.Schema` `__using__` macro rather than bare `use Ecto.Schema`, because
+`mix phx.new --binary-id` and `phx.gen.auth --binary-id` emit `:binary_id`
+which autogenerates UUID **v4** (via `Ecto.UUID.bingenerate/0`) and scatters
+B-tree inserts. Time-ordered keys keep inserts on the right-hand edge of the
+B-tree, which is what the append-only `document_revisions` and
+`edit_operations` tables need.
 
 **No extensions.** Every migration must run against a stock
 `brew install postgresql@18` with no `CREATE EXTENSION` line anywhere. If a
