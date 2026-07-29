@@ -160,6 +160,135 @@ defmodule Quire.PdfTest do
     end
   end
 
+  describe "outline/1 with named destinations" do
+    defp named_dest_pdf(pages) do
+      {:ok, doc} = ExPdfium.new()
+
+      doc =
+        Enum.reduce(1..pages, doc, fn _, acc ->
+          {:ok, next} = ExPdfium.add_page(acc, {595.0, 842.0})
+          next
+        end)
+
+      {:ok, bytes} = ExPdfium.save_to_bytes(doc)
+      {:ok, doc} = Quire.Pdf.open(bytes)
+
+      # Pages are at objects 4, 5, 6... (obj 3 is metadata).
+      # Map page ref -> 0-based page index.
+      doc
+    end
+
+    defp link_named_dest(doc, name, page_obj_id, dest_name) do
+      # Create name tree at object 50
+      :ok = Quire.Pdf.set_object(doc, 50, %{"/Names" => [dest_name, {:ref, 60, 0}]})
+      :ok = Quire.Pdf.set_object(doc, 60, [{:ref, page_obj_id, 0}, {:name, "XYZ"}, 0, 0, nil])
+
+      # Wire /Dests into catalog
+      {:ok, cat} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.put(cat, "/Dests", {:ref, 50, 0}))
+
+      # Create outline item with Dest = dest_name (a string key)
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          80,
+          %{
+            "/Type" => {:name, "Outlines"},
+            "/First" => {:ref, 70, 0},
+            "/Last" => {:ref, 70, 0},
+            "/Count" => 1
+          }
+        )
+
+      :ok =
+        Quire.Pdf.set_object(doc, 70, %{
+          "/Title" => name,
+          "/Dest" => dest_name,
+          "/Parent" => {:ref, 80, 0}
+        })
+
+      # Link outline and dests into catalog
+      {:ok, cat2} = Quire.Pdf.catalog(doc)
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          1,
+          Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}, "/Dests" => {:ref, 50, 0}})
+        )
+
+      :ok
+    end
+
+    test "resolves a named destination from a string Dest key" do
+      doc = named_dest_pdf(3)
+      :ok = link_named_dest(doc, "Chap1", 5, "chap1")  # obj 5 = page 1 (0-indexed)
+
+      assert {:ok, [%{title: "Chap1", page: 1}]} = Quire.Pdf.outline(doc)
+    end
+
+    test "resolves a named destination from a Name Dest key" do
+      doc = named_dest_pdf(3)
+
+      :ok = Quire.Pdf.set_object(doc, 50, %{"/Names" => ["t2", {:ref, 60, 0}]})
+      :ok = Quire.Pdf.set_object(doc, 60, [{:ref, 6, 0}, {:name, "XYZ"}, 0, 0, nil])
+      {:ok, cat} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.put(cat, "/Dests", {:ref, 50, 0}))
+      :ok = Quire.Pdf.set_object(doc, 80, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 71, 0}, "/Last" => {:ref, 71, 0}, "/Count" => 1})
+      :ok = Quire.Pdf.set_object(doc, 71, %{"/Title" => "T2", "/Dest" => {:name, "t2"}, "/Parent" => {:ref, 80, 0}})
+      {:ok, cat2} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}, "/Dests" => {:ref, 50, 0}}))
+
+      assert {:ok, [%{title: "T2", page: 2}]} = Quire.Pdf.outline(doc)
+    end
+
+    test "resolves a named destination through a GoTo action" do
+      doc = named_dest_pdf(3)
+
+      :ok = Quire.Pdf.set_object(doc, 50, %{"/Names" => ["gt", {:ref, 60, 0}]})
+      :ok = Quire.Pdf.set_object(doc, 60, [{:ref, 4, 0}, {:name, "XYZ"}, 0, 0, nil])
+      {:ok, cat} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.put(cat, "/Dests", {:ref, 50, 0}))
+      :ok = Quire.Pdf.set_object(doc, 82, %{"/Title" => "GoTo", "/A" => %{"/S" => {:name, "GoTo"}, "/D" => "gt"}, "/Parent" => {:ref, 83, 0}})
+      :ok = Quire.Pdf.set_object(doc, 83, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 82, 0}, "/Last" => {:ref, 82, 0}, "/Count" => 1})
+      {:ok, cat2} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 83, 0}, "/Dests" => {:ref, 50, 0}}))
+
+      assert {:ok, [%{title: "GoTo", page: 0}]} = Quire.Pdf.outline(doc)
+    end
+
+    test "returns nil for a non-existent named destination" do
+      doc = named_dest_pdf(3)
+      {:ok, cat} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 80, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 72, 0}, "/Last" => {:ref, 72, 0}, "/Count" => 1})
+      :ok = Quire.Pdf.set_object(doc, 72, %{"/Title" => "Missing", "/Dest" => "nonexistent", "/Parent" => {:ref, 80, 0}})
+      {:ok, cat2} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}}))
+
+      assert {:ok, [%{title: "Missing", page: nil}]} = Quire.Pdf.outline(doc)
+    end
+
+    test "round-trips through save and reopen" do
+      doc = named_dest_pdf(3)
+      :ok = link_named_dest(doc, "RT", 6, "rt")
+
+      {:ok, saved} = Quire.Pdf.save(doc)
+      {:ok, reopened} = Quire.Pdf.open(saved)
+
+      assert {:ok, [%{title: "RT", page: 2}]} = Quire.Pdf.outline(reopened)
+    end
+
+    test "still resolves a direct array Dest (regression)" do
+      doc = named_dest_pdf(3)
+      {:ok, cat} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 80, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 74, 0}, "/Last" => {:ref, 74, 0}, "/Count" => 1})
+      :ok = Quire.Pdf.set_object(doc, 74, %{"/Title" => "Direct", "/Dest" => [{:ref, 4, 0}, {:name, "XYZ"}, 0, 0, nil], "/Parent" => {:ref, 80, 0}})
+      {:ok, cat2} = Quire.Pdf.catalog(doc)
+      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}}))
+
+      assert {:ok, [%{title: "Direct", page: 0}]} = Quire.Pdf.outline(doc)
+    end
+  end
+
   describe "save_with/2" do
     test "object streams produce a binary no larger than a plain save" do
       source = blank_pdf(60)

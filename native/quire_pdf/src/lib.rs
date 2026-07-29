@@ -574,13 +574,143 @@ fn entry_page(doc: &Document, node: &Dictionary, pages: &HashMap<ObjectId, u32>)
         }
     };
 
-    // A named destination (a string or a name) would need the catalog's
-    // /Names /Dests name tree to resolve; those come back as `page: nil`.
+    // Named destination (a Name or String key) — resolve via the catalog's
+    // /Names /Dests name tree. LaTeX and Word produce these heavily.
+    // Named destination (a Name or String key) — resolve via the catalog's
+    // /Names /Dests name tree. LaTeX and Word produce these heavily.
+    if matches!(destination, Object::Name(_) | Object::String(_, _)) {
+        return resolve_named_destination_page(doc, destination, pages);
+    }
+
+    // Direct destination: an array whose first element is a page ref or number.
     let items = dereference(doc, destination)?.as_array().ok()?;
 
     match items.first()? {
         Object::Reference(id) => pages.get(id).copied(),
         // A remote/embedded go-to numbers its page directly.
+        Object::Integer(number) => u32::try_from(*number).ok(),
+        _ => None,
+    }
+}
+
+/// Look up a named destination (string or name key) in the catalog's name tree
+/// and return the 0-based page index.
+///
+/// PDF name trees have two forms:
+///   /Catalog -> /Dests      (PDF < 2.0, non-namespaced)
+///   /Catalog -> /Names -> /Dests  (PDF ≥ 2.0, namespaced)
+/// Both are balanced trees whose interior nodes use `/Kids` (array of references
+/// to sub-dictionaries) and whose leaf nodes use `/Names` (flat array of
+/// alternating key/value pairs).
+fn resolve_named_destination_page(
+    doc: &Document,
+    name: &Object,
+    pages: &HashMap<ObjectId, u32>,
+) -> Option<u32> {
+    // Extract key bytes from either a Name or String object.
+    let name_bytes = name
+        .as_str()
+        .or_else(|_| name.as_name())
+        .ok()?;
+
+    let catalog = doc.catalog().ok()?;
+
+    // Try /Catalog -> /Dests (flat, older PDFs).
+    if let Ok(dests) = catalog.get(b"Dests") {
+        if let Some(page) = find_in_name_tree_get_page(doc, dests, name_bytes, pages) {
+            return Some(page);
+        }
+    }
+
+    // Try /Catalog -> /Names -> /Dests (namespaced, PDF ≥ 1.2).
+    if let Ok(names) = catalog.get(b"Names") {
+        if let Some(names_dict) = dereference(doc, names)?.as_dict().ok() {
+            if let Ok(dests) = names_dict.get(b"Dests") {
+                if let Some(page) = find_in_name_tree_get_page(doc, dests, name_bytes, pages) {
+                    return Some(page);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Walk a name-tree node looking for `name`. Handles both `/Kids` and `/Names`.
+fn find_in_name_tree_get_page(
+    doc: &Document,
+    node: &Object,
+    name: &[u8],
+    pages: &HashMap<ObjectId, u32>,
+) -> Option<u32> {
+    let dict = dereference(doc, node)?.as_dict().ok()?;
+
+    // Interior node: recurse into Kids.
+    if let Ok(kids) = dict.get(b"Kids") {
+        if let Ok(kid_refs) = kids.as_array() {
+            for kid_ref in kid_refs {
+                if let Ok(kid_id) = kid_ref.as_reference() {
+                    if let Ok(kid_dict) = doc.get_dictionary(kid_id) {
+                        let kid_obj = Object::Dictionary(kid_dict.clone());
+                        if let Some(page) =
+                            find_in_name_tree_get_page(doc, &kid_obj, name, pages)
+                        {
+                            return Some(page);
+                        }
+                    }
+                }
+            }
+        }
+        return None;
+    }
+
+    // Leaf node: scan the Names array (alternating key, value).
+    let names = dict.get(b"Names").ok()?;
+    let entries = names.as_array().ok()?;
+    let mut iter = entries.iter();
+    while let (Some(key), Some(val)) = (iter.next(), iter.next()) {
+        let key_str = key.as_str().or_else(|_| key.as_name()).ok()?;
+        if key_str != name {
+            continue;
+        }
+
+        // The value can be:
+        //   1. A reference to a dictionary with "/D" -> destination array
+        //   2. A reference directly to a destination array
+        //   3. An inline dictionary with "/D" -> destination array
+        if let Ok(obj_ref) = val.as_reference() {
+            // Reference to a dictionary with "/D" -> destination array
+            if let Ok(dict) = doc.get_dictionary(obj_ref) {
+                if let Ok(dest_obj) = dict.get(b"D") {
+                    if let Ok(arr) = dereference(doc, dest_obj)?.as_array() {
+                        return first_element_to_page(arr, pages);
+                    }
+                }
+                return None;
+            }
+            // Reference directly to an array
+            if let Ok(obj) = doc.get_object(obj_ref) {
+                if let Ok(arr) = obj.as_array() {
+                    return first_element_to_page(arr, pages);
+                }
+            }
+            return None;
+        } else if let Ok(inline_dict) = val.as_dict() {
+            let dest_obj = inline_dict.get(b"D").ok()?;
+            if let Ok(arr) = dereference(doc, dest_obj)?.as_array() {
+                return first_element_to_page(arr, pages);
+            }
+            return None;
+        }
+    }
+
+    None
+}
+
+/// Extract page index from the first element of a destination array.
+fn first_element_to_page(arr: &[Object], pages: &HashMap<ObjectId, u32>) -> Option<u32> {
+    match arr.first()? {
+        Object::Reference(id) => pages.get(id).copied(),
         Object::Integer(number) => u32::try_from(*number).ok(),
         _ => None,
     }
