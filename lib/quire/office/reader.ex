@@ -36,6 +36,18 @@ defmodule Quire.Office.Reader do
       :pptx ->
         Quire.Office.Reader.Pptx.read(bytes)
 
+      :ods ->
+        Quire.Office.Reader.Ods.read(bytes)
+
+      :odt ->
+        Quire.Office.Reader.Odt.read(bytes)
+
+      :odp ->
+        Quire.Office.Reader.Odp.read(bytes)
+
+      :rtf ->
+        Quire.Office.Reader.Rtf.read(bytes)
+
       :unknown ->
         {:error, :unknown_format}
     end

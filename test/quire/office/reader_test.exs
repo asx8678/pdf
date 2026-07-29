@@ -58,7 +58,6 @@ defmodule Quire.Office.ReaderTest do
            """},
           {"xl/_rels/workbook.xml.rels",
            ~S"""
-           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
            <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
              <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
            </Relationships>
@@ -529,6 +528,198 @@ defmodule Quire.Office.ReaderTest do
       assert s2.title == "Slide 2"
       assert hd(s1.blocks) == {:heading, "Slide 1", 1}
       assert hd(s2.blocks) == {:heading, "Slide 2", 1}
+    end
+  end
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # .odt tests
+  # ═════════════════════════════════════════════════════════════════════════════
+
+  describe ".odt" do
+    test "returns {:error, _} for empty input" do
+      assert {:error, _} = Reader.read(<<>>, "test.odt")
+    end
+
+    test "parses a minimal odt with a paragraph" do
+      content_xml = ~s|<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body>
+    <office:text>
+      <text:p>Hello ODT</text:p>
+    </office:text>
+  </office:body>
+</office:document-content>|
+
+      bytes = zip_files([{"content.xml", content_xml}])
+
+      assert {:ok, %Layout{sections: [%Section{type: :page, blocks: blocks}]}} =
+               Reader.read(bytes, "test.odt")
+
+      assert blocks == [{:paragraph, "Hello ODT"}]
+    end
+
+    test "parses headings and lists" do
+      content_xml = ~s|<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body>
+    <office:text>
+      <text:h text:outline-level="1">Title</text:h>
+      <text:p>A paragraph</text:p>
+      <text:list>
+        <text:list-item><text:p>Item A</text:p></text:list-item>
+        <text:list-item><text:p>Item B</text:p></text:list-item>
+      </text:list>
+    </office:text>
+  </office:body>
+</office:document-content>|
+
+      bytes = zip_files([{"content.xml", content_xml}])
+
+      assert {:ok, %Layout{title: nil, sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.odt")
+
+      assert blocks == [
+               {:heading, "Title", 1},
+               {:paragraph, "A paragraph"},
+               {:list, ["Item A", "Item B"], false}
+             ]
+    end
+  end
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # .ods tests
+  # ═════════════════════════════════════════════════════════════════════════════
+
+  describe ".ods" do
+    test "returns {:error, _} for empty input" do
+      assert {:error, _} = Reader.read(<<>>, "test.ods")
+    end
+
+    test "parses a minimal ods with a sheet" do
+      content_xml = ~s|<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0">
+  <office:body>
+    <office:spreadsheet>
+      <table:table table:name="Data">
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Name</text:p></table:table-cell>
+          <table:table-cell office:value-type="string"><text:p>Value</text:p></table:table-cell>
+        </table:table-row>
+        <table:table-row>
+          <table:table-cell office:value-type="string"><text:p>Alpha</text:p></table:table-cell>
+          <table:table-cell office:value-type="float" office:value="42"><text:p>42</text:p></table:table-cell>
+        </table:table-row>
+      </table:table>
+    </office:spreadsheet>
+  </office:body>
+</office:document-content>|
+
+      bytes = zip_files([{"content.xml", content_xml}])
+
+      assert {:ok, %Layout{sections: [%Section{type: :sheet, title: "Data", blocks: blocks}]}} =
+               Reader.read(bytes, "test.ods")
+
+      assert blocks == [{:table, ["Name", "Value"], [["Alpha", "42"]]}]
+    end
+  end
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # .odp tests
+  # ═════════════════════════════════════════════════════════════════════════════
+
+  describe ".odp" do
+    test "returns {:error, _} for empty input" do
+      assert {:error, _} = Reader.read(<<>>, "test.odp")
+    end
+
+    test "parses a minimal odp with one slide" do
+      content_xml = ~s|<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content
+    xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+    xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+    xmlns:draw="urn:oasis:names:tc:opendocument:xmlns:drawing:1.0">
+  <office:body>
+    <office:presentation>
+      <draw:page draw:name="Slide 1">
+        <draw:frame>
+          <draw:text-box>
+            <text:p>Slide content</text:p>
+          </draw:text-box>
+        </draw:frame>
+      </draw:page>
+    </office:presentation>
+  </office:body>
+</office:document-content>|
+
+      bytes = zip_files([{"content.xml", content_xml}])
+
+      assert {:ok, %Layout{sections: [%Section{type: :slide, title: "Slide 1", blocks: blocks}]}} =
+               Reader.read(bytes, "test.odp")
+
+      assert blocks == [{:heading, "Slide content", 1}]
+    end
+  end
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # .rtf tests
+  # ═════════════════════════════════════════════════════════════════════════════
+
+  describe ".rtf" do
+    test "returns {:error, :invalid_rtf} for empty input" do
+      assert {:error, :invalid_rtf} = Reader.read(<<>>, "test.rtf")
+    end
+
+    test "parses a simple rtf document" do
+      rtf = "{\\rtf1\\ansi\\deff0 {\\fonttbl {\\f0 Courier;}}\\pard Hello World\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{type: :page, blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "Hello World"}]
+    end
+
+    test "parses multiple paragraphs" do
+      rtf = "{\\rtf1\\ansi First para\\par Second para\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "First para"}, {:paragraph, "Second para"}]
+    end
+
+    test "handles hex-escaped characters" do
+      rtf = "{\\rtf1\\ansi R\\'e9sum\\'e9\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "Résumé"}]
+    end
+
+    test "handles escaped braces and backslashes" do
+      rtf = "{\\rtf1\\ansi Braces: \\{escaped\\} and \\\\backslash\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "Braces: {escaped} and \\backslash"}]
+    end
+  end
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # dispatch tests
+  # ═════════════════════════════════════════════════════════════════════════════
+
+  describe "format dispatch" do
+    test "unknown format returns {:error, :unknown_format}" do
+      assert {:error, :unknown_format} = Reader.read(<<>>, "test.unknown")
     end
   end
 end
