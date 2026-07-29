@@ -66,6 +66,96 @@ defmodule Quire.Pdf do
           children: [outline_node()]
         }
 
+  @typedoc """
+  A PDF object as decoded from the file. Tagged tuples distinguish PDF types
+  that have no direct Elixir equivalent:
+
+    * `nil` — null
+    * `boolean` — boolean
+    * `integer` / `float` — number
+    * `binary` — literal or hex string
+    * `{:name, String.t()}` — a PDF name (e.g. `{:name, "Catalog"}`)
+    * `{:ref, pos_integer(), non_neg_integer()}` — indirect reference
+    * `{:stream, %{String.t() => pdf_object()}, binary()}` — stream with dictionary and data
+    * `[pdf_object()]` — array
+    * `%{String.t() => pdf_object()}` — dictionary (keys are "/Key" strings)
+  """
+  @type pdf_object ::
+          nil
+          | boolean()
+          | integer()
+          | float()
+          | String.t()
+          | {:name, String.t()}
+          | {:ref, pos_integer(), non_neg_integer()}
+          | {:stream, %{String.t() => pdf_object()}, binary()}
+          | [pdf_object()]
+          | %{String.t() => pdf_object()}
+
+  @typedoc "An indirect object reference: `{object_number, generation_number}`."
+  @type object_id :: {pos_integer(), non_neg_integer()}
+
+  @doc """
+  The document catalog as a decoded dictionary.
+
+  The keys are `/Name` strings, matching PDF convention. The value at
+  `catalog["/Pages"]` is typically a `{:ref, num, gen}` pointing to the page
+  tree root.
+  """
+  @spec catalog(t()) :: {:ok, pdf_object()} | {:error, atom()}
+  def catalog(doc) when is_reference(doc), do: Native.catalog(doc)
+
+  @doc """
+  Fetch an indirect object by its id.
+
+  Accepts `{obj_num, gen_num}` or a bare integer (treated as `{num, 0}`).
+
+  ## Examples
+
+      {:ok, obj} = Quire.Pdf.get_object(doc, {3, 0})
+      {:ok, obj} = Quire.Pdf.get_object(doc, 3)
+  """
+  @spec get_object(t(), object_id() | pos_integer()) ::
+          {:ok, pdf_object()} | {:error, atom()}
+  def get_object(doc, id)
+
+  def get_object(doc, {obj_num, gen_num})
+      when is_reference(doc) and is_integer(obj_num) and is_integer(gen_num) do
+    Native.get_object(doc, obj_num, gen_num)
+  end
+
+  def get_object(doc, obj_num) when is_reference(doc) and is_integer(obj_num) do
+    Native.get_object(doc, obj_num, 0)
+  end
+
+  @doc """
+  Replace (or insert) an indirect object.
+
+  `id` accepts the same forms as `get_object/2`. The object is inserted
+  whether or not the id already exists — this is how callers add new objects.
+
+  ## Examples
+
+      Quire.Pdf.set_object(doc, {42, 0}, %{"/Type" => {:name, "Outline"}})
+      Quire.Pdf.set_object(doc, 42, %{"/Type" => {:name, "Outline"}})
+  """
+  @spec set_object(t(), object_id() | pos_integer(), pdf_object()) ::
+          :ok | {:error, atom()}
+  def set_object(doc, id, object)
+
+  def set_object(doc, {obj_num, gen_num}, object)
+      when is_reference(doc) and is_integer(obj_num) and is_integer(gen_num) do
+    with {:ok, :ok} <- Native.set_object(doc, obj_num, gen_num, object) do
+      :ok
+    end
+  end
+
+  def set_object(doc, obj_num, object) when is_reference(doc) and is_integer(obj_num) do
+    with {:ok, :ok} <- Native.set_object(doc, obj_num, 0, object) do
+      :ok
+    end
+  end
+
   # Matches MAX_OUTLINE_DEPTH in native/quire_pdf/src/lib.rs. Checked here as
   # well as there because the NIF's argument decoder recurses on the Rust
   # stack before any of our code runs — this is the guard that actually

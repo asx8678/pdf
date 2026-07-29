@@ -275,6 +275,140 @@ defmodule Quire.PdfTest do
     ]
   end
 
+  describe "catalog/1" do
+    test "returns the document catalog" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      {:ok, catalog} = Quire.Pdf.catalog(doc)
+
+      assert catalog["/Type"] == {:name, "Catalog"}
+      assert match?({:ref, _, _}, catalog["/Pages"])
+    end
+  end
+
+  describe "get_object/2 and set_object/3" do
+    test "round-trips an integer" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, 42)
+      assert {:ok, 42} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a string" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, "hello")
+      assert {:ok, val} = Quire.Pdf.get_object(doc, 10)
+      assert is_binary(val)
+      assert val == "hello"
+    end
+
+    test "round-trips a boolean" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, true)
+      assert {:ok, true} = Quire.Pdf.get_object(doc, 10)
+      assert :ok = Quire.Pdf.set_object(doc, 11, false)
+      assert {:ok, false} = Quire.Pdf.get_object(doc, 11)
+    end
+
+    test "round-trips nil as PDF null" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, nil)
+      assert {:ok, nil} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a name" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, {:name, "TestName"})
+      assert {:ok, {:name, "TestName"}} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a reference without dereferencing" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, {:ref, 42, 3})
+      assert {:ok, {:ref, 42, 3}} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a reference at maximum generation" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, {:ref, 999, 65535})
+      assert {:ok, {:ref, 999, 65535}} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a list" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, [1, "two", {:name, "three"}])
+      assert {:ok, [1, "two", {:name, "three"}]} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a dictionary" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      dict = %{"/Type" => {:name, "Test"}, "/Count" => 5}
+      assert :ok = Quire.Pdf.set_object(doc, 10, dict)
+      assert {:ok, ^dict} = Quire.Pdf.get_object(doc, 10)
+    end
+
+    test "round-trips a stream with binary data" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 10, {:stream, %{}, "raw data"})
+      assert {:ok, {:stream, dict, data}} = Quire.Pdf.get_object(doc, 10)
+      assert is_binary(data)
+    end
+
+    test "round-trips a complex nested structure" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+
+      complex = %{
+        "/Type" => {:name, "Nested"},
+        "/Items" => [{:ref, 1, 0}, {:ref, 2, 5}],
+        "/Dict" => %{"/Sub" => {:name, "inner"}, "/Flag" => true},
+        "/Count" => 3
+      }
+
+      assert :ok = Quire.Pdf.set_object(doc, 50, complex)
+      assert {:ok, ^complex} = Quire.Pdf.get_object(doc, 50)
+    end
+
+    test "accepts a bare integer id" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 99, %{"/Val" => 1})
+      assert {:ok, %{"/Val" => 1}} = Quire.Pdf.get_object(doc, 99)
+    end
+
+    test "accepts a tuple id" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, {88, 0}, %{"/Val" => 2})
+      assert {:ok, %{"/Val" => 2}} = Quire.Pdf.get_object(doc, {88, 0})
+    end
+
+    test "returns {:error, :not_found} for a missing object" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert {:error, :not_found} = Quire.Pdf.get_object(doc, 999)
+    end
+
+    test "returns {:error, :bad_object} for an invalid object value" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert {:error, :bad_object} = Quire.Pdf.set_object(doc, 10, :not_a_pdf_value)
+    end
+
+    test "round-trips through save and reopen" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      complex = %{"/Items" => [{:ref, 1, 0}, {:ref, 2, 0}], "/Type" => {:name, "Dict"}}
+
+      assert :ok = Quire.Pdf.set_object(doc, 50, complex)
+      {:ok, saved} = Quire.Pdf.save(doc)
+
+      {:ok, reopened} = Quire.Pdf.open(saved)
+      assert {:ok, ^complex} = Quire.Pdf.get_object(reopened, 50)
+    end
+
+    test "stores objects independently across different ids" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      assert :ok = Quire.Pdf.set_object(doc, 1, "first")
+      assert :ok = Quire.Pdf.set_object(doc, 2, "second")
+
+      assert {:ok, "first"} = Quire.Pdf.get_object(doc, 1)
+      assert {:ok, "second"} = Quire.Pdf.get_object(doc, 2)
+    end
+  end
+
   defp blank_pdf(pages) when pages > 0 do
     {:ok, doc} = ExPdfium.new()
 

@@ -14,7 +14,7 @@
 //!      document and nothing else. Two documents can be worked on in parallel.
 //!   2. Parsing, serialising and diffing a PDF are CPU-heavy and unbounded in
 //!      the size of the input, so every NIF is `DirtyCpu` (plan3.md §7.3,
-//!      T-021). `ex_pdfium` is 45/45 compliant; this crate is 8/8.
+//!      T-021). `ex_pdfium` is 45/45 compliant; this crate is 11/11.
 //!   3. A NIF must not panic — a panic unwinds into the BEAM. So `unwrap` and
 //!      `expect` are denied below and every failure is mapped to an atom.
 
@@ -28,7 +28,7 @@ use lopdf::{
     decode_text_string, Bookmark, Dictionary, Document, Error, IncrementalDocument, Object,
     ObjectId, SaveOptions,
 };
-use rustler::{Atom, Binary, Env, NifMap, OwnedBinary, ResourceArc};
+use rustler::{Atom, Binary, Env, Encoder, NifMap, OwnedBinary, ResourceArc, Term};
 
 mod atoms {
     rustler::atoms! {
@@ -48,6 +48,13 @@ mod atoms {
         page_out_of_bounds,
         outline_too_deep,
         outline_too_large,
+        // object model
+        nil_val = "nil",
+        name,
+        reference = "ref",
+        stream,
+        bad_object,
+        not_found,
         // resource state
         lock_poisoned,
     }
@@ -577,6 +584,237 @@ fn entry_page(doc: &Document, node: &Dictionary, pages: &HashMap<ObjectId, u32>)
         Object::Integer(number) => u32::try_from(*number).ok(),
         _ => None,
     }
+}
+
+// ── Object model: catalog/1, get_object/2, set_object/3 ──────────────────────
+
+/// Encode a `lopdf::Object` as an Elixir term using tagged tuples for PDF
+/// types that would otherwise be ambiguous:
+///
+/// | Elixir                  | lopdf                 |
+/// |-------------------------|-----------------------|
+/// | `nil`                   | Null                  |
+/// | `true` / `false`        | Boolean               |
+/// | integer / float         | Integer / Real        |
+/// | binary                  | String / HexString    |
+/// | `{:name, name}`         | Name                  |
+/// | `{:ref, num, gen}`      | Reference             |
+/// | `{:stream, dict, data}` | Stream                |
+/// | `[...]`                 | Array                 |
+/// | `%{"/Key" => val}`      | Dictionary            |
+///
+/// Dictionary keys use the `"/Name"` string form (with `/` prefix) so callers
+/// write `catalog["/Type"]` rather than requiring a tagged-name key.
+fn object_to_term<'a>(env: Env<'a>, object: &Object) -> Result<Term<'a>, Atom> {
+    match object {
+        Object::Null => Ok(atoms::nil_val().encode(env)),
+        Object::Boolean(b) => Ok(b.encode(env)),
+        Object::Integer(i) => Ok(i.encode(env)),
+        Object::Real(f) => Ok((*f as f64).encode(env)),
+        Object::Name(bytes) => {
+            let name = String::from_utf8_lossy(bytes).to_string();
+            Ok((atoms::name(), name).encode(env))
+        }
+        Object::String(bytes, _format) => {
+            let mut owned =
+                OwnedBinary::new(bytes.len()).ok_or_else(atoms::alloc_failed)?;
+            owned.as_mut_slice().copy_from_slice(bytes);
+            Ok(owned.release(env).encode(env))
+        }
+        Object::Array(items) => {
+            let terms: Result<Vec<_>, _> =
+                items.iter().map(|item| object_to_term(env, item)).collect();
+            Ok(terms?.encode(env))
+        }
+        Object::Dictionary(dict) => {
+            let entries: Result<Vec<_>, _> = dict
+                .iter()
+                .map(|(key, value)| {
+                    let k = format!("/{}", String::from_utf8_lossy(key));
+                    let v = object_to_term(env, value)?;
+                    Ok((k, v))
+                })
+                .collect();
+            let map: HashMap<String, Term> = entries?.into_iter().collect();
+            Ok(map.encode(env))
+        }
+        Object::Stream(stream) => {
+            let entries: Result<Vec<_>, _> = stream
+                .dict
+                .iter()
+                .map(|(key, value)| {
+                    let k = format!("/{}", String::from_utf8_lossy(key));
+                    let v = object_to_term(env, value)?;
+                    Ok((k, v))
+                })
+                .collect();
+            let dict_map: HashMap<String, Term> = entries?.into_iter().collect();
+            let data = stream.content.as_slice();
+            let mut owned =
+                OwnedBinary::new(data.len()).ok_or_else(atoms::alloc_failed)?;
+            owned.as_mut_slice().copy_from_slice(data);
+            let data_binary = owned.release(env);
+            Ok((atoms::stream(), dict_map, data_binary).encode(env))
+        }
+        Object::Reference(id) => {
+            let (num, gen) = *id;
+            Ok((atoms::reference(), num, gen).encode(env))
+        }
+    }
+}
+
+/// Decode an Elixir term back into a `lopdf::Object`, inverting
+/// `object_to_term`.
+fn term_to_object(term: Term<'_>) -> Result<Object, Atom> {
+    // Atom handling: nil and boolean
+    if term.is_atom() {
+        if let Ok(atom) = term.decode::<Atom>() {
+            if atom == atoms::nil_val() {
+                return Ok(Object::Null);
+            }
+        }
+        // Not nil — try boolean.
+        if let Ok(b) = term.decode::<bool>() {
+            return Ok(Object::Boolean(b));
+        }
+        // Any atom that is not nil or bool is not a valid PDF object.
+        return Err(atoms::bad_object());
+    }
+
+    // integer
+    if term.is_integer() {
+        return Ok(Object::Integer(term.decode::<i64>().map_err(|_| atoms::bad_object())?));
+    }
+
+    // float
+    if term.is_float() {
+        return Ok(Object::Real((term.decode::<f64>().map_err(|_| atoms::bad_object())?) as f32));
+    }
+
+    // binary → String (callers use {:name, ...} for names)
+    if term.is_binary() {
+        let bin: Binary<'_> = term.decode().map_err(|_| atoms::bad_object())?;
+        return Ok(Object::String(bin.as_slice().to_vec(), lopdf::StringFormat::Literal));
+    }
+
+    // list → Array
+    if term.is_list() {
+        let items: Vec<Term> = term.decode().map_err(|_| atoms::bad_object())?;
+        let objects: Result<Vec<_>, _> = items.into_iter().map(term_to_object).collect();
+        return Ok(Object::Array(objects?));
+    }
+
+    // map → Dictionary (keys are "/Key" strings)
+    if term.is_map() {
+        let map: HashMap<String, Term> = term.decode().map_err(|_| atoms::bad_object())?;
+        let mut dict = Dictionary::new();
+        for (key, value) in map {
+            let name_bytes = if key.starts_with('/') {
+                key[1..].as_bytes().to_vec()
+            } else {
+                key.into_bytes()
+            };
+            dict.set(name_bytes, term_to_object(value)?);
+        }
+        return Ok(Object::Dictionary(dict));
+    }
+
+    // tuple → one of the tagged types: {:name, ...}, {:ref, ...}, {:stream, ...}
+    if term.is_tuple() {
+        let items = rustler::types::tuple::get_tuple(term)
+            .map_err(|_| atoms::bad_object())?;
+
+        if items.len() < 2 || !items[0].is_atom() {
+            return Err(atoms::bad_object());
+        }
+
+        let tag: Atom = items[0].decode().map_err(|_| atoms::bad_object())?;
+
+        // 2-tuple: {:name, name_string}
+        if tag == atoms::name() && items.len() == 2 {
+            let name: String = items[1].decode().map_err(|_| atoms::bad_object())?;
+            return Ok(Object::Name(name.into_bytes()));
+        }
+
+        // 3-tuple: {:ref, num, gen}
+        if tag == atoms::reference() && items.len() == 3 {
+            let num: u32 = items[1].decode().map_err(|_| atoms::bad_object())?;
+            let gen: u32 = items[2].decode().map_err(|_| atoms::bad_object())?;
+            return Ok(Object::Reference((num, gen as u16)));
+        }
+
+        // 3-tuple: {:stream, dict, data}
+        if tag == atoms::stream() && items.len() == 3 {
+            let dict_map: HashMap<String, Term> =
+                items[1].decode().map_err(|_| atoms::bad_object())?;
+            let data_bin: Binary<'_> =
+                items[2].decode().map_err(|_| atoms::bad_object())?;
+            let mut dict = Dictionary::new();
+            for (key, value) in dict_map {
+                let name_bytes = if key.starts_with('/') {
+                    key[1..].as_bytes().to_vec()
+                } else {
+                    key.into_bytes()
+                };
+                dict.set(name_bytes, term_to_object(value)?);
+            }
+            return Ok(Object::Stream(lopdf::Stream::new(
+                dict,
+                data_bin.as_slice().to_vec(),
+            )));
+        }
+
+        return Err(atoms::bad_object());
+    }
+
+    Err(atoms::bad_object())
+}
+
+/// The document catalog as a decoded dictionary.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn catalog<'a>(
+    env: Env<'a>,
+    doc: ResourceArc<DocumentResource>,
+) -> Result<Term<'a>, Atom> {
+    let guard = lock(&doc)?;
+    let catalog = guard.doc.catalog().map_err(|_| atoms::no_catalog())?;
+    object_to_term(env, &Object::Dictionary(catalog.clone()))
+}
+
+/// Fetch an indirect object by `(obj_num, gen_num)`.
+///
+/// Returns `{:error, :not_found}` when the object id is not in the document.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn get_object<'a>(
+    env: Env<'a>,
+    doc: ResourceArc<DocumentResource>,
+    obj_num: u32,
+    gen_num: u16,
+) -> Result<Term<'a>, Atom> {
+    let guard = lock(&doc)?;
+    let object = guard
+        .doc
+        .objects
+        .get(&(obj_num, gen_num))
+        .ok_or(atoms::not_found())?;
+    object_to_term(env, object)
+}
+
+/// Replace an indirect object by `(obj_num, gen_num)`.
+///
+/// The object is inserted regardless of whether the id already exists — this is
+/// how callers add new objects to the document.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn set_object(
+    doc: ResourceArc<DocumentResource>,
+    obj_num: u32,
+    gen_num: u16,
+    object: Term<'_>,
+) -> Result<Atom, Atom> {
+    let mut guard = lock(&doc)?;
+    let obj = term_to_object(object)?;
+    guard.doc.objects.insert((obj_num, gen_num), obj);
+    Ok(atoms::ok())
 }
 
 rustler::init!("Elixir.Quire.Pdf.Native");

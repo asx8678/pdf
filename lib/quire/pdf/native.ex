@@ -22,7 +22,7 @@ defmodule Quire.Pdf.Native do
 
   # Keep these stubs in sync with the #[rustler::nif] fns in
   # native/quire_pdf/src/lib.rs. Each raises until the NIF library loads.
-  # All eight are `schedule = "DirtyCpu"` (plan3.md §7.3, T-021).
+  # All 11 are `schedule = "DirtyCpu"` (plan3.md §7.3, T-021).
 
   def open(_bytes), do: :erlang.nif_error(:nif_not_loaded)
   def open_file(_path), do: :erlang.nif_error(:nif_not_loaded)
@@ -37,4 +37,8 @@ defmodule Quire.Pdf.Native do
 
   def outline(_doc), do: :erlang.nif_error(:nif_not_loaded)
   def set_outline(_doc, _entries), do: :erlang.nif_error(:nif_not_loaded)
+
+  def catalog(_doc), do: :erlang.nif_error(:nif_not_loaded)
+  def get_object(_doc, _obj_num, _gen_num), do: :erlang.nif_error(:nif_not_loaded)
+  def set_object(_doc, _obj_num, _gen_num, _object), do: :erlang.nif_error(:nif_not_loaded)
 end

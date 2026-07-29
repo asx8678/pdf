@@ -88,18 +88,33 @@ Keep the linearization *read* for the Properties dialog. Re-spec Compress as
 own documentation measures at 11–61% size reduction — most of the win. Fast
 web view matters little for a localhost-first application.
 
-### D4 — Page boxes and form field set → upstream a PR to `ex_pdfium`
+### D4 — Page boxes → upstream a PR to `ex_pdfium`
 
-These two **are** reachable through PDFium. `pdfium-render` already exposes
-`boundaries_mut().set_media/crop/bleed/trim/art` and text/checkbox/radio value
-setters, and the `PdfiumLibraryBindings` trait is public, so a NIF can call
-`FPDFAnnot_SetStringValue`/`SetAP` directly.
+**Form field set is NOT reachable through this route.** The page-box setters
+ARE: `pdfium-render` exposes `boundaries_mut().set_media/crop/bleed/trim/art`
+on `PdfPage`, which is a public type reachable from a NIF.
 
-Route: PR to `jtippett/ex_pdfium`, which is active (0.4.1 → 0.5.1 in three
-weeks). Vendored fork as fallback. A from-source NIF build measures **13.85 s**,
-so the build cost is not the objection — the objection is that a fork must
-vendor `libpdfium` (5.5 MB per target) and run its own release matrix, since a
-from-source build does not bundle it.
+Form-field value set and appearance-stream generation is a different story.
+While `FPDFAnnot_SetAP` and `FPDFAnnot_SetStringValue` exist on the public
+`PdfiumLibraryBindings` trait, every path to the `FPDF_ANNOTATION` handle
+needed to call them is `pub(crate)` — `PdfDocument::handle` (document.rs:204),
+`PdfPage::page_handle` (page.rs:238),
+`PdfPageAnnotationPrivate::handle` (annotation/private.rs:129),
+`PdfFormFieldPrivate::annotation_handle` (field.rs:405). So a NIF written
+against this crate **cannot** call these trait methods.
+
+**Appearance-stream generation stays with `Quire.Pdf.AcroForm` over `lopdf`,
+exactly as D5 already assigns it.** D4 should not have offered the raw-trait
+path as an alternative.
+
+The page-box change is visible on the OPEN document — `page_info` and
+`render_page` both pick it up — not only after save+reopen.
+
+Route for the page-box PR to `jtippett/ex_pdfium`, which is active (0.4.1 →
+0.5.1 in three weeks). Vendored fork as fallback. A from-source NIF build
+measures **13.85 s**, so the build cost is not the objection — the objection
+is that a fork must vendor `libpdfium` (5.5 MB per target) and run its own
+release matrix, since a from-source build does not bundle it.
 
 **Form XObject / place-a-page-on-a-page** belongs here too, not in Elixir:
 `pdfium-render` exposes the whole API. This means **T-065 is not doubly
@@ -107,16 +122,37 @@ blocked** and T-064's "background: another PDF" needs no rasterise fallback.
 
 ### D5 — Form field values
 
-PDFium's setter writes `/V` but never regenerates `/AP`. Independently,
-`flatten/1` bakes `/AP` and **ignores `/V` entirely**. So a `/V`-only write —
-including the obvious "just set `/V` and `NeedAppearances`" approach — flattens
-to the *old or empty* appearance and silently discards what the user typed.
+PDFium's setter writes `/V` but never regenerates `/AP`. `flatten/1` bakes
+`/AP` and **ignores `/V` entirely**. So a `/V`-only write through `flatten/1`
+produces the *old or empty* appearance and silently discards what the user
+typed.
+
+**Important distinction: `render_page/3` is more forgiving.** It DOES draw a
+text `/V` write when `/NeedAppearances true` is set or the widget has no `/AP`.
+It does NOT do this when the widget already has a stale `/AP` — PDFium caches
+the existing appearance. So a preview render after a value-only write is honest
+for `/AP`-less or `/NeedAppearances`-flagged widgets, but a flatten is not.
+This matters for T-018 (interactive editing: the preview layer is honest) and
+T-047 (batch flattening: must pre-generate `/AP`).
 
 **Hard rule:** any `/V` write MUST also write `/AP` before the document is
-flattened or rasterised by anything other than `render_page/3`.
-`Quire.Pdf.AcroForm` owns appearance-stream generation — this is font metrics
-plus content-stream emission, not a dictionary write, and is estimated
-accordingly.
+flattened or rasterised. `Quire.Pdf.AcroForm` owns appearance-stream generation
+— this is font metrics plus content-stream emission, not a dictionary write,
+and is estimated accordingly.
+
+#### Additional constraint: multi-widget fields
+
+PDFium's form-value write targets the **annotation** dictionary. It only
+propagates to the field value when the widget and field are merged into a single
+object. On the standard non-merged structure — one field object with separate
+kid widget annotations — the write lands silently on the kid and pdfium never
+reads it back, with no error. ex_pdfium **cannot fill a multi-widget field at
+all** through its `PdfFormField` API.
+
+`Quire.Pdf.AcroForm` must own this case regardless of whether the upstream PR
+is accepted. Value writes to multi-widget fields must reach every kid widget's
+`/V` and `/AP`, which requires direct dictionary manipulation through `lopdf`
+(D1).
 
 ## Gaps not on the §3.3 row at all
 

@@ -86,10 +86,13 @@ and touches nothing in `/opt/homebrew` — libvips travels inside the artefact.
 Pinned exactly for the same reason as ex_pdfium: a minor bump swaps a bundled
 native library.
 
-**This has a licensing consequence the plan gets wrong** — see the follow-up
-issue on LGPLv3. The bundled dylib statically incorporates eight LGPL-3.0
-libraries plus MPL-2.0 cairo; plan3.md's claim that vix is "LGPL-2.1,
-dynamically linked" is inaccurate on both counts, and §12's Tauri packaging
+**This has a licensing consequence the plan used to get wrong** — see §3.5
+and the follow-up issue. The bundled dylib is a statically Combined Work
+conveyed under LGPL-3.0-or-later. **libheif alone is LGPL-3.0-or-later**,
+which forces the whole combination to v3 (the LGPL-2.1-**or-later**
+components — glib, pango, librsvg, libexif, fribidi — upgrade cleanly; they
+are all `-or-later`). cairo is **LGPL-2.1-only OR MPL-1.1**, not MPL-2.0
+(confirmed against upstream cairo's COPYING). §12's Tauri packaging
 inherits obligations the plan currently assumes away.
 
 ### OCR — decided in [ADR 0002](0002-tesseract-sourcing.md)

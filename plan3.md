@@ -448,9 +448,12 @@ Python runtime and an AGPL binary." The contract:
   it, and it is a *build-only* dependency of the tesseract formula, so
   pouring the bottle does not install it.
 - A Hex package shipping a precompiled binary under any copyleft licence,
-  however weak. The ADR must record what `otool -L` and the artefact contents
-  actually show — not what the package's Hex `licenses` field claims — and
-  must name where the resulting obligation is discharged.
+  however weak. The ADR must record what `otool -L` and the artefact
+  contents actually show — not what the package's Hex `licenses` field
+  claims — and must name where the resulting obligation is discharged.
+  **`vix` has no standalone ADR; its evidence table is in §3.5** (verified
+  against the actual artefact on this machine) and the discharge decision is
+  in §12.1 step 9. Those two sections together satisfy the rule's intent.
 - Any npm package, under the same licence bar as Hex.
 
 **Never allowed:**
@@ -469,7 +472,7 @@ Python runtime and an AGPL binary." The contract:
 | **Permissive** — link, bundle, ship | pdf.js, @cantoo/pdf-lib, PDFium, ex_pdfium, pdfium-render, Rustler, lopdf (and `Quire.Pdf` over it), Tesseract, image_ocr, chromic_pdf, Saxy, elixlsx, Oban, the Phoenix stack, and the vix/image *bindings* | No constraints. |
 | **Weak / library copyleft** | **The libvips artefact bundled inside `vix`** — `libvips-cpp.8.18.3.dylib`, conveyed under **LGPL-3.0-or-later** as a statically Combined Work | Attribution and licence text (T-180), **and** the LGPLv3 §4 relink duty. **Do not restate the mechanism here — §12.1 step 9 is the single home for that decision.** |
 | **Weak / file-level copyleft** | cairo, inside the same dylib | Dual-licensed; cairo is used unmodified, so the file-level obligation is satisfied by shipping its licence text. **Confirm the exact MPL version at T-180** — upstream cairo is `LGPL-2.1-only OR MPL-1.1`, and this plan does not assert 2.0 without evidence. |
-| **AGPL / GPL** | none — verified across all 71 Hex deps | Every Hex dependency resolves to Apache-2.0 / MIT / BSD / ISC; the Appendix E gate **passes**. There is no subprocess boundary to police and nothing to quarantine. Keep it that way: a dependency-licence scan runs in `mise run check` (T-005) and fails the build on any AGPL/GPL entry. |
+| **AGPL / GPL** | none — verified against Hex metadata for all 71 deps. ⚠️ Caveat: licences are from upstream declarations, not artefact inspection — the bundled `libvips-cpp.8.18.3.dylib` ships zero licence text (confirmed: `strings` over the 17.7 MB binary yields no hits for GPL / "General Public License" / "Mozilla Public"). The component-level attributions in the table below depend on sharp-libvips' own declaration, not on anything readable from the binary we ship. | Every Hex dependency resolves to Apache-2.0 / MIT / BSD / ISC. **However, the AGPL/GPL gate as asserted here rests on upstream declarations, not on artefact evidence** — the artefact contains no licence files of any kind. The gate earns "passes" only once T-180 pins the sharp-libvips licence set in-repo AND T-005 confirms libimagequant is on the permissive 2.4.x line. Until then, treat LGPL-3.0-or-later as the operative constraint, and libimagequant as an unverified risk to this row. |
 
 ⚠️ **The "LGPL-2.1, dynamically linked" claim that used to sit in this table
 was wrong on both halves, and the mitigation it carried — "precompiled vix
@@ -480,7 +483,7 @@ artefacts satisfy this as shipped" — was false.** Re-verified on this machine:
 | What the artefact contains | `tar tzf vix-nif-2.17-aarch64-apple-darwin-0.40.0.tar.gz` | Exactly two files: `vix.so` and `precompiled_libvips/lib/libvips-cpp.8.18.3.dylib`. **No licence texts, no source, no relink kit.** |
 | Where it comes from | `deps/vix/build_scripts/precompiler.exs:20–23` | `akash-akya/sharp-libvips`, release tag `v8.18.3-rc1` — a fork of `lovell/sharp-libvips`, which conveys the combined build under **LGPL-3.0-or-later**. Upstream libvips alone is LGPL-2.1-or-later, but the distributor has already elected v3. |
 | Whether it is dynamically linked | `otool -L …/libvips-cpp.8.18.3.dylib` | Links **only** macOS system libraries (`libSystem`, `libc++`, `libobjc`, `libiconv`, `libresolv`, Foundation/CoreFoundation/AppKit/CoreGraphics/CoreServices/CoreText). There is no second dylib in the bundle — every third-party dependency is **statically inside** this one 17.7 MB binary. |
-| What is statically inside it | `nm -gU` exported symbols + `strings` | glib/gobject/gio (`g_*`), pango (`pango_*`), cairo (`cairo_*`), librsvg (`rsvg_*`), libexif (`exif_*`), **libheif (`heif_*`)**, harfbuzz (`hb_*`), freetype (`FT_*`), fontconfig (`Fc*`), libpng 1.6.58, libjpeg (`jpeg_*`), libtiff 4.5.1, libwebp (`WebP*`), libarchive 3.8.7, lcms2, libaom (`aom_*`), libimagequant (`liq_*`), cgif, nsgif, libxml2 (`xmlParse*`), zlib-ng. |
+| What is statically inside it | `nm -gU` exported symbols + `strings` | glib/gobject/gio (`g_*`), pango (`pango_*`), cairo (`cairo_*`), librsvg (`rsvg_*`), libexif (`exif_*`), **libheif (`heif_*`)**, harfbuzz (`hb_*`), freetype (`FT_*`), fontconfig (`Fc*`), libpng 1.6.58, libjpeg (`jpeg_*`), libtiff 4.5.1, libwebp (`WebP*`), libarchive 3.8.7, lcms2, libaom (`aom_*`), libimagequant (`liq_*`), cgif, nsgif, libxml2 (`xmlParse*`), zlib-ng, **fribidi (LGPL-2.1-or-later, `_fribidi_get_bidi_type` + 7 more), libffi (MIT, 28 `_ffi_*` exports), highway (Apache-2.0, sharp-libvips build path in strings)**. |
 
 The one dynamic boundary that does exist — `vix.so` → `@rpath/libvips-cpp.8.18.3.dylib`
 under `LC_RPATH @loader_path/precompiled_libvips/lib` — is **inside a single
@@ -505,6 +508,16 @@ we cannot read from the binary. **T-180 must obtain the licence set from
 that is also when cairo's exact MPL version gets settled. Until then, treat
 LGPL-3.0-or-later as the operative constraint — it is the strictest of the
 candidates and the one sharp-libvips itself elects.
+
+**Additional uncertainty: libimagequant's licence.** The table lists
+`libimagequant (liq_*)` with no licence annotation. libimagequant
+re-licensed to GPL-3.0-or-later after the 2.4.x line — which would
+falsify the "AGPL/GPL: none" row. The exported API
+(`_liq_quantize_image`, `_liq_write_histogram_control_points`) looks
+2.x-shaped, so the dylib likely carries the permissive 2.4.1 that
+sharp-libvips pins, but this plan asserted the gate PASSES without
+confirming it. **T-005 must verify the pinned sharp-libvips version
+and assert it stays on the 2.4.x (permissive) line.**
 
 **Why this matters, in one sentence:** LGPLv3 §4 inherits GPLv3 §6 Installation
 Information, so conveying a signed, sealed `.app` containing statically
@@ -713,12 +726,15 @@ instead.
 │                             │                └─ :s3 (later, stub)   │
 │                             └── Local adapter (desktop, §12)        │
 │  Engine behaviours (§7.2/7.3)                                       │
+│    Pdf      → Quire.Pdf — Rustler NIF over lopdf (D1)               │
+│      ├─ Outline — outline write via lopdf Bookmark/Outline          │
+│      └─ AcroForm — /AP generation, /AcroForm re-attach              │
 │    Render   → PDFium NIF  (dirty-scheduled)                         │
 │    Ocr      → Tesseract NIF + vix NIF (preprocess)                  │
-│    Office   → native OOXML/ODF reader & writers (pure Elixir)       │
+│    Office   → native OOXML/ODF reader & writers (over `:zip`+`Saxy`)│
 │    Html     → chromic_pdf → system Chromium (only external process) │
-│    Sign     → Quire.Pades (pure Elixir, OTP crypto)             │
-│    Encrypt  → Quire.SecurityHandler (pure Elixir, OTP crypto)   │
+│    Sign     → Quire.Pades (over Quire.Pdf + OTP crypto)             │
+│    Encrypt  → Quire.SecurityHandler (over Quire.Pdf + OTP crypto)   │
 └───────────────┬─────────────────────────────────────────────────────┘
                 │ Oban
 ┌───────────────▼─────────────────────────────────────────────────────┐
@@ -996,13 +1012,16 @@ lib/quire/
   office/writer/xlsx.ex         # PDF content → .xlsx (elixlsx or native)
   office/writer/pptx.ex         # PDF content → .pptx (pure Elixir)
   office/writer/rtf.ex          # PDF content → .rtf (pure Elixir)
-  pades.ex                      # PAdES signing + validation (pure Elixir)
+  pades.ex                      # PAdES signing + validation (over Quire.Pdf + OTP crypto)
   pades/cms.ex                  # CMS/PKCS#7 over :public_key
   pades/pkcs12.ex               # keystore parsing
   pades/tsa.ex                  # RFC 3161 client over Req
-  security_handler.ex           # AESV2/AESV3 encryption (pure Elixir)
+  security_handler.ex           # AESV2/AESV3 encryption (over Quire.Pdf + OTP :crypto)
+  pdf.ex                        # Rustler NIF over lopdf 0.44.0: load/save, catalog & dict mutation, IncrementalDocument, save_modern, authenticate_password, Bookmark/Outline
+  pdf/outline.ex                # outline write via lopdf Bookmark/Outline (D2)
+  pdf/acro_form.ex              # /AP generation, /AcroForm re-attach after page import (D5)
   pdf_a.ex                      # best-effort PDF/A + conformance report
-  compose.ex                    # content-stream generation: stamps, overlays
+  compose.ex                    # content-stream **and /AP appearance-stream** generation, over Quire.Pdf
 
   documents.ex                  # context: CRUD, revisions, recents
   documents/document.ex
@@ -1116,6 +1135,11 @@ lib/quire_web/
     esign_controller.ex
     health_controller.ex
     user_session_controller.ex  # phx.gen.auth (T-200)
+
+native/
+  quire_pdf/                    # Rustler crate over lopdf 0.44.0, compiled from source (Rust ≥ 1.91, ADR 0003 D1, ADR 0004). Mark every NIF DirtyCpu.
+    Cargo.toml
+    src/lib.rs
 
 assets/js/
   app.js
@@ -1426,18 +1450,16 @@ persisting the journal. Reopening rehydrates from `edit_operations`.
 **Sized for a laptop, not a server.** On a MacBook you are also running a
 browser, an editor and a language server, and the queues below are the
 difference between "OCR is running" and "the fan is at maximum and the UI has
-stopped responding". Derive from physical performance cores, not
-`System.schedulers/0` — on Apple Silicon that number includes efficiency
-cores, which are the wrong thing to saturate with Tesseract.
+stopped responding".
 
-⚠️ **Carve-out: core count does not apply to the PDFium-touching queues.**
-`render` and `transform` are bounded by `ex_pdfium`'s process-wide
-`PDFIUM_LOCK`, not by hardware (§3.3: 44 of 45 NIFs acquire it, so effective
-parallelism is **1**). Deriving those two from performance cores would size
-them against a resource the engine cannot use. **Fix them at 1; derive only
-`ocr`, `secure`, `esign` and `translate` from cores.** A queue of 8 against a
-lock of 1 is strictly *worse* than a queue of 1: it adds mutex contention and
-memory pressure (see the ⚠️ below) and buys no throughput.
+Every queue limit in the table below is a **literal constant** — none is
+derived from CPU count. The rationale for each is specific to its engine and
+the resource it consumes, not to hardware. In particular `render` and
+`transform` are fixed at 1 because `ex_pdfium` serialises every call behind a
+process-wide `PDFIUM_LOCK` (§3.3: 44 of 45 NIFs acquire it, so effective
+parallelism is **1**). A core-derived width there would buy contention and a
+second full copy of each document in native memory per blocked worker, and no
+throughput.
 
 | Queue | Concurrency | Why |
 |---|---|---|
@@ -1898,8 +1920,8 @@ time until the user dismisses it permanently.
 
 | Control | Side | Implementation |
 |---|---|---|
-| **Restrict Permissions** | S | Owner password + permission flags: print, print high-quality, modify, copy/extract, annotate, fill forms, extract for accessibility, assemble. `Quire.SecurityHandler` implements the standard security handler (AESV2 128-bit, AESV3 256-bit) per ISO 32000-2 §7.6 in pure Elixir over `:crypto` — key derivation, per-object stream/string encryption, and the `/Encrypt` dictionary. Also sets a user (open) password. Passwords MUST be posted over the LiveView channel and never logged; zero the assign immediately after use. |
-| **Digital signature** | S | `Quire.Pades` (pure Elixir over OTP `:public_key`/`:crypto`): parse PKCS#12 keystores, build the CMS (PKCS#7) detached signature over the byte range, embed it with a visible appearance, support PAdES **B-B** (basic) and **B-T** (+ RFC 3161 timestamp via Req against a configured TSA), and append DSS/VRI for **B-LT** so signatures validate long-term. RSA and ECDSA keys. Flow: choose or upload a certificate → place the visible field → sign → validate → store a `digital_signatures` row. **Validation is also native:** parse the CMS, verify the chain, check the timestamp token, and run difference analysis (bytes appended after signing) for the Signatures panel. ⚠️ This is cryptographic code written in-house — the acceptance bar is interoperability: Gate 8 requires signatures produced here to validate in Acrobat, and third-party signed fixtures to validate here. See R-04. |
+| **Restrict Permissions** | S | Owner password + permission flags: print, print high-quality, modify, copy/extract, annotate, fill forms, extract for accessibility, assemble. `Quire.SecurityHandler` implements the standard security handler (AESV2 128-bit, AESV3 256-bit) per ISO 32000-2 §7.6 over `:crypto` with `Quire.Pdf` for `/Encrypt` dictionary writes — key derivation, per-object stream/string encryption. Also sets a user (open) password. Passwords MUST be posted over the LiveView channel and never logged; zero the assign immediately after use. |
+| **Digital signature** | S | `Quire.Pades` (over OTP `:public_key`/`:crypto` + `Quire.Pdf` for byte-range and DSS structure writes): parse PKCS#12 keystores, build the CMS (PKCS#7) detached signature over the byte range, embed it with a visible appearance, support PAdES **B-B** (basic) and **B-T** (+ RFC 3161 timestamp via Req against a configured TSA), and append DSS/VRI for **B-LT** so signatures validate long-term. RSA and ECDSA keys. Flow: choose or upload a certificate → place the visible field → sign → validate → store a `digital_signatures` row. **Validation is also native:** parse the CMS, verify the chain, check the timestamp token, and run difference analysis (bytes appended after signing) for the Signatures panel. ⚠️ This is cryptographic code written in-house — the acceptance bar is interoperability: Gate 8 requires signatures produced here to validate in Acrobat, and third-party signed fixtures to validate here. See R-04. |
 | **Create redaction** | C | Mark regions: drag a rectangle, or select text. Stored as `redactions` rows with a reason code and optional overlay text. Marks are visually distinct (red outline) and **not yet destructive**. |
 | **Apply redaction** | S | Enabled only when unapplied marks exist. Destructive: remove the content, not just cover it. Two paths, in order of preference: (a) enumerate page content via PDFium and delete the text/image/vector objects intersecting the mark, then draw the overlay — preserves the rest of the page losslessly; (b) rasterise the affected page at 300 DPI with the region blanked and replace the page (lossy but bulletproof — automatic fallback for pages where (a) cannot prove completeness, e.g. the mark overlaps a Type-3 glyph or an unparseable content stream). After applying, **verify** by re-extracting text and asserting the redacted strings are absent; fail the job if they are not. |
 | **Search and redact** | C→S | Regex/literal search across the document, plus presets (SSN, credit card, email, phone, IBAN), preview of all hits with per-hit accept/reject, then Apply. |
@@ -2495,7 +2517,7 @@ native PAdES/security-handler work) and are sized accordingly.
 | T-012 | Engine wrapper modules with unit tests against fixtures (no feature code yet): `Render.Pdfium`, `Quire.Pdf` (the `lopdf` NIF — load/save, dictionary read/write, `save_modern` with object + xref streams), `Ocr.Tesseract`, `Ocr.Preprocess` (vix), `Compose` primitives. |
 | T-013 | Boot-time engine self-check + version table + graceful per-feature degradation (§7.2). Three states (`ok` / `degraded` / `unavailable`), shared with `mise run doctor` and Settings → About. |
 | T-014 | **Guard check**: fail if `File.`, `Path.` (calls, not `Path.t()` typespecs), `System.cmd` or `System.tmp_dir` appear outside `lib/quire/storage.ex`, `lib/quire/storage/`, `lib/quire/engine.ex` and `test/support/`. A Credo custom check is preferable to grep precisely because it can tell a call from a typespec. Runs in `mise run check`. |
-| T-015 | Oban config + queues (§7.5) + a `Quire.Workers.Base` with progress reporting and idempotency helpers. Laptop-sized concurrency, derived from performance cores at boot — **except `render` and `transform`, which are fixed at 1 and MUST NOT be derived from cores.** `ex_pdfium` serialises every call behind a process-wide mutex (§3.3), so PDFium's effective parallelism is 1; a core-derived width there buys contention and a second full copy of each document in native memory per blocked worker, and no throughput. Assert the fix in a test, so a later "tune the queues" commit cannot quietly reintroduce it. |
+| T-015 | Oban config + queues (§7.5) + a `Quire.Workers.Base` with progress reporting and idempotency helpers. Laptop-sized concurrency — all queue limits are **literal constants** in §7.5's table; none are derived from CPU count. `render` and `transform` are fixed at 1 because `ex_pdfium` serialises every call behind a process-wide mutex (§3.3); a core-derived width there buys contention and a second full copy of each document in native memory per blocked worker, and no throughput. Assert the fix in a test, so a later "tune the queues" commit cannot quietly reintroduce it. |
 | T-016 | **Build the fixture corpus** (§13) and commit it, including the Office fixtures. |
 | T-017 | `Quire.Render` behaviour (§7.3) + `Render.Client` fallback (browser-captured thumbnails). |
 | T-018 | `Render.Pdfium` via `ex_pdfium`, pinned exactly. Full callback surface: render, text/spans, search, geometry, **outline read**, attachments, images, page import, page objects, save. **Also owns the crop-origin conversion** (§3.3): every spatial result comes back in the MediaBox frame while `render_page/3` rasterises the CropBox region, and `ExPdfium.bounds_to_pixels/3` does not reconcile them — subtract `boxes.crop`, fall back to `boxes.media` yourself, compose page `/Rotate`, and add a `crop_nonzero_origin.pdf` fixture. Outline *write* is not here; it is `Quire.Pdf.Outline`. |
@@ -2970,8 +2992,12 @@ again, `mix.exs` wins and this table is the thing that is wrong.
   Ecto 3.14.1 supplies UUID v7 generation, timestamp extraction **and** a
   monotonic precision mode that this package does not have at all. Adding it
   would mean two UUID implementations with different ordering guarantees.
-- **daisyUI** (§3.1), and anything that shells out to an external document
-  tool — the engine layer is §3.3, in-BEAM only (§3.4).
+- **daisyUI** — **not absent: present in `mix.exs` and `deps/`**, pinned at
+  `v5.5.20` (MIT). T-025 owns deleting the dep, the `@plugin` blocks in
+  `app.css`, and every daisyUI-classed element in one pass. Until then it
+  lingers as generated scaffolding; under the appendix's own precedence rule
+  (`mix.exs` is authoritative), the old "deliberately absent" entry was
+  wrong.
 
 ### Appendix B — Local toolchain files
 
