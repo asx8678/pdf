@@ -1,0 +1,125 @@
+AGENTS.md
+  s_876b9271801391::t_004a0968957ccd 85-87
+  s_876b9271801391::t_cb7686a9be6759 88-536
+assets/js/app.js
+  s_876b9271801391::t_cb7686a9be6759 1-83
+README.md
+  s_876b9271801391::t_cb7686a9be6759 1-18
+lib/quire_web/controllers/error_json.ex
+  s_876b9271801391::t_cb7686a9be6759 1-21
+test/support/conn_case.ex
+  s_876b9271801391::t_cb7686a9be6759 1-38
+lib/quire.ex
+  s_876b9271801391::t_cb7686a9be6759 1-9
+lib/quire_web/controllers/page_html/home.html.heex
+  s_876b9271801391::t_cb7686a9be6759 1-199
+lib/quire_web/components/core_components.ex
+  s_876b9271801391::t_cb7686a9be6759 1-505
+.formatter.exs
+  s_876b9271801391::t_cb7686a9be6759 1-6
+plan3.md
+  s_876b9271801391::t_45eaa20c163da5 475-484
+  s_876b9271801391::t_38e4695def7fce 2625-2629
+  s_876b9271801391::t_b67960179b2835 1,300-456,458,491-1043,1077-2417
+  s_876b9271801391::t_057746fa8b48fe 466
+  s_876b9271801391::t_0ca55574d0dcee 187-188
+  s_876b9271801391::t_0921ecffa87be2 457,1046,2618
+  s_876b9271801391::t_ad71b0ed785d2e 2-4,184-186
+  s_876b9271801391::t_0253999f8594ad 189-191,297-299
+  s_876b9271801391::t_4ee6b0634383c4 459-461,463-465
+  s_876b9271801391::t_f9e44d63393123 467-469,472-474
+  s_876b9271801391::t_6dbb55e036ca50 485-490
+  s_876b9271801391::t_78e984dbfd9696 1044-1045
+  s_876b9271801391::t_ca4eb9b6452471 1047-1049,1074-1076
+  s_876b9271801391::t_8d11625267fd1c 2418-2420,2615-2617
+  s_876b9271801391::t_c281c2cba62ae9 2619-2624
+  s_876b9271801391::t_c62aa4ef874ea5 2630-2632
+lib/quire_web.ex
+  s_876b9271801391::t_cb7686a9be6759 1-114
+priv/repo/seeds.exs
+  s_876b9271801391::t_cb7686a9be6759 1-11
+config/test.exs
+  s_876b9271801391::t_cb7686a9be6759 1-41
+config/config.exs
+  s_876b9271801391::t_cb7686a9be6759 1-71
+test/quire_web/controllers/page_controller_test.exs
+  s_876b9271801391::t_cb7686a9be6759 1-8
+assets/css/app.css
+  s_876b9271801391::t_e9b0c5ff64010c 16-17,19-23
+  s_876b9271801391::t_cb7686a9be6759 1-15,24-113
+  s_876b9271801391::t_6c5dc3ce7a8e3f 18
+test/quire_web/controllers/error_json_test.exs
+  s_876b9271801391::t_cb7686a9be6759 1-12
+lib/quire/repo.ex
+  s_876b9271801391::t_cb7686a9be6759 1-5
+lib/quire/mailer.ex
+  s_876b9271801391::t_cb7686a9be6759 1-3
+lib/quire_web/components/layouts/root.html.heex
+  s_876b9271801391::t_cb7686a9be6759 1-43
+test/quire_web/controllers/error_html_test.exs
+  s_876b9271801391::t_cb7686a9be6759 1-14
+config/runtime.exs
+  s_876b9271801391::t_cb7686a9be6759 1-136
+lib/quire/application.ex
+  s_876b9271801391::t_cb7686a9be6759 1-34
+priv/gettext/errors.pot
+  s_876b9271801391::t_cb7686a9be6759 1-109
+lib/quire_web/controllers/page_html.ex
+  s_876b9271801391::t_cb7686a9be6759 1-10
+lib/quire_web/endpoint.ex
+  s_876b9271801391::t_cb7686a9be6759 1-55
+test/test_helper.exs
+  s_876b9271801391::t_cb7686a9be6759 1-2
+test/support/data_case.ex
+  s_876b9271801391::t_cb7686a9be6759 1-58
+config/dev.exs
+  s_876b9271801391::t_cb7686a9be6759 1-77
+lib/quire_web/router.ex
+  s_876b9271801391::t_cb7686a9be6759 1-44
+priv/static/images/logo.svg
+  s_876b9271801391::t_cb7686a9be6759 1-6
+lib/quire_web/controllers/page_controller.ex
+  s_876b9271801391::t_cb7686a9be6759 1-7
+mix.exs
+  s_876b9271801391::t_cb7686a9be6759 1-101
+priv/static/robots.txt
+  s_876b9271801391::t_cb7686a9be6759 1-5
+lib/quire_web/components/layouts.ex
+  s_876b9271801391::t_cb7686a9be6759 1-160
+assets/tsconfig.json
+  s_876b9271801391::t_cb7686a9be6759 1-32
+lib/quire_web/gettext.ex
+  s_876b9271801391::t_cb7686a9be6759 1-25
+priv/repo/migrations/.formatter.exs
+  s_876b9271801391::t_cb7686a9be6759 1-4
+priv/gettext/en/LC_MESSAGES/errors.po
+  s_876b9271801391::t_cb7686a9be6759 1-112
+config/prod.exs
+  s_876b9271801391::t_cb7686a9be6759 1-32
+lib/quire_web/controllers/error_html.ex
+  s_876b9271801391::t_cb7686a9be6759 1-24
+lib/quire_web/telemetry.ex
+  s_876b9271801391::t_cb7686a9be6759 1-93
+assets/vendor/heroicons.js
+  s_876b9271801391::t_24f0781619cf89 1-43
+assets/vendor/topbar.js
+  s_876b9271801391::t_031a75dd4e960b 1-138
+mix.lock
+  s_876b9271801391::t_5395c6ce4b4eb6 1-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4502ac7b75e17295213a1cd56bf6d8dd70428f8a",
+  "prompts": {},
+  "sessions": {
+    "s_876b9271801391": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d5d89826-6d69-4f15-99f7-c12164917d0f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "asx8678 <114666958+asx8678@users.noreply.github.com>"
+    }
+  }
+}
