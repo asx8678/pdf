@@ -211,15 +211,18 @@ strictly.
 | Erlang/OTP | 28.x | mise | 28 preferred. Built from source by kerl on first install — see §3.6 for the macOS OpenSSL flags, and expect 10–20 minutes on an M-series chip. |
 | Phoenix | `~> 1.8.9` | Hex | Current stable line. |
 | Phoenix LiveView | `~> 1.2.7` | Hex | Gives colocated hooks (`Phoenix.LiveView.ColocatedHook`), which this project leans on heavily. |
-| Bandit | `~> 1.5` | Hex | Phoenix 1.8 default adapter. |
+| Bandit | `~> 1.12` | Hex | Phoenix 1.8 default adapter. |
 | **PostgreSQL** | **18.4** | Homebrew (`postgresql@18`) | Running natively on the machine, started with `brew services`. §3.7 covers what PG18 gives this project — chiefly native `uuidv7()`. **No extensions are required, and none may be added.** |
-| Ecto + Postgrex | `~> 3.13` | Hex | Postgrex speaks PG18's wire protocol without changes; scram-sha-256 is the default auth method and works out of the box. |
-| Oban | `~> 2.18` | Hex | Every server-side PDF operation is a job. Non-negotiable — see §7.5. |
+| Ecto | `~> 3.14.1` | Hex | Declared explicitly, not left to `ecto_sql`'s floor. UUID v7 *generation* (`autogenerate: [version: 7]`, `precision: :monotonic`) landed in 3.14.0, but the helpers §3.7 uses — `to_datetime/1`, `to_unix/2`, `version/1` — landed in **3.14.1**. `ecto_sql ~> 3.13` alone would admit a version that cannot do this and silently break the T-200 schemas. |
+| Ecto SQL + Postgrex | `~> 3.14` / `~> 0.22` | Hex | Postgrex speaks PG18's wire protocol without changes; scram-sha-256 is the default auth method and works out of the box. |
+| Oban | `~> 2.23` | Hex | Every server-side PDF operation is a job. Non-negotiable — see §7.5. |
 | Tailwind CSS | v4 (via `tailwind` Hex package) | Hex | Phoenix 1.8 default. Downloads a standalone darwin-arm64 binary, no Node required for CSS. |
 | esbuild | via `esbuild` Hex package | Hex | Phoenix 1.8 default. Must be configured for ESM + code splitting — pdf.js 6.x is ESM-only. |
 | Node.js | 24.x LTS | mise | **Not** used to build the app. Needed only for `npm install pdfjs-dist` / `@cantoo/pdf-lib` vendoring (T-038) and for Playwright (T-199). |
-| Req | `~> 0.5` | Hex | URL fetching, TSA timestamp requests, cloud storage connectors, translation provider calls. |
-| Rustler | `~> 0.38` | Hex + mise (`rust`) | For the PDFium NIF and the Tesseract NIF (§3.3). Precompiled artefacts are preferred; Rust is needed if a darwin-arm64 artefact is missing — and later for Tauri (§12). |
+| Req | `~> 0.7.1` | Hex | URL fetching, TSA timestamp requests, cloud storage connectors, translation provider calls. 0.7.0 carried breaking changes (`current_request_steps` removed, `run_finch` → `Req.Finch`, `put_plug`/`run_plug` → `Req.Plug`); pin the **0.7.1** line, because `~> 0.7` takes 0.7.0 as its floor and still floats to 0.9.x, which is not a bound at all. |
+| Rustler | `~> 0.38`, `runtime: false` | Hex + mise (`rust`) | Builds `Quire.Pdf` (§3.3) from source on every `mix compile`, so **a Rust toolchain is on the happy path, not a fallback**. Also the `EXPDFIUM_BUILD=1` escape hatch and Tauri (§12). It is *not* justified by an OCR NIF — see §3.3. |
+| rustler_precompiled | `~> 0.8.4` | Hex | Declared explicitly because it is the component that downloads `ex_pdfium`'s `aarch64-apple-darwin` artefact (ADR 0001). `ex_pdfium` asks for `~> 0.8`, which floats to 0.9.0 — a line it was not developed against, and which changed the download path. Hold the 0.8 line. |
+| Rust | `1.91` | mise | Set by **rustler 0.38.0**, whose manifest declares `rust-version = "1.91"`; cargo hard-refuses below it with no override. `lopdf` 0.44.0 needs only 1.88, so rustler is the binding constraint. (Earlier drafts said 1.90 and 1.85; both were wrong.) |
 
 **Strip daisyUI before Phase 1.** Phoenix 1.8.9's generator adds a daisyUI
 dependency **and** daisyUI-classed markup throughout `core_components.ex` and
@@ -295,37 +298,108 @@ wrong, not the table.
 
 | Component | Version | License | Form | Owns |
 |---|---|---|---|---|
-| **PDFium** via `ex_pdfium` | 0.5.1 (PDFium 151.x, pdfium-render 0.9.3) | MIT / BSD-3 | Rustler NIF, precompiled, `libpdfium` bundled | Page rasterisation (thumbnails, previews, print renders), text extraction with per-character bboxes, search, page geometry, outline read/write, attachment enumeration/extraction, AcroForm introspection, annotation inspection, image extraction, page import/splice (merge, split, insert, extract, replace, reorder, reverse), crop/box manipulation, page-object creation (text, vector, image) for stamps/watermarks/headers/footers/Bates/page numbers, annotation flattening, PDF save with linearization |
-| **Tesseract** via `tesseract_elixir` | pin latest 0.x on Hex at adoption (T-019) | Apache-2.0 | Rustler NIF over the Tesseract OCR engine | OCR recognition, per-word confidence, 100+ languages via tessdata packs |
-| **`image` / `vix`** (libvips) | pin latest on Hex at adoption (T-019) | MIT (binding) / LGPL-2.1 (libvips, dynamically linked) | Precompiled NIF | Image format normalisation (HEIC/TIFF/BMP/WebP → PNG/JPEG), deskew, denoise/clean for OCR preprocessing, image downscale and recompression for Compress, PNG/JPEG/TIFF/WebP output for PDF→Image |
+| **PDFium** via `ex_pdfium` | `== 0.5.1` (PDFium **144.0.7543.0**, pdfium-render **0.8.37**) | MIT / BSD-3 | Rustler NIF, precompiled, `libpdfium` bundled | Page rasterisation (thumbnails, previews, print renders), text extraction with per-character bboxes, search, page geometry, **outline read**, attachment enumeration/extraction, **AcroForm introspection (read)**, annotation inspection, image extraction, page import/splice (merge, split, insert, extract, replace, reorder, reverse), **page box read**, page-object creation (text, vector, image) for stamps/watermarks/headers/footers/Bates/page numbers, annotation flattening, `rotate_page/3` and `object_display_rotation/3`, `links/2`, `permissions/1` (read), `signatures/1`, `page_objects/2`, and **PDF save without linearization** |
+| **`Quire.Pdf`** — PDF object model, over `lopdf` 0.44.0 (written for this project) | lopdf `0.44.0`; built from source by `use Rustler` | MIT | **Rustler NIF, compiled from source** (needs Rust ≥ 1.91, §3.1) | Raw PDF structure read *and write*: catalog and arbitrary dictionary modification, `IncrementalDocument` appends over the original bytes, `save_modern` with **object streams + xref streams**, `authenticate_password/1` for encrypted input, and `Bookmark`/`Outline` with `add_bookmark()`/`build_outline()`. Owns **outline write** (`Quire.Pdf.Outline`), and `/AP` appearance-stream generation plus `/AcroForm` re-attachment after page import (`Quire.Pdf.AcroForm`, per ADR 0003 D5 — `Quire.Compose` does NOT own `/AP`). This is the foundation `Quire.Compose`, `Quire.PdfA`, `Quire.SecurityHandler` and `Quire.Pades` were already assuming and nobody owned |
+| **Tesseract** via `image_ocr` | `== 0.2.0` | Apache-2.0 (binding); Tesseract itself Apache-2.0 | C++ NIF over Homebrew Tesseract 5.5.3 + Leptonica 1.87.0 | OCR recognition, per-word confidence and bounding boxes, auto-rotate via `osd.traineddata`, 100+ languages via tessdata packs (`eng` vendored in `priv/`, further packs on demand) |
+| **`image` / `vix`** (libvips) | `image ~> 0.72.0` / `vix == 0.40.0` | MIT (bindings) / **LGPL-3.0-or-later** — the bundled libvips is a statically combined work, see §3.5 | Precompiled NIF with a bundled `libvips-cpp.8.18.3.dylib` | Image format normalisation (HEIC/TIFF/BMP/WebP → PNG/JPEG), deskew, denoise/clean for OCR preprocessing, image downscale and recompression for Compress, PNG/JPEG/TIFF/WebP output for PDF→Image |
 | **Native OOXML/ODF reader** (`Quire.Office.Reader`, written for this project) | — | project code | Pure Elixir: ZIP (`:zip`) + XML (`Saxy`) | Reading .docx/.xlsx/.pptx/.odt/.ods/.odp/.rtf/.csv/.txt/.md into an intermediate layout model for File→PDF |
 | **Native OOXML writers** (`Quire.Office.Writer.*`, written for this project; `elixlsx` MAY be used for .xlsx) | — | project code (+ `elixlsx` MIT) | Pure Elixir | Generating .docx/.xlsx/.pptx/.rtf from extracted PDF content for PDF→Word/Excel/PowerPoint/RTF |
 | **chromic_pdf** | 1.17.1 | Apache-2.0 | Hex library driving the **system Chromium** over CDP | URL→PDF and HTML→PDF rendering (the File→PDF back end and PDF→HTML print paths). Chromium is a browser the user already has — the only external process the app ever spawns besides Postgres |
-| **Native PAdES signing** (`Quire.Pades`, written for this project) | — | project code | Pure Elixir over OTP `:public_key` / `:crypto` | CMS (PKCS#7) detached signatures over PDF byte ranges, PKCS#12 keystore parsing, PAdES B-B and B-T levels, RFC 3161 timestamping via Req, DSS/VRI appending for B-LT, signature validation and difference analysis (§9.7) |
-| **Native security handler** (`Quire.SecurityHandler`, written for this project) | — | project code | Pure Elixir over `:crypto` | AESV2/AESV3 encryption and decryption, owner/user passwords, permission flags, per ISO 32000-2 §7.6 (§9.7) |
-| **Native PDF/A module** (`Quire.PdfA`, written for this project) | — | project code | Pure Elixir over the PDFium NIF | Best-effort PDF/A-2b conversion (font embedding verification, OutputIntent/ICC injection, XMP metadata, MarkInfo, forbidden-feature removal) plus a built-in structural conformance report (§9.2) |
-| **Native text reflow & stamping** (`Quire.Compose`, written for this project) | — | project code | Pure Elixir | Content-stream generation for overlay/underlay stamping, text runs, translation overlay/sidecar output (§9.5, §9.11) |
+| **Native PAdES signing** (`Quire.Pades`, written for this project) | — | project code | Elixir over OTP `:public_key` / `:crypto`, with `Quire.Pdf` for byte-range and DSS structure writes | CMS (PKCS#7) detached signatures over PDF byte ranges, PKCS#12 keystore parsing, PAdES B-B and B-T levels, RFC 3161 timestamping via Req, DSS/VRI appending for B-LT, signature validation and difference analysis (§9.7) |
+| **Native security handler** (`Quire.SecurityHandler`, written for this project) | — | project code | Elixir over `:crypto`, with `Quire.Pdf` for `/Encrypt` dictionary read/write | AESV2/AESV3 encryption and decryption, owner/user passwords, permission flags, per ISO 32000-2 §7.6 (§9.7) |
+| **Native PDF/A module** (`Quire.PdfA`, written for this project) | — | project code | Elixir over the PDFium NIF for inspection and `Quire.Pdf` for structure writes | Best-effort PDF/A-2b conversion (font embedding verification, OutputIntent/ICC injection, XMP metadata, MarkInfo, forbidden-feature removal) plus a built-in structural conformance report (§9.2) |
+| **Native text reflow & stamping** (`Quire.Compose`, written for this project) | — | project code | Elixir over `Quire.Pdf` | Content-stream generation for overlay/underlay stamping, text runs, translation overlay/sidecar output (§9.5, §9.11). `/AP` appearance-stream generation belongs to `Quire.Pdf.AcroForm`, not here (ADR 0003 D5) |
 
-**How the pieces fit.** PDFium is the only general-purpose PDF engine and it
-is a *very* capable one: its page-import API implements merge/split/reorder
-directly, its page-object API draws stamps and watermarks in-process, its
-text API produces the spans that power search, Compare, Translate and Edit
-mode, and its save API produces the output files. Everything PDFium does not
-do — OCR, image work, Office formats, signatures, encryption, PDF/A — is
-either a second in-BEAM NIF (Tesseract, libvips) or pure Elixir built on OTP's
-crypto and ZIP/XML tooling. There is no point in the system where work leaves
-the VM to a third-party CLI.
+**How the pieces fit.** PDFium is the primary *rendering and inspection*
+engine and it is a very capable one: its page-import API implements
+merge/split/reorder directly, its page-object API draws stamps and watermarks
+in-process, its text API produces the spans that power search, Compare,
+Translate and Edit mode, and its save API produces the output files.
+Everything PDFium does not do — OCR, image work, Office formats, signatures,
+encryption, PDF/A — is either a second in-BEAM NIF (`image_ocr`, libvips,
+`Quire.Pdf`) or Elixir built on OTP's crypto and ZIP/XML tooling. There is no
+point in the system where work leaves the VM to a third-party CLI.
 
-**The NIF discipline (applies to `ex_pdfium`, `tesseract_elixir`, `vix`).**
-NIFs are the only way to get this performance natively, and they come with
-two BEAM-specific hazards that Phase 0 exists to defuse:
+**What PDFium cannot do, verified against the headers it actually ships.**
+The row above was rebuilt from source in ADR 0003 — `deps/ex_pdfium/lib/ex_pdfium.ex`,
+`native/ex_pdfium/src/lib.rs`, and pdfium-render 0.8.37's vendored PDFium
+public C headers at `include/pdfium_7543/`. Of the verbs the old row claimed,
+**22 are present, 9 partial, 2 missing**, and neither missing verb is
+reachable by forking:
+
+- **Outline write is absent from PDFium's public API.** `fpdf_doc.h` exposes
+  exactly seven `FPDFBookmark_*` symbols and all seven are getters (`Find`,
+  `GetAction`, `GetCount`, `GetDest`, `GetFirstChild`, `GetNextSibling`,
+  `GetTitle`); grepping all 22 headers returns the same seven. pdfium-render
+  mirrors it — `PdfDocument` has `bookmarks()` and **no** `bookmarks_mut()`,
+  on adjacent lines to `attachments_mut()`, `fonts_mut()` and `pages_mut()`.
+  **Owner: `Quire.Pdf.Outline`** (server-authoritative, so §7.4 undo payloads
+  are unaffected). It is *not* client-side: `@cantoo/pdf-lib` 2.7.4 has no
+  outline or bookmark API of any kind.
+- **Linearizing save is likewise absent.** PDFium can *detect* linearization;
+  it cannot produce it. `lopdf` cannot either. **Linearization is therefore
+  dropped as a product capability** — see §9's Compress row. The
+  linearization *read* stays, for the Properties dialog.
+- **Page box set and form-field set are reachable but unbound.**
+  pdfium-render exposes `boundaries_mut().set_media/crop/bleed/trim/art`,
+  text/checkbox/radio value setters and the public `PdfiumLibraryBindings`
+  trait; `ex_pdfium` simply does not surface them. Route: a PR to
+  `jtippett/ex_pdfium` (active, 0.4.1 → 0.5.1 in three weeks), vendored fork
+  as fallback. A from-source NIF build measures 13.85 s, so build cost is not
+  the objection — the objection is that a fork must vendor `libpdfium`
+  (5.5 MB per target) and run its own release matrix. Form XObject /
+  place-a-page-on-a-page belongs to the same PR, which means §9's "background:
+  another PDF" needs no rasterise fallback.
+- **`/V` without `/AP` silently loses user input.** PDFium's setter writes
+  `/V` but never regenerates `/AP`, and `flatten/1` bakes `/AP` while ignoring
+  `/V` entirely. A `/V`-only write — including the obvious "set `/V` and
+  `NeedAppearances`" approach — flattens to the *old or empty* appearance.
+  **Hard rule: any `/V` write MUST also write `/AP`** before the document is
+  flattened or rasterised by anything other than `render_page/3`.
+- **Crop-origin coordinate frame.** On a non-zero-origin CropBox every spatial
+  result (text, search, annotation, image, link bounds) is in the **MediaBox**
+  frame while `render_page/3` rasterises the **CropBox** region, and
+  `ExPdfium.bounds_to_pixels/3` does not reconcile them. `Quire.Render.Pdfium`
+  must subtract `boxes.crop` (falling back to `boxes.media` — PDFium does not
+  fall back) and compose page `/Rotate`. Needs a `crop_nonzero_origin.pdf`
+  fixture and a **Gate 2 exit criterion**.
+- **`/AcroForm` and `/Outlines` do not survive page import.** `append/2` and
+  `extract_pages/2` drop them while leaving widget annotations behind, so the
+  output *looks* like a form and is not one. `Quire.Pdf.AcroForm` re-attaches
+  after import; §9's Merge row therefore reads "bookmark **and form**
+  handling".
+- **Print-intent rendering is partial.** `render_page/3` has no print flag;
+  `PdfRenderConfig::use_print_quality` exists in the crate but is unbound.
+  Fold it into the same upstream PR.
+
+⚠️ **PDFium's effective parallelism is 1, and that is a property of the
+binding, not of the queue.** `deps/ex_pdfium/native/ex_pdfium/src/lib.rs:201`
+declares `static PDFIUM_LOCK: Mutex<()>`, and **44 of the 45 NIFs acquire it**
+(the sole exception, `set_dynamic_lib_dir` at `lib.rs:351`, is dev/test-only
+and touches no document). Every PDFium call in the VM is serialised behind
+that one mutex. This is orthogonal to dirty schedulers — all 45 NIFs are
+correctly `DirtyCpu`, so BEAM scheduler health is fine; the constraint is
+throughput. It is also very likely *correct*: upstream PDFium is not
+thread-safe globally. §7.5 sizes the queues to it and §14.1 accounts for the
+memory it pins.
+
+**The NIF discipline (applies to `ex_pdfium`, `image_ocr`, `vix` and the
+project's own `Quire.Pdf`).** NIFs are the only way to get this performance
+natively, and they come with two BEAM-specific hazards that Phase 0 exists to
+defuse:
 
 - **Scheduler stalls.** Any NIF that can run longer than ~1 ms MUST be marked
   `DirtyCpu` (CPU work) or `DirtyIo`. Rasterising a page or recognising OCR
   text will blow past the budget on a normal scheduler and freeze LiveView
   under load. T-021 and T-022 verify this empirically for each NIF before it
   touches a request path; if a NIF cannot be dirty-scheduled, patch it or
-  wrap the call in a `Port`-style isolation — do not ship a stall.
+  wrap the call in a `Port`-style isolation — do not ship a stall. Both
+  `ex_pdfium` (45/45) and `image_ocr`'s two recognition entry points already
+  declare dirty-CPU, so those gates should pass by construction — but
+  `image_ocr`'s `init_nif` runs on a **normal** scheduler while loading a
+  ~4 MB traineddata file, and moving it into a pool worker does not fix that
+  (`init_worker/1` is itself a synchronous normal-scheduler call). T-022 must
+  time it against §14.1.
 - **VM crashes.** A segfault in a NIF takes the whole BEAM down. Mitigations:
   pin exact versions, run the full fixture corpus (§13) through every NIF in
   Phase 0 as a crash-fuzz pass, and — for OCR specifically, which is the
@@ -351,7 +425,12 @@ Python runtime and an AGPL binary." The contract:
 **Allowed without review:**
 
 - Any Hex package (pure Elixir, or a NIF under MIT/BSD/Apache) that runs
-  inside the BEAM.
+  inside the BEAM. **The licence that matters is the artefact's, not the Hex
+  package's.** `vix` is the worked example: it declares MIT on Hex and ships a
+  17.7 MB `libvips-cpp.8.18.3.dylib` that is a Combined Work under
+  LGPL-3.0-or-later (§3.5). A Hex package whose *precompiled binary* carries
+  copyleft is **not** covered by this clause and falls under "allowed only
+  with an ADR" below.
 - PostgreSQL 18, stock, no extensions.
 - The user's installed Chromium/Chrome browser, driven over CDP by
   chromic_pdf, with an explicit configured executable path. If no Chromium is
@@ -363,7 +442,15 @@ Python runtime and an AGPL binary." The contract:
 - A system C library required by a NIF (e.g. Tesseract + tessdata via
   Homebrew if the NIF does not vendor it). It must be declared in the
   `Brewfile`, version-asserted by `mise run doctor`, and surfaced in
-  Settings → About.
+  Settings → About. **ADR 0002 is that ADR for `image_ocr` + Homebrew
+  Tesseract**; note it also makes `brew "pkgconf"` mandatory, not optional —
+  `image_ocr`'s Makefile shells out to `pkg-config`, Xcode CLT does not ship
+  it, and it is a *build-only* dependency of the tesseract formula, so
+  pouring the bottle does not install it.
+- A Hex package shipping a precompiled binary under any copyleft licence,
+  however weak. The ADR must record what `otool -L` and the artefact contents
+  actually show — not what the package's Hex `licenses` field claims — and
+  must name where the resulting obligation is discharged.
 - Any npm package, under the same licence bar as Hex.
 
 **Never allowed:**
@@ -379,9 +466,51 @@ Python runtime and an AGPL binary." The contract:
 
 | Class | Components | Rule |
 |---|---|---|
-| **Permissive** — link, bundle, ship | pdf.js, @cantoo/pdf-lib, PDFium, ex_pdfium, Rustler, Tesseract, tesseract_elixir, chromic_pdf, Saxy, elixlsx, Oban, Phoenix stack | No constraints. |
-| **Weak / file-level copyleft** | libvips (LGPL-2.1, dynamically linked via vix) | Dynamic linking only, do not modify or statically link. Precompiled vix artefacts satisfy this as shipped. |
-| **AGPL / GPL** | none — by construction | There is no GPL/AGPL component anywhere in the stack (§3.4), so there is no subprocess boundary to police and nothing to quarantine. Keep it that way: a dependency-licence scan runs in `mise run check` (T-005) and fails the build on any AGPL/GPL entry. |
+| **Permissive** — link, bundle, ship | pdf.js, @cantoo/pdf-lib, PDFium, ex_pdfium, pdfium-render, Rustler, lopdf (and `Quire.Pdf` over it), Tesseract, image_ocr, chromic_pdf, Saxy, elixlsx, Oban, the Phoenix stack, and the vix/image *bindings* | No constraints. |
+| **Weak / library copyleft** | **The libvips artefact bundled inside `vix`** — `libvips-cpp.8.18.3.dylib`, conveyed under **LGPL-3.0-or-later** as a statically Combined Work | Attribution and licence text (T-180), **and** the LGPLv3 §4 relink duty. **Do not restate the mechanism here — §12.1 step 9 is the single home for that decision.** |
+| **Weak / file-level copyleft** | cairo, inside the same dylib | Dual-licensed; cairo is used unmodified, so the file-level obligation is satisfied by shipping its licence text. **Confirm the exact MPL version at T-180** — upstream cairo is `LGPL-2.1-only OR MPL-1.1`, and this plan does not assert 2.0 without evidence. |
+| **AGPL / GPL** | none — verified across all 71 Hex deps | Every Hex dependency resolves to Apache-2.0 / MIT / BSD / ISC; the Appendix E gate **passes**. There is no subprocess boundary to police and nothing to quarantine. Keep it that way: a dependency-licence scan runs in `mise run check` (T-005) and fails the build on any AGPL/GPL entry. |
+
+⚠️ **The "LGPL-2.1, dynamically linked" claim that used to sit in this table
+was wrong on both halves, and the mitigation it carried — "precompiled vix
+artefacts satisfy this as shipped" — was false.** Re-verified on this machine:
+
+| What was checked | Command | Result |
+|---|---|---|
+| What the artefact contains | `tar tzf vix-nif-2.17-aarch64-apple-darwin-0.40.0.tar.gz` | Exactly two files: `vix.so` and `precompiled_libvips/lib/libvips-cpp.8.18.3.dylib`. **No licence texts, no source, no relink kit.** |
+| Where it comes from | `deps/vix/build_scripts/precompiler.exs:20–23` | `akash-akya/sharp-libvips`, release tag `v8.18.3-rc1` — a fork of `lovell/sharp-libvips`, which conveys the combined build under **LGPL-3.0-or-later**. Upstream libvips alone is LGPL-2.1-or-later, but the distributor has already elected v3. |
+| Whether it is dynamically linked | `otool -L …/libvips-cpp.8.18.3.dylib` | Links **only** macOS system libraries (`libSystem`, `libc++`, `libobjc`, `libiconv`, `libresolv`, Foundation/CoreFoundation/AppKit/CoreGraphics/CoreServices/CoreText). There is no second dylib in the bundle — every third-party dependency is **statically inside** this one 17.7 MB binary. |
+| What is statically inside it | `nm -gU` exported symbols + `strings` | glib/gobject/gio (`g_*`), pango (`pango_*`), cairo (`cairo_*`), librsvg (`rsvg_*`), libexif (`exif_*`), **libheif (`heif_*`)**, harfbuzz (`hb_*`), freetype (`FT_*`), fontconfig (`Fc*`), libpng 1.6.58, libjpeg (`jpeg_*`), libtiff 4.5.1, libwebp (`WebP*`), libarchive 3.8.7, lcms2, libaom (`aom_*`), libimagequant (`liq_*`), cgif, nsgif, libxml2 (`xmlParse*`), zlib-ng. |
+
+The one dynamic boundary that does exist — `vix.so` → `@rpath/libvips-cpp.8.18.3.dylib`
+under `LC_RPATH @loader_path/precompiled_libvips/lib` — is **inside a single
+artefact we redistribute**, so it is not the LGPL §4(d)(1) "uses a suitable
+shared library mechanism" escape by itself; the copyleft components are static
+within the dylib on the far side of it. **libheif alone is LGPL-3.0-or-later**,
+which is what forces the whole combination to v3 (the LGPL-2.1-**or-later**
+components upgrade cleanly; glib, pango, librsvg and libexif are all
+`-or-later`).
+
+**What the table above proves, and what it does not.** The *structural* facts
+— one dylib, no other dylibs, those symbols statically inside it, that source
+repo and tag, no licence files in the artefact — were all reproduced on this
+machine with the commands shown, and they are what overturn "dynamically
+linked". The *licence attributions* for the individual components (libheif =
+LGPL-3.0-or-later, glib/pango/librsvg/libexif = LGPL-2.1-or-later, cairo =
+dual) come from those projects' own upstream declarations, **not** from
+anything inside the artefact, because the artefact ships no licence texts at
+all. That gap is itself the finding: we redistribute a binary whose licence
+we cannot read from the binary. **T-180 must obtain the licence set from
+`akash-akya/sharp-libvips` `v8.18.3-rc1` directly and pin it in-repo**, and
+that is also when cairo's exact MPL version gets settled. Until then, treat
+LGPL-3.0-or-later as the operative constraint — it is the strictest of the
+candidates and the one sharp-libvips itself elects.
+
+**Why this matters, in one sentence:** LGPLv3 §4 inherits GPLv3 §6 Installation
+Information, so conveying a signed, sealed `.app` containing statically
+combined LGPLv3 code triggers a relink duty that this plan previously assumed
+away. That lands on §12 (packaging), T-005 (the scanner) and T-180
+(attribution). **The decision is recorded once, at §12.1 step 9.**
 
 ### 3.6 Local development environment (macOS)
 
@@ -457,7 +586,7 @@ job and exits afterwards; nothing else ever runs.
 | Repo | `~/code/quire` (or wherever) | |
 | Document storage | `<repo>/_data/storage` | Gitignored. `Storage.Web` filesystem backend root (§7.1). Override with `QUIRE_DATA_DIR`. |
 | Scratch / temp | `$TMPDIR/quire/<op_id>` | macOS gives each user a private `$TMPDIR`. Per-operation subdirectory, removed in an `after` block. |
-| tessdata | per the Tesseract NIF's resolution (Homebrew `share/tessdata` if system-installed) | Install language packs on demand in T-139 rather than all 100+ up front (~1.5 GB). |
+| tessdata | `image_ocr`'s resolution: `eng` is vendored in the package's `priv/`; further packs are fetched on demand. Homebrew `share/tessdata` supplies `osd.traineddata`, which auto-rotate needs | Install language packs on demand in T-139 rather than all 100+ up front (~1.5 GB). |
 | Postgres data | `$(brew --prefix)/var/postgresql@18` | |
 | Fixture corpus | `<repo>/test/fixtures/pdfs` | Committed (§13, T-016). |
 
@@ -1100,18 +1229,34 @@ scheduler safety, input limits and isolation rather than subprocesses.
 Every engine module behind a behaviour:
 
 - `Quire.Render` (§7.3) — PDFium NIF primary, client-side fallback.
-- `Quire.Ocr.Engine` — Tesseract NIF, with vix preprocessing.
+- **`Quire.Pdf` — Rustler NIF over `lopdf` 0.44.0; the PDF object model.**
+  Everything below that writes raw PDF structure goes through it, so the
+  dirty-scheduler and bounded-input rules in this section apply to it in full.
+  Unlike `ex_pdfium` and `vix` it is **compiled from source on every
+  `mix compile`**, which is why Rust ≥ 1.91 is a hard prerequisite (§3.1) and
+  why its NIFs are ours to mark `DirtyCpu` — nobody upstream did it for us.
+  Sub-modules: `Quire.Pdf.Outline` (outline write) and `Quire.Pdf.AcroForm`
+  (`/AP` generation, `/AcroForm` re-attach after page import).
+- `Quire.Ocr.Engine` — `image_ocr` NIF, with vix preprocessing.
 - `Quire.Office.Reader` / `Office.Writer.*` — pure Elixir.
-- `Quire.Pades` — pure Elixir signing/validation.
-- `Quire.SecurityHandler` — pure Elixir encryption.
-- `Quire.PdfA` — pure Elixir best-effort PDF/A + conformance report.
-- `Quire.Compose` — pure Elixir content-stream generation.
+- `Quire.Pades` — signing/validation, over `Quire.Pdf` for structure writes.
+- `Quire.SecurityHandler` — encryption, over `Quire.Pdf` for `/Encrypt`.
+- `Quire.PdfA` — best-effort PDF/A + conformance report, over `Quire.Pdf`.
+- `Quire.Compose` — content-stream **and `/AP` appearance-stream** generation,
+  over `Quire.Pdf`. Not "pure Elixir": its foundation is a NIF.
 
 **Rules every engine call MUST follow:**
 
 - **Dirty schedulers only for NIF work.** Any NIF invocation expected to
   exceed ~1 ms must be declared `DirtyCpu`/`DirtyIo` in the wrapper. T-021
   and T-022 prove this per NIF; `mise run doctor` re-asserts it.
+- **Serialisation is a separate property from scheduling, and PDFium has
+  it.** Dirty scheduling keeps the BEAM responsive; it does **not** make an
+  engine parallel. `ex_pdfium` serialises every call behind one process-wide
+  mutex (§3.3), so its effective parallelism is 1 no matter how wide the
+  queue. Any engine wrapper over a globally-locked native library MUST
+  declare that limit here and have §7.5 size its queue to it, rather than
+  letting the queue imply a concurrency the engine cannot deliver.
 - **Bounded inputs.** Workers enforce size and page-count caps before calling
   a NIF (a 4 GB malformed PDF must be rejected by policy, not by a NIF
   crash).
@@ -1136,8 +1281,11 @@ Every engine module behind a behaviour:
 - resolves the Chromium executable from config (feature degrades cleanly if
   absent);
 - captures every component version into `Quire.Engine.versions/0`,
-  surfaced in Settings → About (PDFium build, Tesseract version, libvips
-  version, Chromium version, OTP/Elixir versions, Postgres version);
+  surfaced in Settings → About (PDFium build — **144.0.7543.0**, whatever
+  `ex_pdfium 0.5.1` bundles; `lopdf` version behind `Quire.Pdf`; Tesseract
+  and Leptonica versions; libvips version **and its LGPL-3.0-or-later
+  notice**, §12.1 step 9; Chromium version, OTP/Elixir versions, Postgres
+  version);
 - reports one of three states per capability and prints a table at boot:
 
 | State | Meaning | Effect |
@@ -1162,9 +1310,16 @@ Callbacks (all take and return plain data; refs via §7.1):
 - `search/3` → page + rect + context hits
 - `form_fields/1`, `annotations/1`
 - `extract_images/2` → embedded rasters at native resolution (§9.3)
-- `outline/1` → bookmark tree (§9.1)
+- `outline/1` → bookmark tree (§9.1). **Read only** — outline *write* is
+  `Quire.Pdf.Outline`, because PDFium's public API has no bookmark setter at
+  all (§3.3)
 - `import_pages/…`, `new_document/…`, `add_page_objects/…`, `save/…` — the
-  mutation surface used by Page ops, Merge/Split, stamping and redaction
+  mutation surface used by Page ops, Merge/Split, stamping and redaction.
+  `save/…` produces **no linearization**; where output structure matters
+  (Compress, PDF/A, incremental signing) the writer is `Quire.Pdf`
+- Two callbacks this behaviour must *not* grow, because no PDFium build
+  answers them: linearizing save, and any bookmark mutation. Route them to
+  `Quire.Pdf` instead of adding an `unavailable` state for them
 
 Primary implementation `Render.Pdfium` wraps `ex_pdfium` 0.5.1, pinned
 exactly (`== 0.5.1`, not `~> 0.5.1`). **T-021 gates the NIF: prove it runs
@@ -1275,10 +1430,19 @@ stopped responding". Derive from physical performance cores, not
 `System.schedulers/0` — on Apple Silicon that number includes efficiency
 cores, which are the wrong thing to saturate with Tesseract.
 
+⚠️ **Carve-out: core count does not apply to the PDFium-touching queues.**
+`render` and `transform` are bounded by `ex_pdfium`'s process-wide
+`PDFIUM_LOCK`, not by hardware (§3.3: 44 of 45 NIFs acquire it, so effective
+parallelism is **1**). Deriving those two from performance cores would size
+them against a resource the engine cannot use. **Fix them at 1; derive only
+`ocr`, `secure`, `esign` and `translate` from cores.** A queue of 8 against a
+lock of 1 is strictly *worse* than a queue of 1: it adds mutex contention and
+memory pressure (see the ⚠️ below) and buys no throughput.
+
 | Queue | Concurrency | Why |
 |---|---|---|
-| `render` | 4 (≈ cores/2) | PDFium NIF on dirty CPU schedulers |
-| `transform` | 2 | PDFium page ops, mostly I/O + short CPU bursts |
+| `render` | **1 — fixed, not derived** | PDFium NIF. All 45 NIFs are correctly `DirtyCpu`, so the BEAM stays responsive, but every call serialises behind `PDFIUM_LOCK`. Raise this only if the D4 fork ships per-document locks *and* PDFium is proven thread-safe per-instance |
+| `transform` | **1 — fixed, not derived** | Same lock. PDFium page ops contend with `render` on it, so the two queues share one effective slot between them |
 | `convert` | 1 | Chromium instances are heavyweight; one at a time. The OOXML writers are pure Elixir but run in this queue for pacing |
 | `ocr` | 1 | Tesseract already parallelises internally; MAY move to a second BEAM node (§3.3) |
 | `secure` | 2 | Signing/encryption are pure-Elixir crypto — cheap, but keep I/O ordering sane |
@@ -1295,12 +1459,24 @@ laptop produce swap pressure that reads as a random timeout. If you need
 parallel conversion later, pool browser instances explicitly with a hard
 instance cap — do not just raise this number.
 
-⚠️ **`ocr: 1` and `render: 4` interact.** Tesseract spawns its own threads
+⚠️ **`ocr: 1` and `render: 1` interact.** Tesseract spawns its own threads
 and the PDFium NIF occupies dirty CPU schedulers. Running both flat out
 starves the normal schedulers that LiveView needs to send diffs, and the
 symptom is a UI that freezes only during OCR — which reads as a LiveView
-bug. T-190's load test exists to catch exactly this on your actual hardware;
-treat the numbers above as a starting point and tune them there.
+bug. T-189's load test exists to catch exactly this on your actual hardware;
+treat the numbers above as a starting point and tune them there — but note
+that `render` and `transform` are the two numbers T-189 **cannot** tune
+upward, because the ceiling is a mutex and not the machine.
+
+⚠️ **Raising a PDFium queue costs memory before it costs anything else.**
+`ExPdfium.open/2` (via the private `document_open/2` NIF) copies the whole file into a native buffer
+(`decode_source` → `bytes.as_slice().to_vec()`) **before** it enters
+`with_pdfium`, which is where the lock is taken. So every worker queued
+behind the mutex is already holding a second full copy of its document in
+native memory while doing no work at all. Four `render` workers on 50 MB
+documents pin ~200 MB of native buffers to achieve the throughput of one.
+This is the concrete reason the fix for slow rendering is the D4 fork or a
+second BEAM node (§3.3), never a bigger number in this table.
 
 Every worker MUST:
 
@@ -1523,13 +1699,39 @@ row with live progress and a plain-language failure cause**.
 | **URL to PDF** | S | `Req` fetch → chromic_pdf print-to-PDF via the system Chromium. Options: page size, margins, background graphics, header/footer, wait-for-selector, JS enabled. SSRF guard: block RFC1918/link-local/metadata IPs, cap redirects, 30 s timeout. |
 | **Merge** | S | Multi-document picker with drag-reorder and per-file page ranges → PDFium page import into a new document. Options: continue page numbering, keep/flatten bookmarks, keep/discard forms. |
 | **Split PDF** | S | Modes: every N pages, at bookmarks (level selector), by page ranges, by file size, extract selected. PDFium page import per output. Outputs packaged as a ZIP (`:zip`). |
-| **Compress** | S | Presets: Low/Medium/High/Custom. Pipeline: enumerate embedded images via PDFium → downscale/recompress via vix (JPEG quality per preset) → rebuild via PDFium with object streams + linearization. ⚠️ Never strip `/StructTreeRoot` or `/MarkInfo` — that silently destroys tagged-PDF accessibility; if aggressive reduction genuinely needs it, make it an explicit opt-in labelled "remove accessibility tags". Show a before/after size comparison and a page-preview diff before the user commits. |
+| **Compress** | S | Presets: Low/Medium/High/Custom. Pipeline: enumerate embedded images via PDFium → downscale/recompress via vix (JPEG quality per preset) → rebuild via **`Quire.Pdf`** with `SaveOptions::use_object_streams(true)` + `use_xref_streams(true)`. ⚠️ **Linearization is deliberately not produced — this is a scope reduction, not an omission; see the note below.** ⚠️ Never strip `/StructTreeRoot` or `/MarkInfo` — that silently destroys tagged-PDF accessibility; if aggressive reduction genuinely needs it, make it an explicit opt-in labelled "remove accessibility tags". Show a before/after size comparison and a page-preview diff before the user commits. |
 | **PDF to Word / Excel / PowerPoint** | S | `Office.Writer.{Docx,Xlsx,Pptx}` (pure Elixir): extract spans with layout from PDFium, group into paragraphs/tables/shapes, emit valid OOXML. Fidelity is best-effort — **surface this expectation in the UI** ("best for text-based PDFs"). Offer "run OCR first" when the source has no text layer (detect via `Render.extract_text`). |
 | **PDF to Image** | S | PDFium render → vix encode → PNG/JPEG/TIFF/WebP at 72–600 DPI, all pages or a range, one file per page or a multipage TIFF, ZIP output. |
 | **Advanced ▾ → PDF to PDF/A** | S | `Quire.PdfA` (§3.3): best-effort PDF/A-2b — verify/embed fonts, inject an ICC OutputIntent, write XMP metadata and MarkInfo, remove forbidden features (encryption, JS, external references) — then run the built-in structural conformance report and **show the report to the user, including every check that could not be verified**. Labelled "best-effort conversion" everywhere; the product never claims ISO certification (§1.2). |
 | **Advanced ▾ → PDF to TXT** | S | PDFium `extract_text`, with layout-preserving and reading-order modes. |
 | **Advanced ▾ → PDF to RTF** | S | `Office.Writer.Rtf`: spans → paragraphs with basic character formatting. Label it "basic formatting only". |
 | **Advanced ▾ → PDF to HTML** | S | Generate HTML yourself: render each page to WebP + overlay absolutely-positioned text spans from `extract_text`, in a single self-contained file. Offer a "text only" mode using semantic reflow. |
+
+⚠️ **Compress no longer promises linearization. This is a deliberate change
+to a stated product requirement, made here rather than discovered in Phase 8.**
+
+Earlier drafts of this row promised "rebuild via PDFium with object streams +
+linearization". **PDFium cannot produce linearized output** — it can only
+*detect* it; the capability is absent from the public C headers that
+pdfium-render 0.8.37 vendors at `include/pdfium_7543/`, so no fork or PR
+reaches it (§3.3). `lopdf` cannot linearize either, so moving the work to
+`Quire.Pdf` does not recover it. There is no in-BEAM path to fast web view,
+and §3.4 forbids the only tools that would provide one (Ghostscript, qpdf).
+
+**What replaces it:** object streams + xref streams, which `lopdf` supports
+directly via `SaveOptions` and which its own documentation measures at
+**11–61% size reduction** — most of the win, and the win users actually asked
+for, since Compress is a *file size* feature. What is genuinely lost is byte-
+range progressive loading over HTTP, which matters little for a
+localhost-first application whose own viewer reads from OPFS and a local
+range-request controller (§14.2). Revisit only if a hosted deployment lands.
+
+**Do not silently drop the vocabulary.** Linearization stays visible in two
+places, both correct: the **Properties dialog** (§10.2) *reads and reports*
+whether a document is linearized, which PDFium does support; and
+`linearized.pdf` stays in the fixture corpus (§13) as a read-path fixture.
+T-083's acceptance criterion is a size reduction, never a `/Linearized`
+dictionary in the output.
 
 **Batch** (the Home tile) is this tab's operations applied to N files with a
 saved recipe — see §10.1.
@@ -2009,6 +2211,14 @@ Python, no office suite. What remains is genuinely desktop work: the shell,
 native file dialogs, localhost auth, code signing and notarisation, plus the
 two platforms you have not been developing on.
 
+**Two things make it less small than that paragraph reads, and both are
+licence/redistribution problems rather than code problems.** The bundled
+libvips dylib carries an LGPLv3 relink duty that constrains how the `.app` may
+be signed (step 9 below — the *only* place that decision is recorded), and
+`image_ocr` links live into `/opt/homebrew`, so OCR is not redistributable
+until T-180 lands. Budget them as their own work, not as notarisation
+paperwork.
+
 ### 12.1 Chosen path: Tauri v2 shell + Elixir release as a child process + ElixirKit
 
 **Tauri** `tauri` crate **2.11.x**. **ElixirKit** `elixirkit` **0.1.0**
@@ -2048,7 +2258,54 @@ production, which is the strongest available evidence that it works.
    T-019's ADR) or bundled dylibs with `install_name_tool` fix-ups. Verify
    with `otool -L` that no bundled binary links back into `/opt/homebrew`.
    **`File.chmod!(path, 0o755)` on first use** for anything executable — do
-   not assume the executable bit survives archive round-trips.
+   not assume the executable bit survives archive round-trips. This is the
+   step ADR 0002 names as the trigger for T-180: `image_ocr` links live into
+   `/opt/homebrew`, so a NIF built that way **cannot ship in a distributed
+   `.app`**, and `image_ocr` does not build on Windows at all — which blocks
+   T-183 independently of T-180.
+
+9. **The LGPLv3 §4 decision — this step is its only home.** §3.5 establishes
+   *that* the obligation exists (the bundled `libvips-cpp.8.18.3.dylib` is a
+   statically Combined Work conveyed under LGPL-3.0-or-later); this step is
+   where it is *discharged*. Do not re-decide it anywhere else.
+
+   **Decision: discharge LGPLv3 §4(d)(0) — convey the Minimal Corresponding
+   Source and enable relinking — rather than rebuild libvips against a v2.1
+   dependency set.** Rationale: the alternative means owning a from-source
+   libvips build across every target triple, which is strictly larger than
+   T-180's already-large Tesseract problem and buys only a licence-version
+   change. Note the two §4(d) options are alternatives and only (d)(0) is
+   available here: (d)(1)'s "suitable shared library mechanism" requires a
+   mechanism that "uses at run time a copy of the Library **already present on
+   the user's computer system**", which a dylib we ship inside our own bundle
+   is not. So (d)(1) is unavailable, and the replaceable-dylib packaging below
+   is not (d)(1) compliance — it is what makes the (d)(0) relink right real
+   rather than theoretical. It is a good fit because `vix.so` **already** links
+   libvips dynamically via
+   `@rpath/libvips-cpp.8.18.3.dylib` under
+   `LC_RPATH @loader_path/precompiled_libvips/lib` — the mechanism exists; it
+   is the *packaging* that currently defeats it by sealing the dylib inside a
+   signed bundle. Concretely, the `.app` MUST:
+
+   - keep `libvips-cpp.8.18.3.dylib` as a **replaceable file** in
+     `Contents/Frameworks/` (or `Contents/Resources/`), never `install_name_tool`-ed
+     into the NIF and never merged into a single binary;
+   - be **signed with the hardened runtime's library-validation exception**
+     (`com.apple.security.cs.disable-library-validation`), or a user-supplied
+     replacement dylib will be refused at load and the §4(d)(0) relink
+     right is not actually exercisable. **This is the load-bearing detail** — sign it the ordinary way
+     and the relink right is theoretical;
+   - ship the **complete corresponding licence texts** for every component
+     enumerated in §3.5, plus a written offer and a build recipe naming
+     `akash-akya/sharp-libvips` `v8.18.3-rc1`, since the artefact we consume
+     contains no licence files at all;
+   - state the LGPL-3.0-or-later notice in Settings → About alongside the
+     version table (§7.2).
+
+   T-180 owns the mechanics and T-181 owns the signing flags. If Apple ever
+   makes the library-validation exception unavailable for notarised
+   distribution, this decision reopens and the fallback is a v2.1 rebuild —
+   record that reversal here, not in §3.5.
 
 ### 12.2 Security for the localhost server
 
@@ -2162,7 +2419,8 @@ not be recorded.
 | Undo/redo (client op) | < 50 ms |
 | Thumbnail generation | ≤ 100 ms/page in the `:render` queue |
 | LiveView payload per interaction | < 50 KB |
-| BEAM memory per open document | < 50 MB (stream, never fully load) |
+| BEAM memory per open document | < 50 MB **in Elixir binaries** (stream; never hold a whole PDF in a process). **This budget does not cover the PDFium path** — see below |
+| **Native memory per in-flight PDFium call** | **≈ 1 full copy of the document, per worker, for the whole time it is queued.** Budget `render` + `transform` at `2 × max_document_size` and cap uploads accordingly |
 | **BEAM RSS, idle, 3 documents open** | **< 500 MB** — you are sharing this machine with a browser and an editor |
 | **OCR throughput** | ≥ 1 page/s at 300 DPI, single-language, `ocr: 1` |
 | **Scheduler stall during OCR + render** | **0** — `:timer.tc` on an unrelated process stays under 5 ms while both queues are saturated. This is the NIF dirty-scheduler property (T-021/T-022), re-asserted under real load. |
@@ -2225,28 +2483,74 @@ native PAdES/security-handler work) and are sized accordingly.
 | T-001 | Choose the project name and accent colour (§2). Create the repo: `mix phx.new . --app quire --module Quire --binary-id`, generated in place so the existing repo, plan and issue database stay put (LiveView is on by default in Phoenix 1.8). Phoenix 1.8.9, Elixir 1.20.2, OTP 28. |
 | T-200 | **Run `mix phx.gen.auth Accounts User users --live --binary-id --no-agents-md` immediately after `mix phx.new`, before anything else touches the schema or the markup.** It generates `Accounts`, `Accounts.User`, `Accounts.UserToken`, `Accounts.Scope` (the `current_scope` assign), `QuireWeb.UserAuth`, the auth LiveViews and session controller, the router blocks, **and the `users` + `users_tokens` migration** — so it must precede T-006 (which would otherwise duplicate `users` and break `mix ecto.migrate`), precede T-003 (it writes `{:bcrypt_elixir, "~> 3.0"}` into `mix.exs`), and precede T-025 (so its daisyUI markup is stripped in the same pass). Then: delete the generated citext extension line and retype `email` as `:string` with a `lower(email)` unique index plus `update_change(:email, &String.downcase/1)`; set `@primary_key {:id, Ecto.UUID, autogenerate: [version: 7]}` on both schemas and `default: fragment("uuidv7()")` on both PK columns; add a confirmed dev seed user to `priv/repo/seeds.exs`. |
 | T-002 | **Machine bootstrap (do this first).** Commit `mise.toml` and the `Brewfile` (Appendix B) before writing any Elixir: Xcode CLT, Homebrew, mise; `KERL_CONFIGURE_OPTIONS` set so OTP 28 builds against Homebrew OpenSSL; `mise install` green. |
-| T-003 | Pin deps in `mix.exs` (Appendix A): Oban, Req, Rustler, `ex_pdfium` (exact), `tesseract_elixir`, `vix`/`image`, `saxy`, `cloak_ecto`, `uniq`, `phoenix_test`, `stream_data`. Verify `mix deps.compile ex_pdfium` downloads a precompiled `aarch64-apple-darwin` NIF rather than building from source, and record which happened (§7.3). |
+| T-003 | Pin deps in `mix.exs` (Appendix A): Oban, Req, Rustler, `rustler_precompiled`, `ex_pdfium` (exact), `vix`/`image` (both exact-ish — the vix artefact carries a bundled libvips), `saxy`, `cloak_ecto`, `ecto` (explicitly, `~> 3.14.1`, for UUID v7 helpers), `phoenix_test`, `stream_data`. **Pin nothing from Appendix A's "deliberately absent" list** — two packages earlier drafts told you to pin belong there now, one because it has never existed and one because Ecto 3.14.1 replaced it; read that list before you edit `mix.exs`. OCR belongs to T-019, not here. Verify `mix deps.compile ex_pdfium` downloads a precompiled `aarch64-apple-darwin` NIF rather than building from source, and record which happened (§7.3). **Outcome recorded in ADR 0001: it downloads; no Rust needed for `ex_pdfium`.** |
 | T-004 | ∥ Local services: `brew services start postgresql@18`; create the `quire_dev` / `quire_test` databases; apply the two `postgresql.conf` changes from §3.7. |
-| T-005 | ∥ `mise run check`: format check, Credo strict, Dialyzer, `mix test`, Sobelow, `mix deps.audit` (vulnerabilities) **and a dependency-licence scan** (GPL/AGPL guard, §3.5 — a separate concern from vulnerabilities), plus T-014's guard and `mise run doctor`. Wire it as a **git pre-push hook**, not a CI service — there is no CI in v1, so the hook is the only thing standing between you and a broken `main`. |
+| T-005 | ∥ `mise run check`: format check, Credo strict, Dialyzer, `mix test`, Sobelow, `mix deps.audit` (vulnerabilities) **and a dependency-licence scan** (GPL/AGPL guard, §3.5 — a separate concern from vulnerabilities), plus T-014's guard and `mise run doctor`. Wire it as a **git pre-push hook**, not a CI service — there is no CI in v1, so the hook is the only thing standing between you and a broken `main`. **The scanner's rules are specified below — a naive "substring GPL fails the build" implementation fails on every run of this repo today.** |
 | T-006 | Ecto migrations for §5.1–5.2 — **not `users` or `users_tokens`, which T-200's `phx.gen.auth` migration already created**; T-006 adds only the tables that reference them (settings, licenses, documents, revisions, pages, recents, `document_page_text`). UUID v7 primary keys with `DEFAULT uuidv7()`; `document_page_text.search` is `GENERATED ALWAYS AS (...) STORED` with a GIN index. **Assert no `CREATE EXTENSION` appears in any migration.** |
 | T-007 | Ecto migrations for §5.3–5.6 (editing, annotations, forms, security, signing, e-sign, jobs, translation, cloud). |
 | T-008 | `Quire.Storage` behaviour + `Storage.Ref` (§7.1). |
 | T-009 | `Storage.Web` + the `:filesystem` backend (two-level key fan-out, atomic rename-into-place, zero-copy `with_local_path/2`). Full test suite. Add the `:s3` stub that raises, with its `StorageCase` run `@tag :skip`. |
 | T-010 | `Storage.Local` adapter (§12). Same test suite, run against both adapters via a shared `StorageCase`. |
 | T-011 | `Quire.Engine` registry + boot self-check skeleton (§7.2): behaviour definitions, telemetry conventions, structured error taxonomy. |
-| T-012 | Engine wrapper modules with unit tests against fixtures (no feature code yet): `Render.Pdfium`, `Ocr.Tesseract`, `Ocr.Preprocess` (vix), `Compose` primitives. |
+| T-012 | Engine wrapper modules with unit tests against fixtures (no feature code yet): `Render.Pdfium`, `Quire.Pdf` (the `lopdf` NIF — load/save, dictionary read/write, `save_modern` with object + xref streams), `Ocr.Tesseract`, `Ocr.Preprocess` (vix), `Compose` primitives. |
 | T-013 | Boot-time engine self-check + version table + graceful per-feature degradation (§7.2). Three states (`ok` / `degraded` / `unavailable`), shared with `mise run doctor` and Settings → About. |
 | T-014 | **Guard check**: fail if `File.`, `Path.` (calls, not `Path.t()` typespecs), `System.cmd` or `System.tmp_dir` appear outside `lib/quire/storage.ex`, `lib/quire/storage/`, `lib/quire/engine.ex` and `test/support/`. A Credo custom check is preferable to grep precisely because it can tell a call from a typespec. Runs in `mise run check`. |
-| T-015 | Oban config + queues (§7.5) + a `Quire.Workers.Base` with progress reporting and idempotency helpers. Laptop-sized concurrency, derived from performance cores at boot. |
+| T-015 | Oban config + queues (§7.5) + a `Quire.Workers.Base` with progress reporting and idempotency helpers. Laptop-sized concurrency, derived from performance cores at boot — **except `render` and `transform`, which are fixed at 1 and MUST NOT be derived from cores.** `ex_pdfium` serialises every call behind a process-wide mutex (§3.3), so PDFium's effective parallelism is 1; a core-derived width there buys contention and a second full copy of each document in native memory per blocked worker, and no throughput. Assert the fix in a test, so a later "tune the queues" commit cannot quietly reintroduce it. |
 | T-016 | **Build the fixture corpus** (§13) and commit it, including the Office fixtures. |
 | T-017 | `Quire.Render` behaviour (§7.3) + `Render.Client` fallback (browser-captured thumbnails). |
-| T-018 | `Render.Pdfium` via `ex_pdfium`, pinned exactly. Full callback surface: render, text/spans, search, geometry, outline, attachments, images, page import, page objects, save. |
-| T-019 | `Ocr.Tesseract` via `tesseract_elixir` + `Ocr.Preprocess` via vix. Pin versions; decide in an ADR whether Tesseract is vendored/static or a Homebrew dependency (this decision returns in T-181 at packaging time). |
+| T-018 | `Render.Pdfium` via `ex_pdfium`, pinned exactly. Full callback surface: render, text/spans, search, geometry, **outline read**, attachments, images, page import, page objects, save. **Also owns the crop-origin conversion** (§3.3): every spatial result comes back in the MediaBox frame while `render_page/3` rasterises the CropBox region, and `ExPdfium.bounds_to_pixels/3` does not reconcile them — subtract `boxes.crop`, fall back to `boxes.media` yourself, compose page `/Rotate`, and add a `crop_nonzero_origin.pdf` fixture. Outline *write* is not here; it is `Quire.Pdf.Outline`. |
+| T-018a | **`Quire.Pdf` — the Rustler NIF over `lopdf` 0.44.0** (§3.3). Load/save, `save_modern` with object + xref streams, catalog and dictionary mutation, `IncrementalDocument`, `authenticate_password/1`, `Bookmark`/`Outline`. Mark every NIF `DirtyCpu` and bound its inputs (§7.2) — this one is ours, so nobody upstream did it for us. It is compiled from source on every `mix compile`, so **this is the task that makes Rust ≥ 1.91 a hard prerequisite**; verify a clean-checkout build before Gate 0 depends on it. |
+| T-019 | `Ocr.Tesseract` via **`image_ocr == 0.2.0`** + `Ocr.Preprocess` via vix. **The engine choice is already made in ADR 0002**; the two packages it rejected are in Appendix A's "deliberately absent" list with the reasons. What remains here is integration: uncomment the dep, wire `Quire.Ocr.Tesseract`, add `brew "pkgconf"` to the `Brewfile` (**mandatory** — `image_ocr`'s Makefile needs `pkg-config`, Xcode CLT does not ship it, and it is a build-only dep of the tesseract formula so pouring the bottle does not install it), and keep `brew "tesseract"` for `osd.traineddata`, which auto-rotate needs and `tesseract-lang` does not provide. `tesseract-lang` (~1.5 GB) can be dropped — `image_ocr` vendors `eng` and fetches packs on demand (T-141). Vendored-vs-Homebrew redistribution is **deferred to T-180**, whose trigger is named in ADR 0002. |
 | T-020 | Render + OCR tests against the whole corpus, asserting identical page counts and geometry across code paths, and **running every fixture through every NIF as a crash-fuzz pass**. |
 | T-021 | **GATE: verify `ex_pdfium` schedules on dirty CPU schedulers.** Benchmark: render 20 pages concurrently while measuring scheduler utilisation and the latency of an unrelated `:timer.tc` loop. If it stalls, patch or vendor a fork (MIT — painless) and record the decision in an ADR. Run it plugged in — see §14.1. |
 | T-022 | **GATE: same verification for the Tesseract and vix NIFs** under a 10-page OCR job. Same remedies. |
 | T-023 | `EditSession` GenServer + DynamicSupervisor + Registry (§7.4). |
 | T-024 | `Editing.Operation` + one module per op kind with `apply/2` and `invert/1`. Property test: `apply ∘ invert ∘ apply == apply` for all kinds. Update-shaped ops capture their inverse via PG18 `RETURNING OLD.*, NEW.*` in a single statement. |
+
+#### T-005's licence scanner — the rules, because the obvious implementation is wrong
+
+The scan reads each dependency's `deps/<name>/hex_metadata.config`
+`licenses` field. Three things about this repo's actual dependency graph
+break a naive scanner, and all three must be handled before the hook goes
+live:
+
+1. **Not every licence string is SPDX.** `deps/yamerl/hex_metadata.config`
+   declares `BSD 2-Clause` — spaces, not hyphens — which no SPDX matcher
+   recognises. **Normalise before matching** (case-fold, collapse whitespace
+   to hyphens, then map a small alias table), and keep the alias table in the
+   repo where it can be reviewed. §3.5's rule stands: a licence field the
+   scanner cannot parse is reported **unknown**, never clean.
+2. **Not every dependency has Hex metadata at all.** `heroicons` and
+   `daisyui` are `github:` deps with no `hex_metadata.config` — `deps/heroicons`
+   contains only `.git/` and `optimized/`. A "fail loudly on anything
+   unrecognised" rule as usually written therefore **fails on every run**.
+   Carve them out explicitly: maintain a short allowlist of non-Hex deps
+   keyed by name **and** git tag, each with its licence recorded by hand and
+   a comment saying who checked. Adding a name to that list is a review
+   event; a *new* non-Hex dep that is not on it still fails the build.
+3. **`LGPL-3.0-or-later` must be an explicit allow-entry, not a "GPL" hit.**
+   The §3.5 obligation is real but it is not a ban, and a scanner keyed on
+   the substring `GPL` fires on it. Match on **normalised whole tokens**, not
+   substrings. The allow list is: MIT, Apache-2.0, BSD-2-Clause,
+   BSD-3-Clause, **BSD-4-Clause**, ISC, `LGPL-3.0-or-later` (vix's bundled
+   libvips only, §3.5), MPL (cairo, inside the same dylib). The deny list is
+   `GPL-*` and `AGPL-*` without an `L` prefix. Anything else is unknown → fail.
+
+   **BSD-4-Clause is on that list because `bcrypt_elixir` declares it** —
+   `deps/bcrypt_elixir/hex_metadata.config` reads
+   `{<<"licenses">>,[<<"BSD-3-Clause">>,<<"ISC">>,<<"BSD-4-Clause">>]}`. It is
+   the third of the three deps that break a naive scanner, alongside `yamerl`'s
+   non-SPDX string and the metadata-less `github:` sources. Omitting it fails
+   the build on the unmodified graph, which is exactly what this section exists
+   to prevent. (BSD-4-Clause carries the advertising clause, so it is an
+   attribution obligation for T-180, not a distribution problem.)
+
+The scanner also owns one thing a licence field cannot tell it: **the Hex
+`licenses` field describes the package, not the binary it downloads.** `vix`
+declares `MIT` and ships an LGPL-3.0-or-later dylib. Keep a hand-maintained
+note of packages whose *artefact* licence differs from their declared one
+(today: `vix`, and `ex_pdfium` for the bundled `libpdfium`), and assert that
+list is non-empty rather than trying to derive it.
 
 **Gate 0:** `mise run doctor` is green on a **clean checkout on a second
 machine** (or a fresh macOS user account — this is the test that replaces "it
@@ -2255,7 +2559,9 @@ migration creates an extension; the journal property test passes for every
 op kind; the corpus crash-fuzz pass is clean; `mix ecto.migrate` runs clean
 from an empty database with exactly one `users` migration; the seed user logs
 in and `on_mount {QuireWeb.UserAuth, :require_authenticated}` rejects an
-anonymous session; T-021 and T-022 have written outcomes.
+anonymous session; T-021 and T-022 have written outcomes; **`mise run check`'s
+licence scan passes on the unmodified dependency graph** — if it fails on
+`yamerl` or `heroicons` it is not configured, it is broken.
 
 ---
 
@@ -2297,7 +2603,7 @@ axe reports zero critical issues.
 | T-044 | Document open pipeline (§10.3) including encryption detection and the password prompt. |
 | T-045 | Thumbnail render worker + `document_pages.thumbnail_ref` caching. |
 | T-046 | Thumbnails panel (virtualised) with current-page sync. |
-| T-047 | ∥ Bookmarks panel: read the outline, navigate, add/rename/delete/reorder. |
+| T-047 | ∥ Bookmarks panel: read the outline via `Render.Pdfium`, navigate, add/rename/delete/reorder via **`Quire.Pdf.Outline`** — PDFium's public API is getters only (§3.3), and `@cantoo/pdf-lib` has no bookmark API at all, so the five `doc.bookmark_*` ops stay **server-authoritative** and their §7.4 undo payloads are unchanged. Depends on T-018a. |
 | T-048 | ∥ Search panel via `PDFFindController`: highlight-all, match case, whole word, result list, ↑/↓ navigation. Above a page-count threshold, fall back to the server-side `document_page_text` index (§5.2) with `websearch_to_tsquery`, mapping hits back to page + rect via the stored spans. The two paths must present identically. |
 | T-049 | ∥ Attachments panel: list, preview, extract, add, remove. |
 | T-050 | ∥ Layers (OCG) panel. |
@@ -2328,7 +2634,7 @@ the server-side search fallback returns the same hits as the client path on
 | T-062 | Insert (blank / from file / clipboard / scan). |
 | T-063 | ∥ Extract, Replace, Reverse, Delete, Rotate (persistent). |
 | T-064 | ∥ Background (colour / image / PDF) via page objects. |
-| T-065 | ∥ Size and Margin (box manipulation + content transform). |
+| T-065 | ∥ Size and Margin (box manipulation + content transform). Box *set* is not bound by `ex_pdfium` today but **is** reachable through pdfium-render's `boundaries_mut()`, so this is **not** doubly blocked: it ships with the D4 upstream PR (§3.3), not with a rewrite. Form XObject / place-a-page-on-a-page rides the same PR, which is why T-064's "background: another PDF" needs no rasterise fallback. |
 | T-066 | Export images (PDFium image extraction → ZIP). |
 | T-067 | Page crop (interactive, CropBox-only) + Remove crop. |
 | T-068 | Wire every page op through the journal with working undo. |
@@ -2358,9 +2664,9 @@ with undo at every step, and the result opens correctly in Acrobat.
 | T-078 | PDF to HTML (render + positioned text spans, single self-contained file). |
 | T-079 | Clipboard to PDF. |
 | T-080 | Scan to PDF (camera capture, deskew via vix, contrast). |
-| T-081 | Merge wizard (reorder, per-file ranges, bookmark/form handling) via PDFium page import. |
+| T-081 | Merge wizard (reorder, per-file ranges, **bookmark and form handling**) via PDFium page import. ⚠️ `append/2` and `extract_pages/2` **drop `/AcroForm` and `/Outlines`** while leaving widget annotations behind, so the naive output *looks* like a form and is not one — the documented "keep forms" option is unimplementable through `append/2` alone. `Quire.Pdf.AcroForm` re-attaches both after import (§3.3). |
 | T-082 | Split (all five modes in §9.2) → ZIP. |
-| T-083 | Compress with presets (image recompression pipeline) and a before/after preview. |
+| T-083 | Compress with presets (image recompression pipeline) and a before/after preview. **Rebuild is object streams + xref streams via `Quire.Pdf`, and produces no linearization** — neither PDFium nor `lopdf` can linearize, so the acceptance criterion is a measured size reduction, never a `/Linearized` dictionary (§9.2). |
 | T-084 | **PDF to PDF/A** — `Quire.PdfA` best-effort conversion + the built-in structural conformance report, shown to the user either way, labelled "best-effort" (§9.2). |
 | T-085 | New ▾ (blank, template, from file/clipboard/scanner). |
 | T-086 | Operation progress UI: status strip + toasts driven by PubSub. |
@@ -2561,7 +2867,7 @@ provider.
 | T-177 | Localhost auth plug (32-byte per-run token, `secure_compare`, ETS sessions). Keep `check_origin: true`. |
 | T-178 | Switch to `Storage.Local`; wire `pick_open`/`pick_save` to the Tauri dialog plugin via a hook. |
 | T-179 | Real Local Folders + drive listing in the backstage Computer pane — **no LiveView changes**, adapter only. Verify this. |
-| T-180 | Native-library redistribution: verify the PDFium and libvips dylibs travel inside their NIF artefacts; make Tesseract + tessdata redistributable per the T-019 ADR (static link preferred); `otool -L` every binary and confirm nothing links back into `/opt/homebrew`. **Budget more than a day for this task alone.** |
+| T-180 | Native-library redistribution: verify the PDFium and libvips dylibs travel inside their NIF artefacts; make Tesseract + tessdata redistributable per ADR 0002; `otool -L` every binary and confirm nothing links back into `/opt/homebrew`. Also ship the **complete LGPL-3.0-or-later licence set** for everything statically inside `libvips-cpp.8.18.3.dylib` (§3.5) — the artefact we consume contains no licence files — and confirm cairo's exact MPL version while you are in there. **Budget more than a day: this is bigger than the plan's original estimate.** The `image_ocr` dylib closure alone is 14 libraries, the exit is a per-triple precompile matrix rather than a static link on macOS, and **T-183 is blocked independently of this task** — `image_ocr` does not build on Windows at all, so a macOS static link does not unblock it. |
 | T-181 | Window controls in the title bar wired to the shell. |
 | T-182 | macOS: entitlements (`allow-jit`, `allow-unsigned-executable-memory`, `allow-dyld-environment-variables`, `disable-library-validation`), codesign step, notarisation. |
 | T-183 | ∥ Windows: MSI/NSIS, code signing, WebView2 bootstrap. |
@@ -2599,42 +2905,73 @@ phase** (if it did, §7.1 was violated — fix that instead).
 
 ### Appendix A — Hex dependencies
 
-Pin all of these; re-verify versions on Hex at adoption (Appendix D).
+⚠️ **`mix.exs` is authoritative, not this table.** T-003 pinned every
+requirement below against the live Hex registry and amended the plan where
+they disagreed; the versions here are the amended ones. If they ever diverge
+again, `mix.exs` wins and this table is the thing that is wrong.
 
 | Dependency | Version | Purpose |
 |---|---|---|
 | phoenix | ~> 1.8.9 | Web framework |
-| phoenix_ecto, ecto_sql, postgrex | ~> 4.6 / ~> 3.13 | Database (Postgrex speaks PG18 unchanged) |
-| phoenix_html | ~> 4.1 | HTML |
-| phoenix_live_reload | ~> 1.5 (dev) | Live reload |
-| phoenix_live_view | ~> 1.2.7 | LiveView + colocated hooks |
-| phoenix_live_dashboard | ~> 0.8 | Telemetry UI (T-191) |
-| esbuild, tailwind | Hex wrappers (dev) | Assets (darwin-arm64 standalone binaries) |
-| heroicons | v2.2.0 (git, sparse) | Icons (§8.4) |
-| swoosh | ~> 1.16 | Mail (QAT email, e-sign envelopes) |
-| req | ~> 0.5 | HTTP (URL fetch, TSA, cloud, translate) |
-| telemetry_metrics, telemetry_poller | ~> 1.0 / ~> 1.1 | Telemetry |
-| gettext | ~> 0.26 | i18n (T-188) |
+| phoenix_ecto | ~> 4.7 | Phoenix ↔ Ecto integration |
+| ecto | **~> 3.14.1** | Declared explicitly for UUID v7. The *helpers* §3.7 uses (`to_datetime/1`, `to_unix/2`, `version/1`) landed in 3.14.1, not 3.14.0 — `ecto_sql`'s floor alone admits a version that cannot do this |
+| ecto_sql | ~> 3.14 | Migrations, SQL adapter |
+| postgrex | ~> 0.22 | Database driver (speaks PG18 unchanged) |
+| bcrypt_elixir | ~> 3.3 | Password hashing — added by `phx.gen.auth` in T-200 |
+| phoenix_html | ~> 4.3 | HTML |
+| phoenix_live_reload | ~> 1.6 (dev) | Live reload |
+| phoenix_live_view | ~> 1.2.7 | LiveView + colocated hooks. Floor is 1.2.7 per §3.1; do not relax it |
+| phoenix_live_dashboard | ~> 0.8.7 | Telemetry UI (T-191) |
+| esbuild, tailwind | ~> 0.10 / ~> 0.5 (dev) | Assets (darwin-arm64 standalone binaries) |
+| heroicons | v2.2.0 (git, sparse) | Icons (§8.4). **No Hex metadata — see T-005's scanner carve-out** |
+| swoosh | ~> 1.26 | Mail (QAT email, e-sign envelopes) |
+| req | **~> 0.7.1** | HTTP (URL fetch, TSA, cloud, translate). 0.7.0 was breaking; `~> 0.7` is not a bound — see §3.1 |
+| telemetry_metrics, telemetry_poller | ~> 1.1 / **~> 1.3** | Telemetry |
+| gettext | **~> 1.0** | i18n (T-188). gettext 1.0 has shipped; the old `~> 0.26` predates it |
 | jason | ~> 1.4 | JSON |
-| dns_cluster | ~> 0.1 | Inert locally (§1.2) |
-| bandit | ~> 1.5 | HTTP server |
-| oban | ~> 2.18 | Jobs (§7.5) |
+| dns_cluster | **~> 0.2.0** | Inert locally (§1.2). The generator's bound is tighter than `~> 0.1` and correct |
+| bandit | **~> 1.12** | HTTP server |
+| oban | **~> 2.23** | Jobs (§7.5) |
 | ex_pdfium | == 0.5.1 | PDFium NIF — exact pin, T-021 (§3.3) |
-| rustler | ~> 0.38 | NIF builds |
-| tesseract_elixir | pin at adoption (T-019) | Tesseract NIF — exact pin, T-022 (§3.3) |
-| vix + image | pin at adoption (T-019) | libvips NIF: image normalisation, deskew, recompression (§3.3) |
-| saxy | ~> 1.x | Fast XML parsing for the OOXML reader |
+| rustler | ~> 0.38, `runtime: false` | Builds `Quire.Pdf`; also the `EXPDFIUM_BUILD=1` fallback and Tauri. **Sets the Rust 1.91 floor** |
+| rustler_precompiled | **~> 0.8.4** | Performs the `ex_pdfium` artefact download. `ex_pdfium` asks for `~> 0.8`, which floats to 0.9.0 — hold the 0.8 line (ADR 0001) |
+| vix | **== 0.40.0** | libvips NIF. Exact, because the artefact carries a bundled libvips — a minor bump swaps a native library. See §3.5 on its licence |
+| image | **~> 0.72.0** | vix's principal consumer, pinned to the same granularity: letting it float means a future release that raises its vix floor makes the pair hard-unsatisfiable |
+| saxy | **~> 1.6** | Fast XML parsing for the OOXML reader. The old `~> 1.x` is **not valid Mix syntax** and raises `Version.InvalidRequirementError` |
 | elixlsx | ~> 0.6 | xlsx writer (MAY — a native writer is the alternative, T-074) |
-| chromic_pdf | == 1.17.1 | URL/HTML → PDF via system Chromium (§3.3) |
+| chromic_pdf | == 1.17.1 | URL/HTML → PDF via system Chromium (§3.3). **`print_to_pdf` only** — its PDF/A path shells out to Ghostscript (AGPL-3.0), which §3.4 forbids; PDF/A is `Quire.PdfA` (T-084) |
 | cloak_ecto | ~> 1.3 | Cloud OAuth tokens at rest (§5.6) |
-| uniq | ~> 0.6 | UUID v7 generation Elixir-side (§3.7) |
-| benchee | dev/test | Benchmarks (T-021, T-058, T-189) |
-| phoenix_test + lazy_html | test | LiveView testing |
-| stream_data | dev/test | Property tests (§13) |
-| credo, dialyxir, sobelow, mix_audit | dev/test | `mise run check` (T-005) |
+| benchee | ~> 1.5 (dev/test) | Benchmarks (T-021, T-058, T-189) |
+| phoenix_test + lazy_html | ~> 0.11.1 / ~> 0.1.12 (test) | LiveView testing |
+| stream_data | ~> 1.4 (dev/test) | Property tests (§13) |
+| credo, dialyxir, sobelow, mix_audit | ~> 1.7 / ~> 1.4 / ~> 0.14 / ~> 2.1 (dev/test) | `mise run check` (T-005) |
 
-**Deliberately absent:** daisyUI (§3.1), and anything that shells out to an
-external document tool — the engine layer is §3.3, in-BEAM only (§3.4).
+**Owned by T-019, deliberately not pinned yet:**
+
+| Dependency | Version | Purpose |
+|---|---|---|
+| image_ocr | `== 0.2.0` | Tesseract NIF (ADR 0002). Commented out in `mix.exs` on purpose: uncommenting makes a Homebrew Tesseract a hard build prerequisite for every developer, and that should land with the integration, not ahead of it |
+
+**Deliberately absent, and why — do not "helpfully" re-add these:**
+
+- **`tesseract_elixir` — it does not exist and never has.** This is the one
+  and only place in the plan that names it, deliberately: earlier drafts had
+  rows for it in this appendix, in Appendix D, in T-003 and in T-019, and
+  `mix hex.info` returns "No package with name tesseract_elixir" for all of
+  them. It was **deleted, not version-corrected**. ADR 0002 replaced it with
+  `image_ocr`. Do not reintroduce the name anywhere but this bullet.
+- **`tesseract_ocr`** — the highest-download "tesseract" package on Hex, and
+  disqualified: it shells out via `System.cmd("tesseract", ...)`, which §3.4
+  forbids outright.
+- **`tesserax`** — a real MIT in-process NIF, but it reports **no per-word
+  confidence at all**, which §9.10 requires, and it has a one-byte heap
+  overflow on every recognition. Either alone settles it.
+- **`uniq`** — deleted per ADR 0001/T-003, and likewise named only here.
+  Ecto 3.14.1 supplies UUID v7 generation, timestamp extraction **and** a
+  monotonic precision mode that this package does not have at all. Adding it
+  would mean two UUID implementations with different ordering guarantees.
+- **daisyUI** (§3.1), and anything that shells out to an external document
+  tool — the engine layer is §3.3, in-BEAM only (§3.4).
 
 ### Appendix B — Local toolchain files
 
@@ -2645,8 +2982,10 @@ specified here; write them exactly.
 #### B.1 `mise.toml`
 
 - `[tools]`: `erlang = "28.1"`, `elixir = "1.20.2-otp-28"`,
-  `node = "24"` (asset vendoring + Playwright only), `rust = "1.90"`
-  (NIF fallback builds; Tauri in Phase 13). **No Java, no Python.**
+  `node = "24"` (asset vendoring + Playwright only), **`rust = "1.91"`** —
+  set by rustler 0.38.0's declared `rust-version`, which cargo enforces with
+  no override. Rust is **on the happy path**, not a fallback: `Quire.Pdf`
+  (§3.3) compiles from source on every `mix compile`. **No Java, no Python.**
 - `[env]`: `MIX_ENV`, `ERL_AFLAGS` (shell history), `QUIRE_DATA_DIR`
   pointing at `<repo>/_data/storage`, and `KERL_CONFIGURE_OPTIONS` per §3.6.3.
 - Tasks: `setup` (hex/rebar install, deps.get, ecto.create+migrate, npm ci,
@@ -2673,7 +3012,9 @@ Deliberately tiny — the whole point of this architecture:
 | `brew "postgresql@18"` | Database (18.4) |
 | `brew "openssl@3"` | kerl needs it to build OTP crypto |
 | `brew "autoconf"` | kerl |
-| `brew "tesseract"` + `brew "tesseract-lang"` | **Only if** the T-019 ADR chooses a system Tesseract over a vendored/static one. `tesseract-lang` is ~1.5 GB; drop it and let T-141 download packs on demand if that is too much |
+| `brew "tesseract"` | **Required** — ADR 0002 chose a system Tesseract (5.5.3) + Leptonica for v1, revisited at T-180. Keep the **base** formula specifically: it ships `osd.traineddata`, which §9.10's auto-rotate needs and `tesseract-lang` does not provide |
+| `brew "pkgconf"` | **Required, and a Gate 0 blocker if omitted.** `image_ocr`'s Makefile shells out to `pkg-config`; Xcode CLT does not ship it, and pkgconf is a *build-only* dependency of the tesseract formula (`brew deps --include-build tesseract` lists it, `brew deps tesseract` does not), so pouring the bottle does not install it. On a clean second machine — exactly the machine Gate 0 tests — the build dies with `ERROR: image_ocr requires tesseract >= 5.0.0 (found none)` |
+| ~~`brew "tesseract-lang"`~~ | **Dropped** (~1.5 GB). `image_ocr` vendors `eng` tessdata_fast in `priv/` and fetches further packs on demand, so T-141 can install languages without the up-front cost. Re-add only if `osd` is ever unavailable from the base formula |
 | `cask "chromium"` | URL→PDF / Office→PDF renderer; alternatively reuse an installed Chrome — either way the path is explicit config, never discovery (§3.6.6) |
 
 Pin with `brew bundle --no-upgrade` so an unrelated `brew upgrade` does not
@@ -2699,7 +3040,9 @@ The doctor table (all asserted at boot and by `mise run doctor`):
 
 | ID | Risk | Impact | Mitigation |
 |---|---|---|---|
-| **R-01** | `ex_pdfium` is young and may block BEAM schedulers or crash the VM | High | T-021 gate; exact pin; vendor/patch a fork (MIT); corpus crash-fuzz in Phase 0 and T-197; `Render.Client` fallback for thumbnails |
+| **R-01** | `ex_pdfium` is young and may block BEAM schedulers or crash the VM | High | T-021 gate; exact pin; vendor/patch a fork (MIT); corpus crash-fuzz in Phase 0 and T-197; `Render.Client` fallback for thumbnails. **Note the "patch the MIT fork" escape does not reach every gap:** outline write and linearizing save are absent from PDFium's own public C headers, so no fork produces them (§3.3) — that is why `Quire.Pdf` exists and why linearization was dropped rather than deferred |
+| **R-01a** | **`image_ocr` is very young for something load-bearing** — 2 releases, 160 all-time downloads, 3 GitHub stars. The maintainer is Kip Cole (`image`, the ex_cldr suite), which is real credibility, but this specific package has near-zero field exposure | Medium | `== 0.2.0` exact pin, deliberately; the package is ~290 lines of C++ and forkable if abandoned; ADR 0002 names five explicit triggers for revisiting, of which "goes unmaintained or archived" is one |
+| **R-01b** | **PDFium throughput is capped at one call VM-wide** by `ex_pdfium`'s process-wide `PDFIUM_LOCK`, and the T-056 benchmark plus the Gate 2 bar were both set without knowing this | Medium | §7.5 fixes `render`/`transform` at 1 and T-015 asserts it; re-derive the 500-page benchmark expectation and the Gate 2 bar against a serialised engine before either is treated as a pass/fail line. Escapes, in order of cost: the D4 fork with per-document locks *if* PDFium proves per-instance thread-safe (upstream is not thread-safe globally, so the lock may simply be correct), or a second BEAM node |
 | **R-02** | pdf.js 6.x is ESM-only and asset-path-sensitive | Medium | T-040 dedicated task; verify CJK + JPEG2000 fixtures render |
 | **R-03** | **Native OOXML conversion fidelity disappoints** — an in-house reader/writer cannot match a full office suite on complex layouts | High | State expectations in-product (§9.2); aim for "layout recognisably intact" on business documents (Gate 4); the reader's layout model is versioned so fidelity improves without re-architecting; worst case a document converts as rendered images with a text layer — never as garbage |
 | **R-04** | **In-house crypto is wrong** (PAdES / AESV3 written in Elixir) | High | RFC test vectors in unit tests; Gate 8 interoperability bar against Acrobat in both directions; regression suite (T-138); never silently re-sign (`max_attempts: 1`); validation failures surface, never swallow |
@@ -2732,19 +3075,44 @@ own machine; this table is only what was current when the plan was written.
 | Phoenix LiveView | 1.2.7 | MIT |
 | pdfjs-dist | 6.1.200 | Apache-2.0 |
 | @cantoo/pdf-lib | 2.7.4 | MIT |
-| PDFium | 151.0.7891.0 | BSD-3 + Apache-2.0 |
-| pdfium-render | 0.9.3 | MIT / Apache-2.0 |
+| PDFium | **144.0.7543.0** — whatever `ex_pdfium 0.5.1` bundles. **Nothing may rely on a post-144 API** | BSD-3 + Apache-2.0 |
+| pdfium-render | **0.8.37** (exact — `ex_pdfium` pins `=0.8.37`) | MIT / Apache-2.0 |
 | ex_pdfium | 0.5.1 | MIT |
-| tesseract_elixir | pin latest 0.x at adoption (T-019) | MIT (binding); Tesseract itself Apache-2.0 |
-| Tesseract | 5.5.x | Apache-2.0 |
-| vix / image | pin latest at adoption (T-019) | MIT (binding); libvips LGPL-2.1 dynamically linked |
+| lopdf | 0.44.0 — the `Quire.Pdf` NIF (§3.3) | MIT |
+| image_ocr | 0.2.0 | Apache-2.0 (binding); Tesseract itself Apache-2.0 |
+| Tesseract | 5.5.3 (Homebrew) | Apache-2.0 |
+| Leptonica | 1.87.0 (Homebrew) | BSD-2-Clause |
+| vix / image | **0.40.0 (exact) / 0.72.0** | MIT (**bindings only**) |
+| **libvips**, as bundled in the vix artefact (`libvips-cpp.8.18.3.dylib`, from `akash-akya/sharp-libvips` `v8.18.3-rc1`) | 8.18.3 | **LGPL-3.0-or-later** — a statically Combined Work, **not** "LGPL-2.1 dynamically linked". Component inventory and evidence in §3.5; obligation discharged at §12.1 step 9 |
 | Rustler | 0.38.0 | MIT / Apache-2.0 |
+| rustler_precompiled | 0.8.4 | Apache-2.0 |
 | chromic_pdf | 1.17.1 | Apache-2.0 |
-| Saxy | 1.x | MIT |
-| elixlsx | 0.6.x | MIT |
-| Oban | 2.18.x | Apache-2.0 / commercial (Oban Web/Pro not used) |
+| Saxy | 1.6.1 | MIT |
+| elixlsx | 0.6.0 | MIT |
+| Oban | **2.23.x** | Apache-2.0 / commercial (Oban Web/Pro not used) |
 | Tauri | 2.11.5 — Phase 13 only | MIT / Apache-2.0 |
 | ElixirKit | 0.1.0 — Phase 13 only | Apache-2.0 |
+
+**Transitive Hex dependencies the earlier table omitted.** T-005's scanner
+reads all of these, so they are recorded here rather than discovered by a red
+pre-push hook:
+
+| Component | License as declared on Hex |
+|---|---|
+| yaml_elixir | MIT |
+| yamerl | **`BSD 2-Clause`** — declared with spaces, **not** the SPDX `BSD-2-Clause`. See T-005's normalisation rule |
+| bunt | MIT |
+| erlex | Apache-2.0 |
+| deep_merge | MIT |
+| statistex | MIT |
+| comeonin | BSD-3-Clause |
+| color | Apache-2.0 |
+| sweet_xml | MIT |
+
+**Appendix E's GPL/AGPL gate PASSES**, verified across all 71 Hex
+dependencies: every one resolves to Apache-2.0, MIT, BSD or ISC. §3.5's
+copyleft entries are about *obligations being larger than recorded*, not
+about a banned licence being present.
 
 ### Appendix E — Definition of done (every task)
 
