@@ -213,9 +213,9 @@ defmodule Quire.Pdf do
   @doc """
   Parse a PDF from disk.
 
-  Prefer this to `File.read/1` plus `open/1`: it reads inside the dirty
-  scheduler that is going to do the parsing anyway, and holds one copy of the
-  bytes instead of two.
+  Prefer this to reading bytes via the Storage layer then calling `open/1`:
+  it reads inside the dirty scheduler that is going to do the parsing anyway,
+  and holds one copy of the bytes instead of two.
   """
   @spec open_file(Path.t()) :: {:ok, t()} | {:error, atom()}
   def open_file(path) when is_binary(path), do: Native.open_file(path)

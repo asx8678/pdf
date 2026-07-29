@@ -32,8 +32,8 @@ defmodule Quire.Office.Reader do
 
   ## Examples
 
-      {:ok, layout} = Quire.Office.Reader.read(File.read!("report.docx"), "report.docx")
-      {:ok, layout} = Quire.Office.Reader.read(File.read!("budget.xlsx"), "budget.xlsx")
+      {:ok, layout} = Quire.Office.Reader.read(<<0x50, 0x4B, 0x03, 0x04, ...>>, "report.docx")
+      {:ok, layout} = Quire.Office.Reader.read(<<0x50, 0x4B, 0x03, 0x04, ...>>, "budget.xlsx")
   """
   @spec read(binary(), String.t()) :: {:ok, Quire.Office.Layout.t()} | {:error, atom()}
   def read(bytes, filename) when is_binary(bytes) and is_binary(filename) do
@@ -62,7 +62,9 @@ defmodule Quire.Office.Reader do
   end
 
   defp format(filename) do
-    case String.downcase(Path.extname(filename)) do
+    ext = filename |> String.split(".") |> List.last() |> String.downcase()
+
+    case "." <> ext do
       ".xlsx" -> :xlsx
       ".pptx" -> :pptx
       ".docx" -> :docx

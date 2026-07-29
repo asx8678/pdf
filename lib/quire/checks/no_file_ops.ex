@@ -8,11 +8,12 @@ defmodule Quire.Checks.NoFileOps do
     - `lib/quire/storage/*.ex`
     - `lib/quire/engine.ex`
     - `test/support/*.ex`
+    - `lib/quire/checks/` (the check itself)
   """
 
   use Credo.Check,
     base_priority: :high,
-    category: :custom
+    category: :warning
 
   Module.register_attribute(__MODULE__, :check_name, persist: true)
   @check_name "Quire.Checks.NoFileOps"
@@ -22,11 +23,6 @@ defmodule Quire.Checks.NoFileOps do
     "lib/quire/storage/",
     "lib/quire/engine.ex",
     "test/support/",
-    # Known legitimate File./Path./System.cmd uses not bypassing Storage
-    "config/",
-    "mix.exs",
-    "lib/quire/pdf.ex",
-    "lib/quire/office/reader.ex",
     "lib/quire/checks/"
   ]
 
