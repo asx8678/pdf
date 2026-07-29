@@ -2,7 +2,7 @@ defmodule Quire.Ocr.Engine do
   @moduledoc """
   OCR engine behaviour — image-to-text extraction (§7.2).
 
-  Primary implementation wraps `image_ocr` NIF with `vix` image
+  Primary implementation wraps `Image.OCR` (Tesseract NIF) with `vix` image
   preprocessing. Each call operates on an image binary and returns
   recognised text with positional metadata.
   """

@@ -279,11 +279,7 @@ defmodule Quire.Engine do
   end
 
   defp tesseract_version? do
-    if Code.ensure_loaded?(ImageOcr) do
-      apply(ImageOcr, :versions, [])
-    else
-      "unknown (image_ocr not loaded)"
-    end
+    Image.OCR.tesseract_version()
   rescue
     _ -> "unavailable"
   end

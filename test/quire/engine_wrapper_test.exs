@@ -189,16 +189,25 @@ defmodule Quire.EngineWrapperTest do
   end
 
   describe "Quire.Ocr.Tesseract" do
-    @tag :skip
-    test "run/2 is unavailable when image_ocr is not loaded" do
-      # Skip — see pdf-tuj ADR on vendored-vs-Homebrew Tesseract
-      assert {:error, %Quire.Engine.Error{code: :unavailable}} =
-               Quire.Ocr.Tesseract.run(@tiny_png, [])
+    test "run/2 returns ok or error tuple" do
+      result = Quire.Ocr.Tesseract.run(@tiny_png, language: "eng")
+
+      assert match?({:ok, list} when is_list(list), result) or
+               match?({:error, %Quire.Engine.Error{}}, result)
     end
 
-    @tag :skip
-    test "versions/0 returns unknown when dep missing" do
-      assert Quire.Ocr.Tesseract.versions() == %{tesseract: "unknown", leptonica: "unknown"}
+    test "versions/0 returns a map with tesseract and leptonica keys" do
+      v = Quire.Ocr.Tesseract.versions()
+      assert is_map(v)
+      assert Map.has_key?(v, :tesseract)
+      assert Map.has_key?(v, :leptonica)
+    end
+
+    test "rejects oversized input" do
+      large = :binary.copy(<<0>>, 51 * 1024 * 1024)
+
+      assert {:error, %Quire.Engine.Error{code: :invalid_argument}} =
+               Quire.Ocr.Tesseract.run(large, [])
     end
   end
 

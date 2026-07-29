@@ -64,31 +64,45 @@ defmodule Quire.Ocr.Preprocess do
     Engine.trace(__MODULE__, :preprocess, [byte_size(image_bytes), threshold], fn ->
       # 1. Size validation
       if byte_size(image_bytes) > @max_input_bytes do
-        raise ArgumentError,
-              "Input image size #{byte_size(image_bytes)} bytes exceeds maximum #{@max_input_bytes}"
+        {:error,
+         %Quire.Engine.Error{
+           engine: __MODULE__,
+           operation: :preprocess,
+           code: :invalid_argument,
+           message:
+             "Input image size #{byte_size(image_bytes)} bytes exceeds maximum #{@max_input_bytes}",
+           detail: nil
+         }}
+      else
+        # 2. Load from buffer
+        {:ok, img} = Image.new_from_buffer(image_bytes)
+
+        # 3. Dimension validation
+        w = Image.width(img)
+        h = Image.height(img)
+
+        if w > @max_dimension or h > @max_dimension do
+          {:error,
+           %Quire.Engine.Error{
+             engine: __MODULE__,
+             operation: :preprocess,
+             code: :invalid_argument,
+             message:
+               "Image dimensions #{w}x#{h} exceed maximum #{@max_dimension} px per side",
+             detail: nil
+           }}
+        else
+          # 4. Remove alpha channel (if present)
+          img = if Image.has_alpha?(img), do: flatten!(img), else: img
+
+          # 5. Convert to grayscale
+          {:ok, gray} = Operation.colourspace(img, :VIPS_INTERPRETATION_B_W)
+
+          # 6. Encode as PNG
+          {:ok, png} = Image.write_to_buffer(gray, ".png")
+          png
+        end
       end
-
-      # 2. Load from buffer
-      {:ok, img} = Image.new_from_buffer(image_bytes)
-
-      # 3. Dimension validation
-      w = Image.width(img)
-      h = Image.height(img)
-
-      if w > @max_dimension or h > @max_dimension do
-        raise ArgumentError,
-              "Image dimensions #{w}x#{h} exceed maximum #{@max_dimension} px per side"
-      end
-
-      # 4. Remove alpha channel (if present)
-      img = if Image.has_alpha?(img), do: flatten!(img), else: img
-
-      # 5. Convert to grayscale
-      {:ok, gray} = Operation.colourspace(img, :VIPS_INTERPRETATION_B_W)
-
-      # 6. Encode as PNG
-      {:ok, png} = Image.write_to_buffer(gray, ".png")
-      png
     end)
   end
 

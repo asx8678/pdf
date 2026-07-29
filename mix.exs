@@ -135,21 +135,8 @@ defmodule Quire.MixProject do
       {:vix, "== 0.40.0"},
       {:image, "~> 0.72.0"},
 
-      # --- OCR (§3.3) — NOT PINNED, owner T-019 (pdf-9qh) ---------------------
-      # `tesseract_elixir` DOES NOT EXIST on Hex and never has. Appendix A and
-      # Appendix D name a package that was never published; those rows must be
-      # deleted, not corrected. The only in-process Tesseract NIF on Hex that
-      # reports per-word confidence (§9.1) is `image_ocr` 0.2.0, Apache-2.0 —
-      # verified working end to end, but it ships no precompiled artefact and
-      # links against Homebrew tesseract/leptonica, which is exactly the
-      # vendored-vs-Homebrew question the T-019 ADR owes. Uncomment once it
-      # lands. See pdf-tuj.
-      #
-      # {:image_ocr, "== 0.2.0"},
-      #
-      # DO NOT substitute `tesseract_ocr` — it is the highest-download
-      # "tesseract" package on Hex and it shells out via
-      # `System.cmd("tesseract", ...)`, which §3.4 forbids outright.
+      # --- OCR (§3.3) ---------------------------------------------------------
+      {:image_ocr, "== 0.2.0"},
 
       # --- Documents ----------------------------------------------------------
       # Appendix A says `~> 1.x`, which is not valid Mix requirement syntax.

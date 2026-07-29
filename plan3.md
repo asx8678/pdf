@@ -1002,6 +1002,21 @@ cloud_connections               -- backstage "Add account"
 
 Tokens MUST be encrypted at rest (`cloak_ecto` or equivalent).
 
+### 5.7 Share links
+
+```
+share_links
+  id, document_id, revision_id (nullable), token (unique),
+  scope (:view | :comment), password_hash (nullable),
+  expires_at (nullable timestamptz), revoked_at (nullable timestamptz),
+  created_by, last_accessed_at (nullable timestamptz),
+  inserted_at
+```
+
+Indices: unique on token, index on document_id, index on created_by.
+
+T-007 created the migration file at `20260729191301_create_editing_forms_security_jobs_cloud_tables.exs` — a new migration is needed.
+
 ---
 
 ## 6. Module tree
@@ -1589,6 +1604,8 @@ password-protected view/comment link, with a revocation list in Settings.
 Both are small but they are in the reference chrome, so they are in scope
 (T-198).
 
+**Decision (T-019): Anonymous commenters on share links must provide a display name at link-open time, stored on the annotation and shown in the margin. Replies are forbidden to prevent identity-free harassment.**
+
 **Menu bar** — 44 px tall, white, 1 px bottom border `#E5E7EB`. Left:
 hamburger (opens backstage), home icon, then tab labels at 14 px with 16 px
 horizontal padding. The **active tab** is marked by a 6 px accent dot to the
@@ -2020,6 +2037,8 @@ qualified trust service provider and are out of scope.
 the audit certificate matches the events; a tampered completed document fails
 signature validation.
 
+- **`GET /share/:token`** — share-link document access (§8.2). Single-purpose, expiring, rate-limited (same as E-Sign token). No password form for protected links. The token is the sole credential; a wrong password returns 403 with no clue about the link's existence. Revoked tokens return 410 Gone.
+
 ### 9.10 OCR
 
 *Reference: screenshot 13.*
@@ -2249,7 +2268,7 @@ checkout; keys validate against `licenses`.
 General (theme, language, units, default zoom/view mode, autosave), Editing
 (default fonts/colours, snap, ruler/grid defaults), OCR (default languages,
 tessdata management), Security (default encryption strength, certificate
-store), Privacy & translation (provider, consent, data retention — see
+store), Sharing (active share links with revoke button), Privacy & translation (provider, consent, data retention — see
 §9.11), Connected accounts, Keyboard shortcuts (viewer + editor), About (app
 version, **the engine version table from §7.2** — PDFium, Tesseract, libvips,
 Chromium, OTP, Elixir, Postgres — and the load state of every engine; on a

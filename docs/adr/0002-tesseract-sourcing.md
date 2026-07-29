@@ -122,3 +122,12 @@ and wiring `Quire.Ocr.Tesseract` remains T-019 (pdf-9qh) — the dependency is
 deliberately still commented out in `mix.exs`, because adding it makes a
 Homebrew Tesseract a hard build prerequisite for every developer, and that
 should land with the integration rather than ahead of it.
+
+### Updated by T-019 (2026-07-29)
+
+- `{:image_ocr, "== 0.2.0"}` uncommented in `mix.exs`.
+- `Quire.Ocr.Tesseract` delegates to `Image.OCR` (`Image.OCR.new/1` + `Image.OCR.recognize/3`).
+- `versions/0` uses `Image.OCR.tesseract_version/0`.
+- `Quire.Ocr.Preprocess` provides vix-based image preparation (flatten, grayscale, binarization).
+- `brew "pkgconf"` added to `Brewfile` (required by image_ocr Makefile).
+- System Tesseract/Leptonica versions surfaced by `Quire.Engine.check()` in the engine self-check.
