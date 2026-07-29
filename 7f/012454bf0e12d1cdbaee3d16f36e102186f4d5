@@ -1,0 +1,97 @@
+lib/quire_web/live/user_live/registration.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-89
+priv/repo/seeds.exs
+  s_876b9271801391::t_3080b35dce421a 12-46
+test/support/fixtures/accounts_fixtures.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-89
+test/quire_web/live/user_live/registration_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-82
+test/quire_web/live/user_live/login_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-109
+test/quire/accounts_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-397
+lib/quire_web/user_auth.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-287
+lib/quire/accounts/user.ex
+  s_876b9271801391::t_05f489c944681b 5-9
+  s_876b9271801391::t_c7b302876a544c 41-44
+  s_876b9271801391::t_74978fb1b6f87b 1-4,10-40,45-142
+mix.exs
+  s_876b9271801391::t_74978fb1b6f87b 43
+lib/quire_web/live/user_live/settings.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-160
+test/support/conn_case.ex
+  s_876b9271801391::t_74978fb1b6f87b 38-78
+test/quire_web/live/user_live/settings_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-212
+test/quire_web/user_auth_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-390
+lib/quire/accounts.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-25,29-44,46-299
+  s_876b9271801391::t_efb178d29445ad 26-28
+  s_876b9271801391::t_f3f9b94f10a3e2 45
+config/test.exs
+  s_876b9271801391::t_74978fb1b6f87b 3-5
+lib/quire/accounts/scope.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-33
+lib/quire/accounts/user_notifier.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-84
+lib/quire_web/live/user_live/login.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-134
+test/quire_web/live/user_live/confirmation_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-118
+config/config.exs
+  s_876b9271801391::t_74978fb1b6f87b 10-22
+lib/quire_web/controllers/user_session_controller.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-67
+plan3.md
+  s_876b9271801391::t_71aac413ad9d23 226-231
+  s_876b9271801391::t_aa13e29b55fea1 979-983
+  s_876b9271801391::t_2acbe408d4bf32 989
+  s_876b9271801391::t_ca9a2918017d9e 1944-1960
+  s_876b9271801391::t_1d225f9274f427 2231
+  s_876b9271801391::t_780c7170885390 2266
+  s_876b9271801391::t_e8f669d1881e90 2535
+  s_876b9271801391::t_bb049fc88e3856 900-904
+  s_876b9271801391::t_c230d79cb66123 657,659-662
+  s_876b9271801391::t_ba5a52c61bc366 924
+  s_876b9271801391::t_60b8fb8511a666 2225-2226
+  s_876b9271801391::t_a6e381bd4c1598 2255-2258
+  s_876b9271801391::t_7c7aa545e5a50c 2294
+lib/quire_web/components/layouts/root.html.heex
+  s_876b9271801391::t_74978fb1b6f87b 41-60
+test/quire_web/controllers/user_session_controller_test.exs
+  s_876b9271801391::t_74978fb1b6f87b 1-147
+lib/quire/accounts/user_token.ex
+  s_876b9271801391::t_29864962d5f093 15-16
+  s_876b9271801391::t_74978fb1b6f87b 1-14,17-159
+.beads/issues.jsonl
+  s_876b9271801391::t_9f0e688fdc08fe 2,5-6,97,129-131,201
+  s_876b9271801391::t_e47f844520628d 124
+lib/quire_web/router.ex
+  s_876b9271801391::t_74978fb1b6f87b 4-5,13,47-74
+priv/repo/migrations/20260729061521_create_users_auth_tables.exs
+  s_876b9271801391::t_337533cf20643d 13-15,18-19,26-28,31
+  s_876b9271801391::t_74978fb1b6f87b 1-4,16-17,20-25,29-30,32-44
+  s_876b9271801391::t_2491c3c494921f 5-12
+lib/quire_web/live/user_live/confirmation.ex
+  s_876b9271801391::t_74978fb1b6f87b 1-94
+mix.lock
+  s_876b9271801391::t_cb834bbdef5728 3,5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "7f012454bf0e12d1cdbaee3d16f36e102186f4d5",
+  "prompts": {},
+  "sessions": {
+    "s_876b9271801391": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d5d89826-6d69-4f15-99f7-c12164917d0f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "asx8678 <114666958+asx8678@users.noreply.github.com>"
+    }
+  }
+}
