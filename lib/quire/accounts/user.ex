@@ -1,6 +1,7 @@
 defmodule Quire.Accounts.User do
   use Quire.Schema
   import Ecto.Changeset
+
   schema "users" do
     field :email, :string
     field :password, :string, virtual: true, redact: true

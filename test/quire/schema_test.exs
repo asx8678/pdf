@@ -27,13 +27,18 @@ defmodule Quire.SchemaTest do
       now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       {1, [%{id: id}]} =
-        Quire.Repo.insert_all(User, [%{
-          email: email,
-          id: Ecto.UUID.generate(version: 7),
-          inserted_at: now,
-          updated_at: now
-        }],
-        returning: [:id])
+        Quire.Repo.insert_all(
+          User,
+          [
+            %{
+              email: email,
+              id: Ecto.UUID.generate(version: 7),
+              inserted_at: now,
+              updated_at: now
+            }
+          ],
+          returning: [:id]
+        )
 
       assert Ecto.UUID.version(id) == 7,
              "expected id #{inspect(id)} to be UUID v7"
