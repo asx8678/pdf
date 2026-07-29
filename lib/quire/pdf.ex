@@ -451,6 +451,7 @@ defmodule Quire.Pdf do
       :ok = Quire.Pdf.fixup_after_extract(ext_q, [1, 3, 5])
       {:ok, final_bytes} = Quire.Pdf.save(ext_q)
   """
+
   @spec fixup_after_extract(t(), [non_neg_integer()]) :: :ok | {:error, atom()}
   def fixup_after_extract(extracted_doc, kept_indices)
       when is_reference(extracted_doc) and is_list(kept_indices) do
@@ -458,5 +459,24 @@ defmodule Quire.Pdf do
          :ok <- Outline.filter_for_pages(extracted_doc, kept_indices) do
       :ok
     end
+  end
+
+  @doc false
+  def check do
+    # Prove the Rustler NIF loads. The stub (not yet replaced) raises
+    # `ErlangError` with `original: :nif_not_loaded`. If the NIF loaded
+    # and is real, calling with nil fails at argument decoding (raises
+    # something else) or succeeds (unexpected but treated as :ok).
+    # Prove the Rustler NIF loads by trying to parse an empty byte string.
+    # An empty string is invalid PDF but reaches the NIF's decoder, proving
+    # the crate initialised. A stub raises at function dispatch instead.
+    case Native.open(<<>>) do
+      {:error, _reason} -> :ok
+      {:ok, _doc} -> :ok
+      other -> {:error, "unexpected return: #{inspect(other)}"}
+    end
+  rescue
+    _e in [ErlangError] -> {:error, "NIF not loaded"}
+    _ -> :ok
   end
 end

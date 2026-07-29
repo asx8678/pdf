@@ -26,4 +26,15 @@ defmodule Quire.SecurityHandler do
   Returns whether the PDF is encrypted and the encryption method.
   """
   @callback info(pdf_bytes :: binary()) :: {:ok, map()} | {:error, term()}
+
+  @doc false
+  def check do
+    # Skeleton — real implementation will verify Quire.Pdf NIF loads.
+    # For now, rely on Quire.Pdf.check/0 for the NIF dependency.
+    if function_exported?(Quire.Pdf, :check, 0) do
+      Quire.Pdf.check()
+    else
+      :ok
+    end
+  end
 end

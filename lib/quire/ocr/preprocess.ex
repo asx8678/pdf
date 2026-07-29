@@ -126,6 +126,14 @@ defmodule Quire.Ocr.Preprocess do
   # Private helpers
   # ═════════════════════════════════════════════════════════════════════════
 
+  @doc false
+  def check do
+    _ = Vix.Vips.version()
+    :ok
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   defp flatten!(img) do
     {:ok, flat} = Operation.flatten(img)
     flat

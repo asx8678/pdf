@@ -22,4 +22,15 @@ defmodule Quire.Pades do
   `:signer`, `:timestamp` and optional `:warnings`.
   """
   @callback verify(pdf_bytes :: binary()) :: {:ok, list(map())} | {:error, term()}
+
+  @doc false
+  def check do
+    # Skeleton — real implementation will verify Quire.Pdf NIF loads.
+    # For now, rely on Quire.Pdf.check/0 for the NIF dependency.
+    if function_exported?(Quire.Pdf, :check, 0) do
+      Quire.Pdf.check()
+    else
+      :ok
+    end
+  end
 end

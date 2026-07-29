@@ -27,4 +27,7 @@ defmodule Quire.Ocr.Engine do
               required(:tesseract) => String.t(),
               required(:leptonica) => String.t()
             }
+
+  @doc false
+  def check, do: Quire.Ocr.Tesseract.check()
 end

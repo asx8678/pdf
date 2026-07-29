@@ -179,6 +179,39 @@ defmodule Quire.EngineTest do
       assert Map.has_key?(result, Quire.Ocr.Engine)
       assert Map.has_key?(result, Quire.Office.Writer)
     end
+
+    test "each engine entry has a state map with :state key" do
+      result = Quire.Engine.check()
+
+      for {mod, status} <- result.engines do
+        assert is_map(status), "#{inspect(mod)} status is not a map"
+
+        assert status.state in [:ok, :degraded, :unavailable],
+               "#{inspect(mod)} has invalid state: #{inspect(status.state)}"
+      end
+    end
+
+    test "includes smoke_tests key with render and ocr_preprocess" do
+      result = Quire.Engine.check()
+      assert Map.has_key?(result, :smoke_tests)
+      assert Map.has_key?(result.smoke_tests, :render)
+      assert Map.has_key?(result.smoke_tests, :ocr_preprocess)
+    end
+
+    test "includes system key with component versions" do
+      result = Quire.Engine.check()
+      assert Map.has_key?(result, :system)
+      assert is_binary(result.system.pdfium)
+      assert is_binary(result.system.vips)
+      assert is_binary(result.system.elixir)
+      assert is_binary(result.system.otp)
+    end
+
+    test "module keys at top level for backward compatibility" do
+      result = Quire.Engine.check()
+      assert result[Quire.Render]
+      assert result[Quire.Pdf]
+    end
   end
 
   describe "Quire.Engine.versions/0" do
@@ -188,6 +221,41 @@ defmodule Quire.EngineTest do
       assert is_map(result.system)
       assert is_binary(result.system.elixir)
       assert is_binary(result.system.otp)
+    end
+
+    test "includes pdfium, vips and chromium in system versions" do
+      result = Quire.Engine.versions()
+      assert Map.has_key?(result.system, :pdfium)
+      assert Map.has_key?(result.system, :vips)
+      assert Map.has_key?(result.system, :chromium)
+      assert Map.has_key?(result.system, :postgres)
+      assert Map.has_key?(result.system, :rust)
+    end
+  end
+
+  describe "Quire.Engine.healthy?/0" do
+    test "returns a boolean" do
+      assert is_boolean(Quire.Engine.healthy?())
+    end
+
+    test "matching check result logic" do
+      result = Quire.Engine.check()
+
+      expected =
+        Enum.all?(result.engines, fn {_mod, s} -> s.state == :ok end) &&
+          Enum.all?(result.smoke_tests, fn {_n, s} -> s == :ok end)
+
+      assert Quire.Engine.healthy?() == expected
+    end
+  end
+
+  describe "Quire.Engine.print_boot_table/0" do
+    test "does not raise" do
+      try do
+        Quire.Engine.print_boot_table()
+      rescue
+        e -> flunk("print_boot_table raised: #{Exception.message(e)}")
+      end
     end
   end
 

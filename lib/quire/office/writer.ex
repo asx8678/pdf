@@ -19,4 +19,7 @@ defmodule Quire.Office.Writer do
   Returns the list of output formats this writer supports.
   """
   @callback supported_formats() :: list(atom())
+
+  @doc false
+  def check, do: :ok
 end

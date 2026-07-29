@@ -76,6 +76,18 @@ defmodule Quire.Ocr.Tesseract do
     end
   end
 
+  @doc false
+  def check do
+    if Code.ensure_loaded?(ImageOcr) do
+      _ = apply(ImageOcr, :versions, [])
+      :ok
+    else
+      {:error, "image_ocr not loaded"}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   # ── size enforcement ──────────────────────────────────────────────────────
 
   defp check_size(bytes) when byte_size(bytes) <= @max_image_bytes, do: :ok

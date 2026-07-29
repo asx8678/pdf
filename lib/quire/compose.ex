@@ -23,4 +23,7 @@ defmodule Quire.Compose do
   """
   @callback appearance(field :: map(), value :: term(), opts :: keyword()) ::
               {:ok, binary()} | {:error, term()}
+
+  @doc false
+  def check, do: Quire.Compose.Primitives.check()
 end

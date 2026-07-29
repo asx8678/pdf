@@ -87,4 +87,7 @@ defmodule Quire.Render do
   @callback add_page_objects(doc :: term(), objects :: term()) :: {:ok, term()} | {:error, term()}
 
   @callback save(doc :: term()) :: {:ok, binary()} | {:error, term()}
+
+  @doc false
+  def check, do: Quire.Render.Pdfium.check()
 end

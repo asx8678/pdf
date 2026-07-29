@@ -21,7 +21,20 @@ defmodule Quire.Application do
     # See https://elixir.hexdocs.pm/Supervisor.html
     # for other strategies and supported options
     opts = [strategy: :one_for_one, name: Quire.Supervisor]
-    Supervisor.start_link(children, opts)
+
+    case Supervisor.start_link(children, opts) do
+      {:ok, pid} ->
+        # Print the engine self-check table at boot. Disabled when running
+        # `mix run --no-start` (doctor) or in test to avoid extra noise.
+        unless System.get_env("QUIRE_SKIP_BOOT_CHECK") do
+          Quire.Engine.print_boot_table()
+        end
+
+        {:ok, pid}
+
+      error ->
+        error
+    end
   end
 
   # Tell Phoenix to update the endpoint configuration

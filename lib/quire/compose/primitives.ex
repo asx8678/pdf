@@ -651,6 +651,11 @@ defmodule Quire.Compose.Primitives do
 
   # ── Simple truncation for text fields ──────────────────────────────────────
 
+  @doc false
+  def check do
+    :ok
+  end
+
   defp truncate_to_fit(text, _width, _font_size) do
     # A proper implementation would measure text extents, but at the primitive
     # level this is delegated to the caller for accurate metrics.

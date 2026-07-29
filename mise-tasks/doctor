@@ -172,7 +172,22 @@ done
 [ "$found_binary" -eq 1 ] || skip "no downloaded asset binaries yet (mise run setup)"
 
 section "Engine self-check (§7.2)"
-skip "ex_pdfium, Tesseract, vix, Chromium and the dirty-scheduler benchmark land in T-013 (pdf-cyt)"
+
+# Runs the boot self-check via mix run --no-start (no DB needed).
+# Exits non-zero if any engine reports worse than :ok.
+ENGINE_FAILED=0
+mix run --no-start -e '
+  Quire.Engine.print_boot_table()
+  unless Quire.Engine.healthy?() do
+    System.halt(1)
+  end
+' 2>&1 || ENGINE_FAILED=1
+
+if [ "$ENGINE_FAILED" -eq 0 ]; then
+  pass "engine self-check — all engines ok"
+else
+  fail "engine self-check — one or more engines degraded or unavailable"
+fi
 
 printf '\n'
 if [ "$failures" -eq 0 ]; then

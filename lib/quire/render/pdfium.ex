@@ -266,6 +266,16 @@ defmodule Quire.Render.Pdfium do
   end
 
   @doc false
+  def check do
+    case ExPdfium.pdfium_version() do
+      v when is_binary(v) -> :ok
+      {:error, :pdfium_init_failed} -> {:error, "pdfium_init_failed"}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  @doc false
   defp bitmap_to_png!(%ExPdfium.Bitmap{data: data, width: w, height: h, format: format}) do
     {converted, bands} = normalize_bitmap(data, format)
 
