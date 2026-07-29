@@ -58,7 +58,13 @@ for appending to original bytes; `SaveOptions::use_object_streams(true)` and
 This is a deliberate change to the plan's implied approach. It is permitted:
 §3.4 bans **external processes**, not native code — a Rust library linked as a
 NIF is the same shape as `ex_pdfium` and `vix`, both already in the tree.
-`mise.toml` pins `rust = "1.90"`; `lopdf` needs 1.85+.
+
+`mise.toml` pins `rust = "1.91"`. The binding constraint is **rustler 0.38.0**,
+whose manifest declares `rust-version = "1.91"` — cargo hard-refuses below it,
+with no override. `lopdf` 0.44.0 needs only 1.88. (An earlier draft of this ADR
+said 1.90/1.85; both figures were wrong and neither was the real constraint.
+`ex_pdfium` never exposed this because it ships a precompiled NIF, so nobody
+ever compiled rustler.)
 
 It closes D2, D3 and most of D6 at once, and replaces the single largest cost
 item found.

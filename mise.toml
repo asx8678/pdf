@@ -12,7 +12,7 @@
 erlang = "28.1"
 elixir = "1.20.2-otp-28"
 node = "24"   # asset vendoring (T-038/T-040) and Playwright (T-199) only — never used to build the app
-rust = "1.90" # NIF fallback builds when a darwin-arm64 artefact is missing; Tauri in Phase 13
+rust = "1.91" # rustler 0.38.0 declares rust-version = "1.91"; cargo hard-refuses below it
 
 [env]
 MIX_ENV = "dev"

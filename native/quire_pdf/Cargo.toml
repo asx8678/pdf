@@ -1,0 +1,30 @@
+[package]
+name = "quire_pdf"
+version = "0.1.0"
+edition = "2021"
+# mise.toml pins rust 1.91 (rustler 0.38.0 requires it; lopdf 0.44.0 needs 1.88). lopdf 0.44.0's own manifest declares
+# rust-version = "1.88" (NOT 1.85 as ADR 0003 states — `cargo info lopdf@0.44.0`
+# is the source of truth). Track its floor so a from-source developer build
+# fails with a clear message rather than a wall of trait errors.
+rust-version = "1.88"
+
+[lib]
+name = "quire_pdf"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.38"
+
+# The PDF object model. MIT. Pinned exactly for the same reason §7.3 pins
+# ex_pdfium: this crate IS the file-format behaviour, so a minor bump changes
+# bytes we write.
+#
+# lopdf 0.44's default feature set is [chrono, jiff, rayon, time] — three
+# date-time crates we do not use plus a thread pool. `default-features = false`
+# drops all four; there is no `nom_parser`/`pom_parser` split in 0.44 (that was
+# <= 0.32), the nom parser is unconditional.
+lopdf = { version = "=0.44.0", default-features = false }
+
+[profile.release]
+opt-level = 3

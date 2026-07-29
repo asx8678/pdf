@@ -46,3 +46,10 @@ npm-debug.log
 
 # Document storage — Storage.Web filesystem backend root (§3.6.5).
 /_data/
+
+# Rust NIF build artefacts (native/quire_pdf).
+/native/*/target/
+/priv/native/
+
+# Agent worktrees.
+/.claude/worktrees/

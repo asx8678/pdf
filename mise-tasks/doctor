@@ -58,7 +58,7 @@ fi
 for tool in node rust; do
   case "$tool" in
     node) expected="24"; actual=$(node --version 2>/dev/null | tr -d 'v') ;;
-    rust) expected="1.90"; actual=$(rustc --version 2>/dev/null | awk '{print $2}') ;;
+    rust) expected="1.91"; actual=$(rustc --version 2>/dev/null | awk '{print $2}') ;;
   esac
   if version_matches "$actual" "$expected"; then
     pass "$tool $actual"

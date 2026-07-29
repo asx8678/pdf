@@ -112,8 +112,15 @@ defmodule Quire.MixProject do
       # asks for `~> 0.8`, which floats to 0.9.0 — a line it was not developed
       # against (0.9.0 changed the download path). Hold the 0.8 line.
       {:rustler_precompiled, "~> 0.8.4"},
-      # Build-time only: needed if a precompiled artefact is ever missing
-      # (`EXPDFIUM_BUILD=1`), and later for Tauri (§12). Not on the happy path.
+      # ON the happy path since ADR 0003: native/quire_pdf (Quire.Pdf, over
+      # lopdf) is compiled from source by `use Rustler` on every `mix compile`,
+      # so a Rust toolchain >= 1.91 IS now required — rustler 0.38.0's manifest
+      # declares that MSRV and cargo hard-refuses below it. See mise.toml.
+      # Also still the `EXPDFIUM_BUILD=1` fallback and the Tauri path (§12).
+      #
+      # `runtime: false` stays correct: Rustler.Compiler runs at compile time,
+      # when runtime-false deps are still loaded, and the generated
+      # rustler_init/0 touches nothing in the Rustler namespace afterwards.
       # NB §3.1 also justifies rustler with "the Tesseract NIF" — void, see OCR.
       {:rustler, "~> 0.38", runtime: false},
 
