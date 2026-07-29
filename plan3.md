@@ -223,11 +223,12 @@ strictly.
 
 **Strip daisyUI before Phase 1.** Phoenix 1.8.9's generator adds a daisyUI
 dependency **and** daisyUI-classed markup throughout `core_components.ex` and
-the layouts; `mix phx.gen.auth` (T-163) emits more of it later. The chrome in
-§8 is bespoke and daisyUI's opinions will fight you. Removing it therefore
-means deleting the dep *and* rewriting the generated markup — budget half a
-day in T-024, and run `phx.gen.auth` with equivalent cleanup in T-163 rather
-than discovering it then.
+the layouts; `mix phx.gen.auth` (T-200) emits more of it — six more templates,
+all daisyUI-classed. The chrome in §8 is bespoke and daisyUI's opinions will
+fight you. Removing it therefore means deleting the dep *and* rewriting the
+generated markup — run `phx.gen.auth` in Phase 0 **before** the strip, then
+clean both generators' output in a single pass in T-025, rather than doing it
+twice.
 
 ### 3.2 Browser-side PDF stack
 
@@ -653,8 +654,12 @@ rather than adding it.
 ### 5.1 Core
 
 ```
-users                      -- phx.gen.auth
+users                      -- phx.gen.auth, created in Phase 0 by T-200 (NOT T-006)
   id, email, hashed_password, confirmed_at, inserted_at, updated_at
+  -- email is :string with a lower(email) unique index, not citext (§3.4)
+
+users_tokens               -- phx.gen.auth, same migration as users
+  id, user_id, token, context, sent_to, authenticated_at, inserted_at
 
 user_settings
   id, user_id, theme, default_zoom, default_view_mode, ruler_visible,
@@ -892,7 +897,11 @@ lib/quire/
   translation.ex
   batch.ex
 
-  accounts.ex                   # phx.gen.auth
+  accounts.ex                   # phx.gen.auth (T-200)
+  accounts/user.ex              # phx.gen.auth
+  accounts/user_token.ex        # phx.gen.auth
+  accounts/user_notifier.ex     # phx.gen.auth
+  accounts/scope.ex             # phx.gen.auth — the `current_scope` struct
   licensing.ex
   cloud.ex
 
@@ -912,6 +921,7 @@ lib/quire_web/
   endpoint.ex
   router.ex
   telemetry.ex
+  user_auth.ex                  # phx.gen.auth (T-200) — plugs + on_mount
 
   components/
     core_components.ex          # generated, trimmed
@@ -966,11 +976,17 @@ lib/quire_web/
     esign/
       sign_live.ex              # public signer-facing route
     settings_live.ex
+    user_live/                  # phx.gen.auth (T-200)
+      registration.ex
+      login.ex
+      confirmation.ex
+      settings.ex
 
   controllers/
     document_controller.ex      # range-request byte serving, downloads
     esign_controller.ex
     health_controller.ex
+    user_session_controller.ex  # phx.gen.auth (T-200)
 
 assets/js/
   app.js
@@ -1925,10 +1941,23 @@ never a crash.
 
 ### 11.1 Accounts
 
-`mix phx.gen.auth` with email confirmation, password reset, sudo mode for
-sensitive actions (changing security settings, managing certificates). Add
-optional TOTP 2FA (T-164). Sessions are LiveView-aware
-(`on_mount {QuireWeb.UserAuth, :ensure_authenticated}`).
+`mix phx.gen.auth` runs in **Phase 0 (T-200)**, not in this phase — it owns the
+`users` + `users_tokens` migration (§5.1) and everything downstream assumes a
+session already exists. Phoenix 1.8.9 generates magic-link **and** password
+log-in, email confirmation, and sudo mode for sensitive actions (changing
+security settings, managing certificates) out of the box. T-162 is polish on
+top of that; optional TOTP 2FA is T-163. Sessions are LiveView-aware through
+the generated `Quire.Accounts.Scope` struct, assigned as `@current_scope`
+(`on_mount {QuireWeb.UserAuth, :require_authenticated}`; siblings are
+`:mount_current_scope` and `:require_sudo_mode`).
+
+**Open product decision — classic password reset.** Phoenix 1.8.9 ships *no*
+forgot-password flow; recovery is the magic link, and password changes live in
+the generated settings LiveView. This section previously promised "password
+reset". That promise is not deleted here, because dropping a stated
+requirement silently is worse than carrying it: if a conventional
+forgot-password email is actually wanted, it is **new work with its own task**,
+not generator output. Decide before Phase 12.
 
 The account avatar in the title bar shows a notification dot for: pending
 e-sign requests, completed background jobs, and licence expiry warnings.
@@ -2193,12 +2222,13 @@ native PAdES/security-handler work) and are sized accordingly.
 
 | ID | Task |
 |---|---|
-| T-001 | Choose the project name and accent colour (§2). Create the repo: `mix phx.new quire --binary-id` (LiveView is on by default in Phoenix 1.8). Phoenix 1.8.9, Elixir 1.20.2, OTP 28. |
+| T-001 | Choose the project name and accent colour (§2). Create the repo: `mix phx.new . --app quire --module Quire --binary-id`, generated in place so the existing repo, plan and issue database stay put (LiveView is on by default in Phoenix 1.8). Phoenix 1.8.9, Elixir 1.20.2, OTP 28. |
+| T-200 | **Run `mix phx.gen.auth Accounts User users --live --binary-id --no-agents-md` immediately after `mix phx.new`, before anything else touches the schema or the markup.** It generates `Accounts`, `Accounts.User`, `Accounts.UserToken`, `Accounts.Scope` (the `current_scope` assign), `QuireWeb.UserAuth`, the auth LiveViews and session controller, the router blocks, **and the `users` + `users_tokens` migration** — so it must precede T-006 (which would otherwise duplicate `users` and break `mix ecto.migrate`), precede T-003 (it writes `{:bcrypt_elixir, "~> 3.0"}` into `mix.exs`), and precede T-025 (so its daisyUI markup is stripped in the same pass). Then: delete the generated citext extension line and retype `email` as `:string` with a `lower(email)` unique index plus `update_change(:email, &String.downcase/1)`; set `@primary_key {:id, Ecto.UUID, autogenerate: [version: 7]}` on both schemas and `default: fragment("uuidv7()")` on both PK columns; add a confirmed dev seed user to `priv/repo/seeds.exs`. |
 | T-002 | **Machine bootstrap (do this first).** Commit `mise.toml` and the `Brewfile` (Appendix B) before writing any Elixir: Xcode CLT, Homebrew, mise; `KERL_CONFIGURE_OPTIONS` set so OTP 28 builds against Homebrew OpenSSL; `mise install` green. |
 | T-003 | Pin deps in `mix.exs` (Appendix A): Oban, Req, Rustler, `ex_pdfium` (exact), `tesseract_elixir`, `vix`/`image`, `saxy`, `cloak_ecto`, `uniq`, `phoenix_test`, `stream_data`. Verify `mix deps.compile ex_pdfium` downloads a precompiled `aarch64-apple-darwin` NIF rather than building from source, and record which happened (§7.3). |
 | T-004 | ∥ Local services: `brew services start postgresql@18`; create the `quire_dev` / `quire_test` databases; apply the two `postgresql.conf` changes from §3.7. |
 | T-005 | ∥ `mise run check`: format check, Credo strict, Dialyzer, `mix test`, Sobelow, `mix deps.audit` (vulnerabilities) **and a dependency-licence scan** (GPL/AGPL guard, §3.5 — a separate concern from vulnerabilities), plus T-014's guard and `mise run doctor`. Wire it as a **git pre-push hook**, not a CI service — there is no CI in v1, so the hook is the only thing standing between you and a broken `main`. |
-| T-006 | Ecto migrations for §5.1–5.2 (users, settings, licenses, documents, revisions, pages, recents, `document_page_text`). UUID v7 primary keys with `DEFAULT uuidv7()`; `document_page_text.search` is `GENERATED ALWAYS AS (...) STORED` with a GIN index. **Assert no `CREATE EXTENSION` appears in any migration.** |
+| T-006 | Ecto migrations for §5.1–5.2 — **not `users` or `users_tokens`, which T-200's `phx.gen.auth` migration already created**; T-006 adds only the tables that reference them (settings, licenses, documents, revisions, pages, recents, `document_page_text`). UUID v7 primary keys with `DEFAULT uuidv7()`; `document_page_text.search` is `GENERATED ALWAYS AS (...) STORED` with a GIN index. **Assert no `CREATE EXTENSION` appears in any migration.** |
 | T-007 | Ecto migrations for §5.3–5.6 (editing, annotations, forms, security, signing, e-sign, jobs, translation, cloud). |
 | T-008 | `Quire.Storage` behaviour + `Storage.Ref` (§7.1). |
 | T-009 | `Storage.Web` + the `:filesystem` backend (two-level key fan-out, atomic rename-into-place, zero-copy `with_local_path/2`). Full test suite. Add the `:s3` stub that raises, with its `StorageCase` run `@tag :skip`. |
@@ -2222,8 +2252,10 @@ native PAdES/security-handler work) and are sized accordingly.
 machine** (or a fresh macOS user account — this is the test that replaces "it
 builds in Docker"); both Storage adapters pass an identical test suite; no
 migration creates an extension; the journal property test passes for every
-op kind; the corpus crash-fuzz pass is clean; T-021 and T-022 have written
-outcomes.
+op kind; the corpus crash-fuzz pass is clean; `mix ecto.migrate` runs clean
+from an empty database with exactly one `users` migration; the seed user logs
+in and `on_mount {QuireWeb.UserAuth, :require_authenticated}` rejects an
+anonymous session; T-021 and T-022 have written outcomes.
 
 ---
 
@@ -2231,7 +2263,7 @@ outcomes.
 
 | ID | Task |
 |---|---|
-| T-025 | Design tokens in `app.css` (§8.4). Delete daisyUI config and rewrite generated markup (§3.1). |
+| T-025 | Design tokens in `app.css` (§8.4). Delete the daisyUI dep and config and rewrite **all** generated markup in one pass — `core_components.ex`, the layouts, and the `phx.gen.auth` templates from T-200 (login, registration, confirmation, session, settings). Nothing daisyUI-classed survives (§3.1). |
 | T-026 | `TitleBar` component (§8.2) with QAT and window controls (hidden on web). |
 | T-027 | ∥ QAT customise menu, persisted to `user_settings.qat_items`. |
 | T-028 | `MenuBar` with all **11** tabs, active-dot styling, `Activate now`, help, gear. |
@@ -2259,7 +2291,7 @@ axe reports zero critical issues.
 | ID | Task |
 |---|---|
 | T-040 | Vendor pdf.js 6.1.200: esbuild ESM config, worker as a separate entry, copy `cmaps/`, `standard_fonts/`, `iccs/`, `wasm/` to `priv/static/vendor/pdfjs/`. Node comes from mise; commit `package-lock.json` and add a `mise run assets.vendor` task so the copy step is reproducible. |
-| T-041 | `document_controller.ex` with HTTP range support, ETag, and auth. |
+| T-041 | `document_controller.ex` with HTTP range support, ETag, and auth — `QuireWeb.UserAuth.require_authenticated_user` (generated in T-200) plus an owner check against `documents.owner_id`. |
 | T-042 | `PdfViewerHook` wrapping `PDFViewer` + `EventBus` + `PDFLinkService` (§3.2). |
 | T-043 | `geometry.js` + the Elixir twin (§14.3) with the round-trip property test. |
 | T-044 | Document open pipeline (§10.3) including encryption detection and the password prompt. |
@@ -2500,7 +2532,7 @@ cache prevents a re-translation of unchanged text.
 
 | ID | Task |
 |---|---|
-| T-162 | `mix phx.gen.auth` + confirmation, reset, sudo mode (+ daisyUI cleanup, §3.1). |
+| T-162 | Accounts polish on top of T-200's generator output: confirmation-flow copy, token-expiry handling, sudo mode applied to the Secure tab and certificate management, and the §11.1 avatar notification dot. The generator, its migration and its daisyUI cleanup are Phase 0 work (T-200, T-025). Phoenix 1.8.9 already generates confirmation and sudo mode — this task is coverage and copy, not construction. |
 | T-163 | ∥ Optional TOTP 2FA. |
 | T-164 | Licensing tiers + `allows?/2` + `<.gated>` component; enforce in component, event handler **and** worker. |
 | T-165 | `Activate now` modal + key validation + trial expiry handling. |
