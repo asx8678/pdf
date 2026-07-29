@@ -309,6 +309,7 @@ wrong, not the table.
 | **Native security handler** (`Quire.SecurityHandler`, written for this project) | — | project code | Elixir over `:crypto`, with `Quire.Pdf` for `/Encrypt` dictionary read/write | AESV2/AESV3 encryption and decryption, owner/user passwords, permission flags, per ISO 32000-2 §7.6 (§9.7) |
 | **Native PDF/A module** (`Quire.PdfA`, written for this project) | — | project code | Elixir over the PDFium NIF for inspection and `Quire.Pdf` for structure writes | Best-effort PDF/A-2b conversion (font embedding verification, OutputIntent/ICC injection, XMP metadata, MarkInfo, forbidden-feature removal) plus a built-in structural conformance report (§9.2) |
 | **Native text reflow & stamping** (`Quire.Compose`, written for this project) | — | project code | Elixir over `Quire.Pdf` | Content-stream generation for overlay/underlay stamping, text runs, translation overlay/sidecar output (§9.5, §9.11). `/AP` appearance-stream generation belongs to `Quire.Pdf.AcroForm`, not here (ADR 0003 D5) |
+| **Font resource management** (`Quire.Compose.Font`, written for this project) | — | project code | Pure Elixir; binary TTF/OTF parsing for subsetting, `Quire.Pdf` for embedding | Bundled Liberation Sans/Serif/Mono (SIL OFL, metric-compatible with Standard 14), pure-Elixir TTF/CFF subsetting, uploaded-font fsType embedding check, complex-script shaping refused with clear message (ADR 0006) |
 
 **How the pieces fit.** PDFium is the primary *rendering and inspection*
 engine and it is a very capable one: its page-import API implements
@@ -1876,7 +1877,7 @@ in a PDF is inherently approximate. Implement two modes:
 | **Grid** | C | Configurable grid with snap-to-grid for object placement. Toggle persists. |
 
 **Floating text format bar** (screenshot 6) appears when a text object is
-selected: font family combo (embedded + standard-14 + uploaded), size combo,
+selected: font family combo (embedded + standard-14 + uploaded TTF/OTF with embedding check), size combo,
 **B**, *I*, font colour, highlight colour, strikethrough, underline,
 alignment (with a dropdown for justify), decrease/increase indent,
 anchor/link button, overflow menu (line spacing, character spacing,
@@ -2059,6 +2060,15 @@ Provider behind a `Quire.Translation.Provider` behaviour so the LLM/MT
 vendor is swappable. Text length is billable — show an estimated cost/token
 count before running, and cache by `sha256(text) + langs` in
 `translation_cache` (§5.5).
+
+⚠️ **Language coverage limited by font pipeline.** Until a shaping engine
+(HarfBuzz) is integrated, `Compose` can only re-render text in scripts
+supported by the bundled Liberation fonts (Latin, Cyrillic, Greek) and
+full-embed fonts (CJK via Noto from T-157 onwards). Translating into Arabic,
+Hebrew, Indic or other complex-script languages will be refused with a clear
+message at translate time (ADR 0006). This limitation is independent of the
+translation provider — even a perfect LLM translation cannot be rendered
+into the PDF without shaping support.
 
 **Locally:** the API key lives in `.mise.local.toml` (gitignored), never in
 `config/*.exs` and never in the repo. Ship a `Provider.Null` implementation
