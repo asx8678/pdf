@@ -1,0 +1,106 @@
+# Quire local toolchain — plan3.md Appendix B.1, §3.6.
+#
+# This file plus Brewfile, mix.lock and package-lock.json are the entire
+# reproducibility contract (§3.6.2). mise owns the language runtimes, the
+# project environment and the task runner. It does NOT own the C-library
+# world — PostgreSQL, OpenSSL and Tesseract come from the Brewfile.
+#
+# Machine-specific and secret values belong in .mise.local.toml, which is
+# gitignored: TRANSLATION_API_KEY, TSA_URL, CHROME_EXECUTABLE, PGUSER.
+
+[tools]
+erlang = "28.1"
+elixir = "1.20.2-otp-28"
+node = "24"   # asset vendoring (T-038/T-040) and Playwright (T-199) only — never used to build the app
+rust = "1.90" # NIF fallback builds when a darwin-arm64 artefact is missing; Tauri in Phase 13
+
+[env]
+MIX_ENV = "dev"
+ERL_AFLAGS = "-kernel shell_history enabled"
+
+# Storage.Web filesystem backend root (§7.1, §3.6.5). Kept inside the repo
+# and gitignored, so it is one `ls` away during development.
+QUIRE_DATA_DIR = "{{config_root}}/_data/storage"
+
+# kerl will not find Homebrew's OpenSSL on its own; without this, `crypto`
+# fails to build and the error points nowhere useful (§3.6.3). --without-javac
+# is deliberate (nothing needs JInterface) and wxWidgets is likewise not built
+# — Tauri is the desktop story (§12), so nothing here needs an OTP with :wx.
+KERL_CONFIGURE_OPTIONS = "--with-ssl={{ exec(command='brew --prefix openssl@3') }} --disable-debug --disable-silent-rules --without-javac --enable-shared-zlib --enable-dynamic-ssl-lib"
+
+[tasks.setup]
+description = "Install deps, database, assets and the fixture corpus"
+run = """
+set -euo pipefail
+mix local.hex --force --if-missing
+mix local.rebar --force --if-missing
+mix deps.get
+mix assets.setup
+mise run assets:resign
+mix assets.build
+echo
+echo "setup: done. Still owned by later tasks —"
+echo "  T-004 (pdf-0nc): mix ecto.create + ecto.migrate against local PostgreSQL 18"
+echo "  T-038: npm ci for pdfjs-dist and @cantoo/pdf-lib"
+echo "  T-040: mise run assets:vendor"
+echo "  T-016 (pdf-5o8): the fixture corpus"
+"""
+
+[tasks."assets:resign"]
+description = "Re-sign mix-downloaded binaries so Gatekeeper does not SIGKILL them"
+# plan3.md §3.6.6 prescribes `xattr -dr com.apple.quarantine`, which is not
+# sufficient on macOS 26+: the attribute is com.apple.provenance, which xattr
+# cannot remove, and spctl reports the vendor's linker-signed Mach-O as having
+# an invalid signature. Re-signing ad hoc is what actually works. See pdf-0k9a.
+run = """
+set -euo pipefail
+for bin in _build/tailwind-* _build/esbuild-*; do
+  [ -f "$bin" ] || continue
+  codesign --force --sign - "$bin" 2>/dev/null
+  echo "re-signed $bin"
+done
+"""
+
+[tasks.doctor]
+description = "Prove the machine is actually ready; exits non-zero on any problem"
+run = "mise-tasks/doctor"
+
+[tasks.server]
+description = "Run the Phoenix server in IEx"
+# macOS defaults ulimit -n to 256; a LiveView app with a page-render pipeline
+# and a virtualised viewer exhausts that (§3.6.6).
+run = """
+ulimit -n 8192
+exec iex -S mix phx.server
+"""
+
+[tasks.test]
+description = "Create/migrate the test database and run the suite"
+env = { MIX_ENV = "test" }
+run = """
+set -euo pipefail
+ulimit -n 8192
+mix test
+"""
+
+[tasks.check]
+description = "Full pre-push suite: format, warnings-as-errors, credo, licence scan, tests"
+depends = ["doctor"]
+run = """
+echo "mise run check is implemented in T-005 (pdf-a47)." >&2
+exit 1
+"""
+
+[tasks.e2e]
+description = "Playwright end-to-end suite"
+run = """
+echo "mise run e2e is implemented in T-199." >&2
+exit 1
+"""
+
+[tasks."assets:vendor"]
+description = "Copy the pdf.js runtime assets into priv/static"
+run = """
+echo "mise run assets:vendor is implemented in T-040." >&2
+exit 1
+"""

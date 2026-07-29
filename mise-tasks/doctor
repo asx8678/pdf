@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+#
+# Prove the machine is actually ready — plan3.md §3.6.1 step 7, Appendix B.3.
+#
+# Exits non-zero on any missing or wrong-versioned component. This is the first
+# thing to run when anything behaves strangely.
+#
+# Scope note: T-002 owns the toolchain and system rows below. The engine rows in
+# Appendix B.3 — ex_pdfium/PDFium, the Tesseract NIF, vix/libvips, Chromium and
+# the dirty-scheduler benchmark — are T-013's (pdf-cyt), which appends the §7.2
+# self-check via `mix run --no-start`.
+
+set -uo pipefail
+
+failures=0
+
+pass() { printf '  \033[32mok\033[0m    %s\n' "$1"; }
+fail() { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; failures=$((failures + 1)); }
+skip() { printf '  \033[33mskip\033[0m  %s\n' "$1"; }
+
+section() { printf '\n%s\n' "$1"; }
+
+# Compares an actual version against an expected prefix, e.g. "18.4" vs "18".
+version_matches() {
+  case "$1" in
+    "$2" | "$2".*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+section "Language runtimes (mise)"
+
+expected_elixir="1.20.2"
+actual_elixir=$(elixir --version 2>/dev/null | sed -n 's/^Elixir \([0-9.]*\).*/\1/p')
+if [ "$actual_elixir" = "$expected_elixir" ]; then
+  pass "Elixir $actual_elixir"
+else
+  fail "Elixir: expected $expected_elixir, got '${actual_elixir:-not found}'"
+fi
+
+expected_otp="28"
+actual_otp=$(erl -noshell -eval 'io:format("~s", [erlang:system_info(otp_release)]), halt().' 2>/dev/null)
+if version_matches "$actual_otp" "$expected_otp"; then
+  pass "Erlang/OTP $actual_otp"
+else
+  fail "Erlang/OTP: expected ${expected_otp}.x, got '${actual_otp:-not found}'"
+fi
+
+# The -otp-28 Elixir artefact is precompiled against OTP 28. Running it on a
+# different OTP is the single most confusing failure mode in this toolchain.
+compiled_otp=$(elixir --version 2>/dev/null | sed -n 's/.*compiled with Erlang\/OTP \([0-9]*\).*/\1/p')
+if [ -n "$compiled_otp" ] && [ "$compiled_otp" = "$actual_otp" ]; then
+  pass "Elixir compiled against the running OTP ($compiled_otp)"
+else
+  fail "Elixir was compiled against OTP ${compiled_otp:-?} but OTP ${actual_otp:-?} is running — pin elixir = \"1.20.2-otp-28\""
+fi
+
+for tool in node rust; do
+  case "$tool" in
+    node) expected="24"; actual=$(node --version 2>/dev/null | tr -d 'v') ;;
+    rust) expected="1.90"; actual=$(rustc --version 2>/dev/null | awk '{print $2}') ;;
+  esac
+  if version_matches "$actual" "$expected"; then
+    pass "$tool $actual"
+  else
+    fail "$tool: expected ${expected}.x, got '${actual:-not found}'"
+  fi
+done
+
+section "System libraries (Homebrew)"
+
+actual_pg=$(psql --version 2>/dev/null | awk '{print $3}')
+if version_matches "$actual_pg" "18"; then
+  pass "PostgreSQL client $actual_pg"
+else
+  fail "PostgreSQL client: expected 18.x, got '${actual_pg:-not found}'"
+fi
+
+# The server is T-004's (pdf-0nc) to start; report it without failing here.
+if pg_isready -q 2>/dev/null; then
+  server_pg=$(psql -tAc 'show server_version' postgres 2>/dev/null | awk '{print $1}')
+  if version_matches "$server_pg" "18"; then
+    pass "PostgreSQL server $server_pg accepting connections"
+  else
+    fail "PostgreSQL server: expected 18.x, got '${server_pg:-unknown}'"
+  fi
+else
+  skip "PostgreSQL server not accepting connections (started in T-004: brew services start postgresql@18)"
+fi
+
+if openssl_prefix=$(brew --prefix openssl@3 2>/dev/null); then
+  pass "openssl@3 at $openssl_prefix"
+else
+  fail "openssl@3 not installed — run: brew bundle --no-upgrade"
+fi
+
+# OTP must have actually linked against it, not merely had the flag set.
+if erl -noshell -eval 'case catch crypto:info_lib() of {"EXIT",_} -> halt(1); _ -> halt(0) end.' 2>/dev/null; then
+  pass "OTP crypto loads (kerl found OpenSSL)"
+else
+  fail "OTP crypto will not load — rebuild OTP with KERL_CONFIGURE_OPTIONS set (§3.6.3)"
+fi
+
+section "macOS environment (§3.6.6)"
+
+fds=$(ulimit -n)
+if [ "$fds" = "unlimited" ] || [ "$fds" -ge 8192 ] 2>/dev/null; then
+  pass "ulimit -n $fds"
+else
+  fail "ulimit -n is $fds, need >= 8192 — run through a mise task, not a bare shell"
+fi
+
+# Mix-downloaded standalone binaries are SIGKILLed by Gatekeeper until they are
+# re-signed ad hoc. §3.6.6's `xattr -dr com.apple.quarantine` does not fix this
+# on macOS 26+ — the attribute is com.apple.provenance. See pdf-0k9a.
+found_binary=0
+for bin in _build/tailwind-* _build/esbuild-*; do
+  [ -f "$bin" ] || continue
+  found_binary=1
+  if "$bin" --help >/dev/null 2>&1; then
+    pass "$(basename "$bin") executes"
+  else
+    fail "$(basename "$bin") was killed — run: mise run assets:resign"
+  fi
+done
+[ "$found_binary" -eq 1 ] || skip "no downloaded asset binaries yet (mise run setup)"
+
+section "Engine self-check (§7.2)"
+skip "ex_pdfium, Tesseract, vix, Chromium and the dirty-scheduler benchmark land in T-013 (pdf-cyt)"
+
+printf '\n'
+if [ "$failures" -eq 0 ]; then
+  printf '\033[32mdoctor: all checks passed\033[0m\n'
+  exit 0
+fi
+printf '\033[31mdoctor: %d check(s) failed\033[0m\n' "$failures"
+exit 1
