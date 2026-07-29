@@ -98,17 +98,13 @@ mix test
 bash mise-tasks/check-licences
 
 # Advisory checks — warnings only, never block a push
-declare -a advisory_failures=()
-mix credo   || advisory_failures+=("credo")
-mix dialyzer || advisory_failures+=("dialyzer")
-mix sobelow --exit || advisory_failures+=("sobelow")
-mix deps.audit || advisory_failures+=("deps.audit")
-bash mise-tasks/crash-fuzz || advisory_failures+=("crash-fuzz")
+mix credo || echo "[advisory] credo: warnings found"
+mix dialyzer || echo "[advisory] dialyzer: warnings found"
+mix sobelow --exit || echo "[advisory] sobelow: warnings found"
+mix deps.audit || echo "[advisory] deps.audit: warnings found"
+bash mise-tasks/crash-fuzz || echo "[advisory] crash-fuzz: warnings found"
 
-if [ ${#advisory_failures[@]} -gt 0 ]; then
-  echo "check: advisory warnings in: ${advisory_failures[*]} (not blocking)"
-fi
-echo "check: all passed"
+echo "check: all blocking checks passed"
 """
 
 [tasks.e2e]
