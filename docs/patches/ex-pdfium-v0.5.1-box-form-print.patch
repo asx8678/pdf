@@ -1,0 +1,849 @@
+The byte-exact patch (verified to `git apply --binary` cleanly onto a pristine
+v0.5.1 checkout, then build and test) is at:
+
+  /private/tmp/claude-502/-Users-adam2-projects-pdf/d5d89826-6d69-4f15-99f7-c12164917d0f/scratchpad/d4_patch.diff
+
+and the working clone at:
+
+  /private/tmp/claude-502/-Users-adam2-projects-pdf/d5d89826-6d69-4f15-99f7-c12164917d0f/scratchpad/ex_pdfium   (HEAD detached at v0.5.1)
+
+NOTE: that is a session scratchpad. Copy the .patch out before it is reclaimed.
+Nothing was pushed, forked, or opened as a PR. Nothing was written into
+/Users/adam2/projects/pdf.
+
+$ git diff --stat HEAD   # against v0.5.1 (d50f588)
+ CHANGELOG.md                     |  44 +++++
+ README.md                        |  61 ++++++-
+ lib/ex_pdfium.ex                 | 224 ++++++++++++++++++++++-
+ lib/ex_pdfium/native.ex          |  16 ++
+ native/ex_pdfium/src/lib.rs      | 338 +++++++++++++++++++++++++++++++++--
+ test/ex_pdfium_test.exs          | 377 +++++++++++++++++++++++++++++++++++++++
+ test/fixtures/forms_kids.pdf     |  45 +++++
+ test/fixtures/forms_kids_gen.py  |  81 +++++++++
+ test/release_invariants_test.exs |   4 +-
+ 9 files changed, 1165 insertions(+), 25 deletions(-)
+
+The source diffs are reproduced in full below. CHANGELOG.md, README.md,
+test/ex_pdfium_test.exs (13 new tests across 5 describe blocks) and the two new
+fixture files are additive-only and are in the patch file; they are summarised at
+the end rather than pasted, because I can guarantee the patch file is byte-exact
+and cannot guarantee that of a 1473-line hand transcription.
+
+================================================================================
+diff --git a/native/ex_pdfium/src/lib.rs b/native/ex_pdfium/src/lib.rs
+index e90ee60..e14d7f9 100644
+--- a/native/ex_pdfium/src/lib.rs
++++ b/native/ex_pdfium/src/lib.rs
+@@ -57,6 +57,7 @@ mod atoms {
+         grayscale,
+         annotations,
+         form_fields,
++        print_quality,
+         // render: option values
+         rgba,
+         bgra,
+@@ -181,6 +182,22 @@ mod atoms {
+         annotation_not_found,
+         // flatten
+         flatten_failed,
++        // page boundary boxes (write): selectors. The Bounding ("BBox") box is
++        // computed from page content and is deliberately not selectable.
++        media,
++        crop,
++        bleed,
++        trim,
++        art,
++        unsupported_box,
++        set_box_failed,
++        // forms (write)
++        not_a_form_field,
++        wrong_field_type,
++        form_set_failed,
++        value_not_applied,
++        // composition: place a page on a page
++        place_failed,
+     }
+ }
+ 
+@@ -576,6 +593,7 @@ struct RenderOpts {
+     grayscale: bool,
+     annotations: bool,
+     form_fields: bool,
++    print_quality: bool,
+ }
+ 
+ impl RenderOpts {
+@@ -617,10 +635,12 @@ impl RenderOpts {
+         };
+ 
+         // Toggles. pdfium renders annotations and form data by default, so those
+-        // default to true; grayscale defaults to false.
++        // default to true; grayscale defaults to false. `print_quality` sets
++        // pdfium's FPDF_PRINTING flag, which is off by default (screen intent).
+         let grayscale = opt_bool(opts, atoms::grayscale())?.unwrap_or(false);
+         let annotations = opt_bool(opts, atoms::annotations())?.unwrap_or(true);
+         let form_fields = opt_bool(opts, atoms::form_fields())?.unwrap_or(true);
++        let print_quality = opt_bool(opts, atoms::print_quality())?.unwrap_or(false);
+ 
+         Ok(RenderOpts {
+             sizing,
+@@ -629,6 +649,7 @@ impl RenderOpts {
+             grayscale,
+             annotations,
+             form_fields,
++            print_quality,
+         })
+     }
+ 
+@@ -672,6 +693,11 @@ impl RenderOpts {
+             .use_grayscale_rendering(self.grayscale)
+             .render_annotations(self.annotations)
+             .render_form_data(self.form_fields)
++            // Print intent (pdfium's FPDF_PRINTING). A document that stipulates
++            // separate screen/print quality renders at its print quality; one
++            // that does not is unaffected. Also selects the print appearance of
++            // annotations that carry one, matching what `flatten/1` bakes.
++            .use_print_quality(self.print_quality)
+             .set_maximum_width(MAX_RENDER_DIMENSION)
+             .set_maximum_height(MAX_RENDER_DIMENSION)
+     }
+@@ -851,6 +877,13 @@ fn rect_of(b: &PdfRect) -> Rect {
+     )
+ }
+ 
++// The inverse of `rect_of`: build a PdfRect from the (left, bottom, right, top)
++// the Elixir side passes. (`PdfRect::new` orders the edges itself, so an
++// inverted rectangle is normalized rather than rejected.)
++fn pdf_rect(l: f64, b: f64, r: f64, t: f64) -> PdfRect {
++    PdfRect::new_from_values(b as f32, l as f32, t as f32, r as f32)
++}
++
+ fn page_index_u16(page_index: u32) -> Result<u16, Atom> {
+     page_index
+         .try_into()
+@@ -1508,8 +1541,10 @@ fn document_annotations(
+     })
+ }
+ 
+-// (name, type, value, checked, read_only, required, (page, bounds)). The page +
+-// bounds are nested to stay within rustler's 7-element tuple limit.
++// (name, type, value, checked, read_only, required, (page, annotation index,
++// bounds)). The page, index and bounds are nested to stay within rustler's
++// 7-element tuple limit. The annotation index addresses this widget within its
++// page — it is what the form-field write NIFs take.
+ type FormField = (
+     Option<String>,
+     Atom,
+@@ -1517,7 +1552,7 @@ type FormField = (
+     Option<bool>,
+     bool,
+     bool,
+-    (u32, Option<Rect>),
++    (u32, u32, Option<Rect>),
+ );
+ 
+ // Read a field's value the way pdfium-render models each type: text/combo/list
+@@ -1571,7 +1606,12 @@ fn document_form_fields(doc: ResourceArc<DocumentResource>) -> Result<Vec<FormFi
+         let mut fields = Vec::new();
+         for (page_index, page) in document.pages().iter().enumerate() {
+             let page_index = u32::try_from(page_index).map_err(|_| atoms::form_failed())?;
+-            for annotation in page.annotations().iter() {
++            // Enumerate ALL annotations, not just the form fields, so the index
++            // we report is the widget's position among the page's annotations —
++            // the address `document_delete_annotation` and the form-field write
++            // NIFs use.
++            for (annot_index, annotation) in page.annotations().iter().enumerate() {
++                let annot_index = u32::try_from(annot_index).map_err(|_| atoms::form_failed())?;
+                 let Some(field) = annotation.as_form_field() else {
+                     continue;
+                 };
+@@ -1585,7 +1625,7 @@ fn document_form_fields(doc: ResourceArc<DocumentResource>) -> Result<Vec<FormFi
+                     checked,
+                     field.is_read_only(),
+                     field.is_required(),
+-                    (page_index, bounds),
++                    (page_index, annot_index, bounds),
+                 ));
+             }
+         }
+@@ -1982,6 +2022,69 @@ fn document_rotate_page(
+     })
+ }
+ 
++// ── Page boundary boxes (write) ──────────────────────────────────────────────
++
++// Map a box-selector atom to its boundary box type. Unknown -> None (->
++// :unsupported_box). The Bounding ("BBox") box pdfium also exposes is computed
++// from page content rather than stored, so it is deliberately not selectable.
++fn boundary_box_type(name: Atom) -> Option<PdfPageBoundaryBoxType> {
++    Some(if name == atoms::media() {
++        PdfPageBoundaryBoxType::Media
++    } else if name == atoms::crop() {
++        PdfPageBoundaryBoxType::Crop
++    } else if name == atoms::bleed() {
++        PdfPageBoundaryBoxType::Bleed
++    } else if name == atoms::trim() {
++        PdfPageBoundaryBoxType::Trim
++    } else if name == atoms::art() {
++        PdfPageBoundaryBoxType::Art
++    } else {
++        return None;
++    })
++}
++
++/// Set one of a page's boundary boxes (`:media` | `:crop` | `:bleed` | `:trim` |
++/// `:art`) to the given rectangle, in PDF points. The read side is
++/// `document_page_info`.
++#[rustler::nif(schedule = "DirtyCpu")]
++#[allow(clippy::too_many_arguments)]
++fn document_set_page_box(
++    doc: ResourceArc<DocumentResource>,
++    page_index: u32,
++    box_type: Atom,
++    l: f64,
++    b: f64,
++    r: f64,
++    t: f64,
++) -> Result<Atom, Atom> {
++    let index = page_index_u16(page_index)?;
++    let box_type = boundary_box_type(box_type).ok_or_else(atoms::unsupported_box)?;
++    // A boundary box must be a real, non-degenerate rectangle: a zero-area box
++    // is invalid per the PDF spec and makes the page unrenderable in every
++    // consumer, so reject it here rather than write it and find out later.
++    if !valid_rect(l, b, r, t) || r <= l || t <= b {
++        return Err(atoms::bad_option());
++    }
++    with_pdfium(|_| {
++        let guard = doc.doc.lock().map_err(|_| atoms::lock_poisoned())?;
++        let document = guard.as_ref().ok_or_else(atoms::document_closed)?;
++        let mut page = document
++            .pages()
++            .get(index)
++            .map_err(|_| atoms::page_out_of_bounds())?;
++        // Like `set_rotation`, this writes page-dictionary metadata directly, so
++        // it persists into a later save with no content regeneration. pdfium
++        // re-derives the page size from the boxes on demand, so the already-open
++        // page reports and renders the new geometry immediately — verified: a
++        // render taken right after this call is byte-identical to one taken
++        // after a save and reopen.
++        page.boundaries_mut()
++            .set(box_type, pdf_rect(l, b, r, t))
++            .map_err(|_| atoms::set_box_failed())?;
++        Ok(atoms::ok())
++    })
++}
++
+ // ── Document creation: pages, text, shapes, images ───────────────────────────
+ 
+ fn color_of(c: (u8, u8, u8, u8)) -> PdfColor {
+@@ -2430,11 +2533,6 @@ fn document_draw_image(
+ // orphan-build-then-drop crash class that affects page *objects* (see
+ // `attach_then_style`) does not arise here.
+ 
+-// Build a PdfRect from the (left, bottom, right, top) the Elixir side passes.
+-fn annot_rect(l: f64, b: f64, r: f64, t: f64) -> PdfRect {
+-    PdfRect::new_from_values(b as f32, l as f32, t as f32, r as f32)
+-}
+-
+ // `create_*_annotation()` attaches before setting all requested properties. If
+ // construction or styling fails, delete the new slot so an error never means a
+ // half-configured annotation was left in the document.
+@@ -2527,7 +2625,7 @@ fn document_add_free_text_annotation(
+                 .create_free_text_annotation(&text)
+                 .map_err(|_| atoms::annotate_failed())?;
+             annotation
+-                .set_bounds(annot_rect(l, b, r, t))
++                .set_bounds(pdf_rect(l, b, r, t))
+                 .map_err(|_| atoms::annotate_failed())?;
+             if let Some(c) = fill {
+                 annotation
+@@ -2580,7 +2678,7 @@ fn document_add_square_annotation(
+                 .create_square_annotation()
+                 .map_err(|_| atoms::annotate_failed())?;
+             annotation
+-                .set_bounds(annot_rect(l, b, r, t))
++                .set_bounds(pdf_rect(l, b, r, t))
+                 .map_err(|_| atoms::annotate_failed())?;
+             if let Some(c) = fill {
+                 annotation
+@@ -2633,7 +2731,7 @@ fn document_add_link_annotation(
+                 .create_link_annotation(&uri)
+                 .map_err(|_| atoms::annotate_failed())?;
+             annotation
+-                .set_bounds(annot_rect(l, b, r, t))
++                .set_bounds(pdf_rect(l, b, r, t))
+                 .map_err(|_| atoms::annotate_failed())
+         })();
+         if let Err(error) = result {
+@@ -2746,4 +2844,216 @@ fn document_signatures(
+     })
+ }
+ 
++// ── Forms (write) ────────────────────────────────────────────────────────────
++//
++// A widget is addressed the same way `document_delete_annotation` addresses one:
++// by 0-based annotation index within a page. `document_form_fields` reports that
++// index for every field it returns, so the read side feeds the write side.
++//
++// TWO PDFIUM BEHAVIOURS DECIDE WHETHER A WRITE ACTUALLY MEANS ANYTHING, and both
++// are silent, so both are handled explicitly here.
++//
++// 1. The write lands in the ANNOTATION's dictionary. That is the field itself
++//    only when the widget and its field are merged into one object — the usual
++//    shape for simple forms, but NOT what a generator emits when one field owns
++//    several widgets, where `/V` lives on a separate parent field object that
++//    pdfium reads and this write never reaches. pdfium reports no error; the
++//    value just does not take. So every write below is READ BACK through pdfium
++//    and a disagreement is returned as `:value_not_applied` rather than a silent
++//    no-op.
++//
++// 2. pdfium writes `/V` and does NOT regenerate the widget's `/AP` appearance
++//    stream, while `FPDFPage_Flatten` (our `flatten/1`) bakes `/AP` and ignores
++//    `/V`. Measured, not assumed:
++//
++//      * CHECKBOX — correct everywhere. Its appearances are pre-baked per state
++//        under `/AP /N` and pdfium switches the in-use state (`/AS`) with the
++//        value, so the new state renders AND flatten bakes it.
++//      * TEXT — the new value is drawn by `document_render_page` (pdfium's form
++//        layer builds the appearance from `/V`) whenever pdfium regenerates
++//        appearances, i.e. the AcroForm sets `/NeedAppearances true` or the
++//        widget has no `/AP`. With a stale `/AP` and no `/NeedAppearances`, even
++//        the render shows the old text. And `flatten/1` bakes the old text (or
++//        nothing) in BOTH cases — the form layer's generated appearance is not
++//        written back to `/AP`, so flattening never sees it.
++//
++//    Supplying an appearance stream ourselves would need font metrics and
++//    content-stream emission — out of scope for a binding — and pdfium's escape
++//    hatch for handing one over, `FPDFAnnot_SetAP`, is unreachable:
++//    `pdfium-render` 0.8.37 keeps every raw
++//    `FPDF_ANNOTATION`/`FPDF_PAGE`/`FPDF_DOCUMENT` handle `pub(crate)`, so the
++//    public `PdfiumLibraryBindings` trait has no argument to call it with.
++//
++// Radio buttons are deliberately absent: `PdfFormRadioButtonField::set_checked()`
++// in pdfium-render 0.8.37 takes the on-state name from the widget's CURRENT
++// `/AS` rather than its export value, so selecting an unselected button writes
++// the literal "Off". (It also prints two `println!` debug lines.) There is no
++// public path around it, so there is no correct radio write to expose yet.
++
++// Resolve the widget annotation at `annot_index` on a page and hand its form
++// field to `f`. Every form-field write goes through here, so the bounds check
++// and the "is this actually a form field?" check live in exactly one place.
++fn with_form_field(
++    doc: &ResourceArc<DocumentResource>,
++    page_index: u16,
++    annot_index: usize,
++    f: impl FnOnce(&mut PdfFormField) -> Result<(), Atom>,
++) -> Result<Atom, Atom> {
++    with_pdfium(|_| {
++        let guard = doc.doc.lock().map_err(|_| atoms::lock_poisoned())?;
++        let document = guard.as_ref().ok_or_else(atoms::document_closed)?;
++        let page = document
++            .pages()
++            .get(page_index)
++            .map_err(|_| atoms::page_out_of_bounds())?;
++        let annotations = page.annotations();
++        if annot_index >= annotations.len() {
++            return Err(atoms::annotation_not_found());
++        }
++        let mut annotation = annotations
++            .get(annot_index)
++            .map_err(|_| atoms::annotation_not_found())?;
++        let field = annotation
++            .as_form_field_mut()
++            .ok_or_else(atoms::not_a_form_field)?;
++        f(field)?;
++        Ok(atoms::ok())
++    })
++}
++
++/// Form filling: set a text field's value. See the section note above for when
++/// the new value renders and when a stale `/AP` still wins.
++#[rustler::nif(schedule = "DirtyCpu")]
++fn document_set_text_field_value(
++    doc: ResourceArc<DocumentResource>,
++    page_index: u32,
++    annot_index: u32,
++    value: String,
++) -> Result<Atom, Atom> {
++    let index = page_index_u16(page_index)?;
++    let annot_index = usize::try_from(annot_index).map_err(|_| atoms::annotation_not_found())?;
++    validate_string(&value)?;
++    with_form_field(&doc, index, annot_index, |field| {
++        let text = field
++            .as_text_field_mut()
++            .ok_or_else(atoms::wrong_field_type)?;
++        text.set_value(&value)
++            .map_err(|_| atoms::form_set_failed())?;
++        // Read back through pdfium (see note 1 above). pdfium reports an empty
++        // value as "no value", so an empty write reads back as None, not "".
++        if text.value().unwrap_or_default() == value {
++            Ok(())
++        } else {
++            Err(atoms::value_not_applied())
++        }
++    })
++}
++
++/// Form filling: check or clear a checkbox. pdfium switches the widget's in-use
++/// appearance state along with the value, so this survives `flatten/1`.
++#[rustler::nif(schedule = "DirtyCpu")]
++fn document_set_checkbox_value(
++    doc: ResourceArc<DocumentResource>,
++    page_index: u32,
++    annot_index: u32,
++    checked: bool,
++) -> Result<Atom, Atom> {
++    let index = page_index_u16(page_index)?;
++    let annot_index = usize::try_from(annot_index).map_err(|_| atoms::annotation_not_found())?;
++    with_form_field(&doc, index, annot_index, |field| {
++        let checkbox = field
++            .as_checkbox_field_mut()
++            .ok_or_else(atoms::wrong_field_type)?;
++        checkbox
++            .set_checked(checked)
++            .map_err(|_| atoms::form_set_failed())?;
++        if checkbox.is_checked().map_err(|_| atoms::form_failed())? == checked {
++            Ok(())
++        } else {
++            Err(atoms::value_not_applied())
++        }
++    })
++}
++
++// ── Composition: place a page on a page ──────────────────────────────────────
++
++/// Draw a copy of `src`'s page as a Form XObject on a page of `dest`, scaled to
++/// fill the `[left, bottom, right, top]` rectangle (PDF points). This is the
++/// underlay/overlay/n-up primitive: stationery, watermarks from a PDF, and
++/// imposition all reduce to it.
++///
++/// The source page's own box origin is shifted to the rectangle's corner, so a
++/// page whose CropBox does not start at (0, 0) lands where the caller asked.
++#[rustler::nif(schedule = "DirtyCpu")]
++#[allow(clippy::too_many_arguments)]
++fn document_place_page(
++    dest: ResourceArc<DocumentResource>,
++    dest_page_index: u32,
++    src: ResourceArc<DocumentResource>,
++    src_page_index: u32,
++    l: f64,
++    b: f64,
++    r: f64,
++    t: f64,
++) -> Result<Atom, Atom> {
++    // Same self-reference reasoning as `document_append`: one non-reentrant
++    // per-document mutex cannot be locked twice, and pdfium's XObject import
++    // needs `&mut` on the destination while the source is borrowed.
++    if std::ptr::eq(&*dest, &*src) {
++        return Err(atoms::same_document());
++    }
++    let dest_index = page_index_u16(dest_page_index)?;
++    let src_index = page_index_u16(src_page_index)?;
++    if !valid_rect(l, b, r, t) || r <= l || t <= b {
++        return Err(atoms::bad_option());
++    }
++    with_pdfium(|_| {
++        let mut dest_guard = dest.doc.lock().map_err(|_| atoms::lock_poisoned())?;
++        let src_guard = src.doc.lock().map_err(|_| atoms::lock_poisoned())?;
++        let dest_doc = dest_guard.as_mut().ok_or_else(atoms::document_closed)?;
++        let src_doc = src_guard.as_ref().ok_or_else(atoms::document_closed)?;
++        check_page(dest_doc, dest_index)?;
++        let src_page = src_doc
++            .pages()
++            .get(src_index)
++            .map_err(|_| atoms::page_out_of_bounds())?;
++
++        // The XObject reproduces the source page in the source page's OWN
++        // coordinate space. Take that space from the CropBox — what a viewer
++        // shows — falling back to the MediaBox, which pdfium does not do for us.
++        let source = src_page
++            .boundaries()
++            .crop()
++            .or_else(|_| src_page.boundaries().media())
++            .map_err(|_| atoms::page_info_failed())?
++            .bounds;
++        let (origin_x, origin_y) = (source.left().value as f64, source.bottom().value as f64);
++        let width = (source.right().value - source.left().value) as f64;
++        let height = (source.top().value - source.bottom().value) as f64;
++        if !valid_positive_f32(width) || !valid_positive_f32(height) {
++            return Err(atoms::page_info_failed());
++        }
++
++        let object = src_page
++            .objects()
++            .copy_into_x_object_form_object(dest_doc)
++            .map_err(|_| atoms::place_failed())?;
++
++        // Transforms compose in application order: move the source box origin to
++        // (0, 0), scale it to the target rectangle's size, then move it to the
++        // target rectangle's bottom-left corner.
++        attach_then_style(dest_doc, dest_index, object, |obj| {
++            obj.translate(
++                PdfPoints::new(-origin_x as f32),
++                PdfPoints::new(-origin_y as f32),
++            )
++            .map_err(|_| atoms::place_failed())?;
++            obj.scale(((r - l) / width) as f32, ((t - b) / height) as f32)
++                .map_err(|_| atoms::place_failed())?;
++            obj.translate(PdfPoints::new(l as f32), PdfPoints::new(b as f32))
++                .map_err(|_| atoms::place_failed())
++        })
++    })
++}
++
+ rustler::init!("Elixir.ExPdfium.Native");
+
+================================================================================
+diff --git a/lib/ex_pdfium/native.ex b/lib/ex_pdfium/native.ex
+index 06373cc..f51e4f4 100644
+--- a/lib/ex_pdfium/native.ex
++++ b/lib/ex_pdfium/native.ex
+@@ -134,4 +134,20 @@ defmodule ExPdfium.Native do
+   def document_extract_pages(_src, _indices), do: :erlang.nif_error(:nif_not_loaded)
+   def document_delete_pages(_doc, _from, _to), do: :erlang.nif_error(:nif_not_loaded)
+   def document_rotate_page(_doc, _page_index, _degrees), do: :erlang.nif_error(:nif_not_loaded)
++
++  # Writing: page boundary boxes. `box` is :media | :crop | :bleed | :trim | :art.
++  def document_set_page_box(_doc, _page_index, _box, _l, _b, _r, _t),
++    do: :erlang.nif_error(:nif_not_loaded)
++
++  # Writing: form field values. A widget is addressed by 0-based annotation index
++  # within its page — the index document_form_fields/1 reports for it.
++  def document_set_text_field_value(_doc, _page_index, _annot_index, _value),
++    do: :erlang.nif_error(:nif_not_loaded)
++
++  def document_set_checkbox_value(_doc, _page_index, _annot_index, _checked),
++    do: :erlang.nif_error(:nif_not_loaded)
++
++  # Writing: place a page of one document onto a page of another (Form XObject).
++  def document_place_page(_dest, _dest_page, _src, _src_page, _l, _b, _r, _t),
++    do: :erlang.nif_error(:nif_not_loaded)
+ end
+
+================================================================================
+diff --git a/test/release_invariants_test.exs b/test/release_invariants_test.exs
+index 026f948..44f681f 100644
+--- a/test/release_invariants_test.exs
++++ b/test/release_invariants_test.exs
+@@ -76,9 +76,9 @@ defmodule ExPdfium.ReleaseInvariantsTest do
+       |> Enum.map(fn {name, _arity} -> Atom.to_string(name) end)
+       |> MapSet.new()
+ 
+-    assert MapSet.size(rust_exports) == 45
++    assert MapSet.size(rust_exports) == 49
+     assert rust_exports == stub_exports
+-    assert length(Regex.scan(~r/#\[rustler::nif\(schedule = "DirtyCpu"\)\]/, rust)) == 45
++    assert length(Regex.scan(~r/#\[rustler::nif\(schedule = "DirtyCpu"\)\]/, rust)) == 49
+ 
+     native = File.read!(Path.join(@root, "lib/ex_pdfium/native.ex"))
+     release = File.read!(Path.join(@root, ".github/workflows/release.yml"))
+
+================================================================================
+diff --git a/lib/ex_pdfium.ex b/lib/ex_pdfium.ex
+index 0666322..fcf4cfc 100644
+--- a/lib/ex_pdfium.ex
++++ b/lib/ex_pdfium.ex
+@@ -10,13 +10,16 @@ defmodule ExPdfium do
+   > permissions, structure (bookmarks/links/attachments), forms/annotations, and
+   > images & page objects.
+   > **Write:** page assembly — merge (`append/2`), split/subset
+-  > (`extract_pages/2`), `delete_pages/2`, `rotate_page/3`; document creation —
++  > (`extract_pages/2`), `delete_pages/2`, `rotate_page/3`, `set_page_box/4`
++  > (crop/resize), `place_page/5` (overlay, underlay, n-up); document creation —
+   > `new/0`, `add_page/3`, and `draw_text`/`draw_rectangle`/`draw_line`/
+   > `draw_circle`/`draw_image`; annotation authoring — `add_text_annotation/5`,
+   > `add_free_text_annotation/5`, `add_square_annotation/4`, `add_link_annotation/5`,
+-  > `delete_annotation/3`; and `save_to_bytes/1` / `save_to_file/2`.
+-  > Form-filling and the text-markup annotation family (highlight/underline/…) are
+-  > not currently included.
++  > `delete_annotation/3`; form filling — `set_text_field_value/4` and
++  > `set_checkbox_value/4` (mind `set_text_field_value/4`'s appearance caveat);
++  > and `save_to_bytes/1` / `save_to_file/2`. Radio-button writes and the
++  > text-markup annotation family (highlight/underline/…) are not currently
++  > included.
+ 
+   > #### Untrusted input {: .warning}
+   > pdfium runs **in-process** as a native library, so a genuine crash in it would
+@@ -178,6 +181,13 @@ defmodule ExPdfium do
+     * `:annotations` — draw annotations (default `true`); set `false` to render the
+       page without its markup/widget overlay
+     * `:form_fields` — draw interactive form-field content (default `true`)
++    * `:print_quality` — render with **print** intent rather than screen intent
++      (default `false`). Sets pdfium's `FPDF_PRINTING` flag: a document that
++      stipulates separate screen and print quality is rendered at its print
++      quality (higher quality, slower); one that does not is unaffected. It also
++      selects the *print* appearance of annotations that carry a separate one —
++      the same appearance `flatten/1` bakes — so pass it when the bitmap is
++      headed for paper or for a raster print pipeline.
+ 
+   ## Bitmap layout
+ 
+@@ -809,9 +819,15 @@ defmodule ExPdfium do
+         read_only: boolean(),
+         required: boolean(),
+         page: non_neg_integer(),  # 0-indexed page the widget sits on
++        index: non_neg_integer(), # 0-indexed annotation index within that page
+         bounds: t:bounds/0 | nil
+       }
+ 
++  `page` and `index` together address the widget: pass them to
++  `set_text_field_value/4`, `set_checkbox_value/4` or `delete_annotation/3`.
++  `index` counts **all** of the page's annotations, not only its form fields, so
++  it lines up with `annotations/2`.
++
+   A checkbox or radio group shares one `name` across its option widgets, so it
+   surfaces as **one entry per option widget**. For these, `value` is the group's
+   *currently-selected* on-state (the same string on every widget in the group),
+@@ -836,7 +852,8 @@ defmodule ExPdfium do
+     case Native.document_form_fields(ref) do
+       {:ok, fields} ->
+         {:ok,
+-         Enum.map(fields, fn {name, type, value, checked, read_only, required, {page, bounds}} ->
++         Enum.map(fields, fn {name, type, value, checked, read_only, required,
++                              {page, index, bounds}} ->
+            %{
+              name: name,
+              type: type,
+@@ -845,6 +862,7 @@ defmodule ExPdfium do
+              read_only: read_only,
+              required: required,
+              page: page,
++             index: index,
+              bounds: opt_rect(bounds)
+            }
+          end)}
+@@ -854,6 +872,101 @@ defmodule ExPdfium do
+     end
+   end
+ 
++  @doc group: :forms
++  @doc """
++  Set the value of the text field whose widget is annotation `index` on `page`.
++
++  Address the widget with the `:page` and `:index` reported by `form_fields/1`:
++
++      {:ok, fields} = ExPdfium.form_fields(doc)
++      %{page: page, index: index} = Enum.find(fields, &(&1.name == "full_name"))
++      {:ok, doc} = ExPdfium.set_text_field_value(doc, page, index, "Ada Lovelace")
++
++  The value is written, read back through pdfium, and only then reported as
++  `{:ok, doc}` — see `:value_not_applied` below.
++
++  > #### The value is stored; whether it is *drawn* is a separate question {: .warning}
++  > pdfium writes the field's `/V`. It does **not** regenerate the widget's
++  > `/AP` appearance stream, and `flatten/1` bakes `/AP` while ignoring `/V`. So:
++  >
++  >   * `form_fields/1` reads the new value back, and it survives
++  >     `save_to_bytes/1` — always.
++  >   * `render_page/3` **draws** the new value when pdfium regenerates the
++  >     appearance itself, which it does when the AcroForm sets
++  >     `/NeedAppearances true` or the widget has no `/AP` at all (the common
++  >     case for generated forms). With a stale `/AP` and no `/NeedAppearances`,
++  >     the render shows the **old** text.
++  >   * `flatten/1` bakes the **old** appearance (or nothing) in *both* cases.
++  >     pdfium's form layer builds its appearance for rendering only; it is never
++  >     written back to `/AP`, so flattening never sees it.
++  >
++  > Supplying an appearance stream here would mean font metrics and
++  > content-stream emission, which is beyond a binding, and pdfium's escape hatch
++  > for handing one over (`FPDFAnnot_SetAP`) is not reachable — the underlying
++  > `pdfium-render` crate keeps the raw annotation handle private. If the text
++  > must survive flattening, generate the appearance stream yourself or flatten
++  > with a tool that regenerates appearances. `set_checkbox_value/4` has none of
++  > these caveats.
++
++  Errors:
++    * `:annotation_not_found` — no annotation at `index` on that page
++    * `:not_a_form_field` — that annotation is not a form-field widget
++    * `:wrong_field_type` — the widget is a form field, but not a text field
++    * `:value_not_applied` — the write did not take: pdfium writes into the
++      *annotation's* dictionary, which is the field itself only when the widget
++      and the field are one object. When a field owns several widgets, its value
++      lives on a separate parent object that this write cannot reach. pdfium
++      reports no error for that, so the value is read back and the mismatch is
++      surfaced here instead of silently doing nothing.
++    * `:form_set_failed` — pdfium rejected the write
++    * `:page_out_of_bounds` / `:document_closed`
++  """
++  @spec set_text_field_value(
++          Document.t(),
++          non_neg_integer(),
++          non_neg_integer(),
++          String.t()
++        ) :: {:ok, Document.t()} | {:error, atom()}
++  def set_text_field_value(%Document{ref: ref} = doc, page, index, value)
++      when is_integer(page) and page >= 0 and is_integer(index) and index >= 0 and
++             is_binary(value),
++      do: wrap(doc, Native.document_set_text_field_value(ref, page, index, value))
++
++  @doc group: :forms
++  @doc """
++  Check (`true`) or clear (`false`) the checkbox whose widget is annotation
++  `index` on `page`.
++
++  Unlike `set_text_field_value/4`, the result is always visible: a checkbox's
++  appearances are pre-baked, one per state, in its `/AP /N` dictionary, and
++  pdfium switches the in-use state (`/AS`) along with the value — so the new
++  state renders, survives `save_to_bytes/1`, and `flatten/1` bakes it, with no
++  `/NeedAppearances` caveat.
++
++  Like `set_text_field_value/4`, the state is read back through pdfium before
++  success is reported. Errors are the same set.
++
++  > #### Read `:checked`, not `:value`, after a write {: .info}
++  > pdfium's setter stores the on/off state name as a PDF *string* (`(/Yes)`)
++  > where the spec asks for a *name* (`/Yes`). pdfium itself reads that back
++  > correctly, so `form_fields/1`'s `:checked` stays accurate, but its `:value`
++  > — the group's selected-state string — becomes unreliable for a checkbox you
++  > have written to. Other readers that key on `/AS` see the same string form.
++
++  > #### Radio buttons are not supported {: .info}
++  > `pdfium-render` 0.8.37's radio setter takes the on-state name from the
++  > widget's *current* `/AS` rather than its export value, so selecting an
++  > unselected button writes the literal `"Off"`. There is no public path around
++  > it, so no radio write is exposed rather than one that silently does the
++  > wrong thing.
++  """
++  @spec set_checkbox_value(Document.t(), non_neg_integer(), non_neg_integer(), boolean()) ::
++          {:ok, Document.t()} | {:error, atom()}
++  def set_checkbox_value(%Document{ref: ref} = doc, page, index, checked)
++      when is_integer(page) and page >= 0 and is_integer(index) and index >= 0 and
++             is_boolean(checked),
++      do: wrap(doc, Native.document_set_checkbox_value(ref, page, index, checked))
++
+   @doc group: :forms
+   @doc """
+   Return the annotations on a 0-indexed page, in page order.
+@@ -1558,6 +1671,107 @@ defmodule ExPdfium do
+       when is_integer(page_index) and page_index >= 0 and is_integer(degrees),
+       do: wrap(doc, Native.document_rotate_page(ref, page_index, degrees))
+ 
++  @doc group: :writing
++  @doc """
++  Set one of a page's boundary boxes to `bounds` (a `t:bounds/0` in PDF points).
++
++  `box` is `:media`, `:crop`, `:bleed`, `:trim`, or `:art`. This is the write
++  side of `page_info/2`'s `:boxes`. Setting the **crop box** is how you crop a
++  page: it does not remove content, it narrows the region viewers show and
++  `render_page/3` rasterises. Setting the **media box** changes the page's
++  physical size. Mutates `doc` in place and returns `{:ok, doc}`.
++
++      # crop 36pt off every edge of a US Letter page
++      {:ok, doc} = ExPdfium.set_page_box(doc, 0, :crop,
++                     %{left: 36, bottom: 36, right: 576, top: 756})
++
++  The change takes effect **immediately**, with no save-and-reopen round trip:
++  `page_info/2` reports the new `:width`/`:height` and `render_page/3` rasterises
++  the new region on the very next call, byte-for-byte identically to a reopened
++  copy. That makes an interactive crop — adjust, re-render, adjust again — a
++  sequence of calls on one open document.
++
++  Errors:
++    * `:unsupported_box` — `box` is not one of the five settable boxes
++    * `:bad_option` — a non-finite, inverted, or zero-area rectangle
++    * `:page_out_of_bounds` / `:document_closed`
++  """
++  @spec set_page_box(
++          Document.t(),
++          non_neg_integer(),
++          :media | :crop | :bleed | :trim | :art,
++          bounds()
++        ) :: {:ok, Document.t()} | {:error, atom()}
++  def set_page_box(%Document{ref: ref} = doc, page_index, box, %{} = bounds)
++      when is_integer(page_index) and page_index >= 0 and is_atom(box) do
++    %{left: l, bottom: b, right: r, top: t} = bounds
++
++    wrap(
++      doc,
++      Native.document_set_page_box(ref, page_index, box, l * 1.0, b * 1.0, r * 1.0, t * 1.0)
++    )
++  end
++
++  @doc group: :writing
++  @doc """
++  Draw a copy of `source`'s page as a Form XObject on a page of `doc`, scaled to
++  fill `bounds`.
++
++  This is the underlay / overlay / n-up primitive: PDF stationery, a watermark
++  taken from another PDF, and imposition are all this call. The source page is
++  placed as page **content**, so it is drawn on top of whatever is already there;
++  put it down first (or draw onto a blank page) to use it as a background.
++  `source` is not modified.
++
++      # stamp page 0 of letterhead.pdf across the whole of page 0
++      {:ok, doc} = ExPdfium.place_page(doc, 0, letterhead, 0,
++                     %{left: 0, bottom: 0, right: 612, top: 792})
++
++  The source page's own coordinate space (its crop box, or media box when there
++  is no crop box) is mapped onto `bounds`, so a page whose box origin is not
++  `(0, 0)` still lands where you asked. Aspect ratio is **not** preserved — pass
++  a rectangle with the source page's proportions if you need that.
++
++  Errors:
++    * `:same_document` — `doc` and `source` are the same handle; copy the
++      document (`save_to_bytes/1` then `open/1`) to place a page on itself
++    * `:bad_option` — a non-finite, inverted, or zero-area rectangle
++    * `:page_out_of_bounds` / `:document_closed`
++    * `:place_failed` — pdfium could not import or attach the XObject
++  """
++  @spec place_page(
++          Document.t(),
++          non_neg_integer(),
++          Document.t(),
++          non_neg_integer(),
++          bounds()
++        ) :: {:ok, Document.t()} | {:error, atom()}
++  def place_page(
++        %Document{ref: dest_ref} = doc,
++        page_index,
++        %Document{ref: source_ref},
++        source_page_index,
++        %{} = bounds
++      )
++      when is_integer(page_index) and page_index >= 0 and is_integer(source_page_index) and
++             source_page_index >= 0 do
++    %{left: l, bottom: b, right: r, top: t} = bounds
++
++    wrap(
++      doc,
++      Native.document_place_page(
++        dest_ref,
++        page_index,
++        source_ref,
++        source_page_index,
++        l * 1.0,
++        b * 1.0,
++        r * 1.0,
++        t * 1.0
++      )
++    )
++  end
++
+   @doc group: :writing
+   @doc """
+   Flatten a 0-indexed page's annotations and form fields into its static content.
+
+================================================================================
+REMAINING HUNKS (additive only; byte-exact in d4_patch.diff)
+
+test/ex_pdfium_test.exs  (+377)
+  New `@forms_kids` fixture attribute, and five new describe blocks with 21 tests:
+    "Writing: set_page_box/4"                      7 tests
+    "Writing: place_page/5"                        4 tests
+    "Writing: geometry & composition concurrency"  1 test (100 tasks, 32-way)
+    "Forms: set_text_field_value/4"                7 tests
+    "Forms: set_checkbox_value/4"                  3 tests
+    "Rendering: print intent"                      3 tests
+  Two private helpers: ink/1 (count non-white pixels) and field/2 (find by name).
+
+test/fixtures/forms_kids_gen.py  (+81)  new file, in the style of forms_gen.py
+test/fixtures/forms_kids.pdf     (+45)  new file, 1105 bytes, generated by the above
+  A form whose text field holds /V on a field object with a SEPARATE kid widget
+  (obj 4 + obj 7), plus a merged widget+field (obj 5) for contrast. This is the
+  fixture that pins :value_not_applied.
+
+CHANGELOG.md  (+44)  an [Unreleased] "Added" section plus a "Notes" section
+                     recording the /AP behaviour and why radio is excluded.
+README.md     (+61)  print_quality: in the Rendering section; :index in the
+                     form_fields example; two new sections, "Writing — page
+                     geometry and composition" and "Writing — form values".

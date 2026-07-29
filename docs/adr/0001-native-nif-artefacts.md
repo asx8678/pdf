@@ -1,7 +1,9 @@
 # ADR 0001 — Native NIF artefacts on Apple Silicon
 
 - **Status:** accepted for `ex_pdfium` and `vix`. OCR is settled separately in
-  [ADR 0002](0002-tesseract-sourcing.md).
+  [ADR 0002](0002-tesseract-sourcing.md). The "no Rust toolchain" consequence
+  below is **superseded in part by [ADR 0004](0004-quire-pdf-artefacts.md)**;
+  see the amended bullet under Consequences.
 - **Date:** 2026-07-29
 - **Tasks:** T-003 (pdf-86r). T-021 (pdf-n2g) and T-022 (pdf-euy) record their
   dirty-scheduler outcomes here. T-019 (pdf-9qh) will append the OCR decision.
@@ -118,7 +120,15 @@ all-time downloads.
 
 ## Consequences
 
-- No developer needs a Rust toolchain on the happy path.
+- ~~No developer needs a Rust toolchain on the happy path.~~ **No longer true,
+  and deliberately so — see [ADR 0004](0004-quire-pdf-artefacts.md).** It still
+  holds for `ex_pdfium` and `vix`, which download precompiled artefacts. But
+  `native/quire_pdf` (ADR 0003 D1) is compiled from source by `use Rustler` on
+  every `mix compile`, so **Rust ≥ 1.91 is now a hard requirement** — that
+  floor is rustler 0.38.0's own declared MSRV, which cargo enforces absolutely.
+  ADR 0004 records why building from source is nonetheless the right choice:
+  Rust is already unconditional for Phase 13's Tauri build, `mise install`
+  provides it at bootstrap, and doctor already asserts it.
 - PDFium is fixed at whatever `ex_pdfium 0.5.1` bundles — **144.0.7543.0**, not
   the 151.0.7891.0 Appendix D claims. Nothing may rely on a post-144 API.
 - Appendix A and Appendix D need amending in several places; tracked separately.
