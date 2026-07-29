@@ -66,6 +66,35 @@ defmodule Quire.SchemaTest do
     end
   end
 
+  describe "migration audit" do
+    @doc """
+    plan3.md §3.4 bans `CREATE EXTENSION` in migrations outright — the build
+    must work on a stock PostgreSQL 18 from Homebrew with no extensions loaded.
+    """
+    test "no CREATE EXTENSION in any migration file" do
+      migration_dir = Path.join(Application.app_dir(:quire, "priv/repo/migrations"), "*")
+
+      violations =
+        migration_dir
+        |> Path.wildcard()
+        |> Enum.filter(&String.ends_with?(&1, ".exs"))
+        |> Enum.flat_map(fn path ->
+          File.read!(path)
+          |> String.split("\n", trim: true)
+          |> Enum.with_index(1)
+          |> Enum.filter(fn {line, _idx} ->
+            String.contains?(line, "CREATE EXTENSION")
+          end)
+          |> Enum.map(fn {line, idx} ->
+            "#{Path.basename(path)}:#{idx}: #{String.trim(line)}"
+          end)
+        end)
+
+      assert violations == [],
+             "CREATE EXTENSION found in migration file(s):\n" <> Enum.join(violations, "\n")
+    end
+  end
+
   describe "schema audit" do
     @doc """
     Every Ecto schema must use `Quire.Schema` to ensure UUID v7 primary keys.
