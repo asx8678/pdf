@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+#
+# Dependency licence scanner — reads Hex metadata for every dep and enforces
+# a project-level allow/deny list.
+#
+# Usage:  bash mise-tasks/check-licences
+#         exit 0  → all deps pass
+#         exit 1  → one or more deps failed
+#
+# Deps that have NO hex_metadata.config (github-only deps: daisyui, heroicons)
+# are hardcoded as allowed.
+#
+# Some deps ship compiled artefacts under a different licence than the Hex
+# metadata declares; those are maintained in the OVERRIDE_* arrays below.
+#
+set -uo pipefail
+
+# ─── Configuration ───────────────────────────────────────────────────────────
+
+# Allow list  —  SPDX identifiers (orthodox case).
+# Every dep must declare at least one licence in this set.
+ALLOW_ITEMS="MIT Apache-2.0 BSD-2-Clause BSD-3-Clause BSD-4-Clause ISC LGPL-3.0-or-later MPL-1.1 MPL-2.0"
+
+# Non-Hex deps (plain github dependencies).  They have no hex_metadata.config
+# so we hardcode the allow verdict.
+NON_HEX_ALLOW="daisyui heroicons"
+
+# Override map  —  dep name → artefact-licence note.
+# These deps declare one thing on Hex but the final artefact (e.g. a bundled
+# dylib) is under a different licence.  We still check the declared licence
+# against the allow/deny lists, then append this note.
+# (Indexed arrays — compatible with bash 3.2 on macOS.)
+OVERRIDE_DEPS=(vix ex_pdfium)
+OVERRIDE_NOTES=(
+  "declared MIT but bundles LGPL-3.0-or-later (libvips dylib)"
+  "declared MIT but bundles LGPL-3.0-or-later (libpdfium)"
+)
+
+# Lower-cased allow list for case-insensitive comparison
+ALLOW_LC=""
+for a in $ALLOW_ITEMS; do
+  ALLOW_LC="$ALLOW_LC $(echo "$a" | tr '[:upper:]' '[:lower:]')"
+done
+
+# ─── Helpers ─────────────────────────────────────────────────────────────────
+
+# Look up an override note for a dep; prints empty string if absent.
+override_note() {
+  local dep="$1" i
+  for i in "${!OVERRIDE_DEPS[@]}"; do
+    if [ "${OVERRIDE_DEPS[$i]}" = "$dep" ]; then
+      echo "${OVERRIDE_NOTES[$i]}"
+      return 0
+    fi
+  done
+  echo ""
+}
+
+# Normalise a licence string:
+#   1. case-fold
+#   2. collapse whitespace runs to a single hyphen
+#   3. alias table (for non-SPDX forms that survive the mechanical steps)
+normalise() {
+  local s="$1"
+  # step 1 & 2
+  s=$(echo "$s" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]][[:space:]]*/-/g')
+  # step 3  —  alias table (maps to canonical SPDX casing)
+  case "$s" in
+    "bsd-2-clause") echo "BSD-2-Clause" ;;
+    "bsd-3-clause") echo "BSD-3-Clause" ;;
+    "bsd-4-clause") echo "BSD-4-Clause" ;;
+    "mit")          echo "MIT" ;;
+    "isc")          echo "ISC" ;;
+    "apache-2.0")   echo "Apache-2.0" ;;
+    "lgpl-3.0-or-later") echo "LGPL-3.0-or-later" ;;
+    *)              echo "$s" ;;
+  esac
+}
+
+# Check a single normalised licence string.
+# Returns:
+#   0  allowed
+#   1  denied (GPL/AGPL)
+#   2  unknown (not in allow list)
+check_licence() {
+  local norm="$1"
+
+  # Deny list  —  any GPL-* or AGPL-* (LGPL is handled by allow list)
+  case "$norm" in
+    gpl*|agpl*) return 1 ;;
+  esac
+
+  # Allow list (case-insensitive)
+  local lc
+  lc=$(echo "$norm" | tr '[:upper:]' '[:lower:]')
+  for a in $ALLOW_LC; do
+    [ "$lc" = "$a" ] && return 0
+  done
+
+  return 2   # not in allow, not denied → unknown
+}
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+failures=0
+total=0
+
+# Table output — aligns columns.
+print_row() {
+  local dep="$1" lic="$2" verdict="$3" note="$4"
+  printf "  %-30s  %-24s  %s" "$dep" "$lic" "$verdict"
+  if [ -n "$note" ]; then
+    printf "  [%s]" "$note"
+  fi
+  printf "\n"
+}
+
+# ── Phase 1: Hardcoded non-Hex deps ─────────────────────────────────────────
+
+for dep in $NON_HEX_ALLOW; do
+  total=$((total + 1))
+  if [ -d "deps/$dep" ]; then
+    print_row "$dep" "(non-Hex)" "pass" ""
+  else
+    print_row "$dep" "(not fetched)" "skip" "not in deps/ — run mix deps.get"
+  fi
+done
+
+# ── Phase 2: Every dep with a hex_metadata.config ───────────────────────────
+
+for config in deps/*/hex_metadata.config; do
+  [ -f "$config" ] || continue
+
+  dep=$(basename "$(dirname "$config")")
+  total=$((total + 1))
+  note=$(override_note "$dep")
+
+  # Parse
+  raw=$(grep '{<<"licenses">>,' "$config" 2>/dev/null || true)
+  if [ -z "$raw" ]; then
+    print_row "$dep" "(missing)" "FAIL" "no licences field"
+    failures=$((failures + 1))
+    continue
+  fi
+
+  # Extract the bracket content (value list), then pull <<"...">> strings
+  content=$(echo "$raw" | sed -n 's/.*{<<"licenses">>,\[\(.*\)\]}.*/\1/p')
+  [ -z "$content" ] && content="$raw"
+  raw_lics=()
+  while IFS= read -r l; do
+    raw_lics[${#raw_lics[@]}]="$l"
+  done < <(echo "$content" | grep -oE '<<"[^"]+">>' | sed 's/^<<"//; s/">>$//')
+
+  if [ ${#raw_lics[@]} -eq 0 ]; then
+    print_row "$dep" "(empty)" "FAIL" "licences field is empty"
+    failures=$((failures + 1))
+    continue
+  fi
+
+  # Classify each licence
+  dep_ok=true
+  dep_bad=""
+  dep_decl=""
+
+  for raw_lic in "${raw_lics[@]}"; do
+    [ -n "$dep_decl" ] && dep_decl="$dep_decl, "
+    dep_decl="${dep_decl}${raw_lic}"
+
+    norm=$(normalise "$raw_lic")
+
+    if check_licence "$norm"; then
+      :  # allowed
+    else
+      rc=$?
+      if [ "$rc" -eq 1 ]; then
+        dep_bad="${dep_bad}${dep_bad:+ }${raw_lic}(denied)"
+      else
+        dep_bad="${dep_bad}${dep_bad:+ }${raw_lic}(unknown)"
+      fi
+      dep_ok=false
+    fi
+  done
+
+  if $dep_ok; then
+    print_row "$dep" "$dep_decl" "pass" "$note"
+  else
+    print_row "$dep" "$dep_decl" "FAIL" "$dep_bad"
+    failures=$((failures + 1))
+  fi
+done
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+
+printf '\n  checked %d dep(s), %d failure(s)\n' "$total" "$failures"
+
+if [ "$failures" -gt 0 ]; then
+  printf '\n  Some deps have disallowed or unknown licences.  The allow list is:\n'
+  printf '    %s\n' "$ALLOW_ITEMS"
+  printf '  Any GPL* or AGPL* is denied (LGPL* is allowed per the list above).\n'
+  exit 1
+fi
+
+exit 0

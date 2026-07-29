@@ -86,9 +86,20 @@ mix test
 [tasks.check]
 description = "Full pre-push suite: format, warnings-as-errors, credo, licence scan, tests"
 depends = ["doctor"]
+env = { MIX_ENV = "test" }
 run = """
-echo "mise run check is implemented in T-005 (pdf-a47)." >&2
-exit 1
+set -euo pipefail
+ulimit -n 8192
+mix format --check-formatted
+mix compile --warnings-as-errors
+mix credo --strict
+mix dialyzer
+mix test
+mix sobelow --exit
+mix deps.audit
+bash mise-tasks/check-licences
+bash mise-tasks/crash-fuzz
+echo "check: all passed"
 """
 
 [tasks.e2e]
