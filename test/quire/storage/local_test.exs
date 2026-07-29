@@ -1,11 +1,11 @@
-defmodule Quire.Storage.WebTest do
+defmodule Quire.Storage.LocalTest do
   use ExUnit.Case, async: false
 
   import Quire.StorageCase
 
   alias Quire.Storage
   alias Quire.Storage.Ref
-  alias Quire.Storage.Web
+  alias Quire.Storage.Local
 
   setup do
     tmp_root = storage_tmp_root!()
@@ -18,9 +18,9 @@ defmodule Quire.Storage.WebTest do
     :ok
   end
 
-  defp adapter, do: Web
+  defp adapter, do: Local
 
-  # ── Shared StorageCase suite (identical structure in LocalTest) ─────────
+  # ── Shared StorageCase suite (identical structure in WebTest) ──────────
 
   describe "shared suite" do
     test "exports all callbacks" do
@@ -109,60 +109,72 @@ defmodule Quire.Storage.WebTest do
     end
   end
 
-  # ── Web-specific tests ──────────────────────────────────────────────────
+  # ── Local-specific tests ────────────────────────────────────────────────
 
-  describe "key fan-out" do
-    test "generates a two-level fan-out key" do
-      assert {:ok, %Ref{key: key}} = Storage.put("data", name: "doc.pdf")
+  describe "absolute path key" do
+    test "Ref.key is the absolute path passed in opts" do
+      tmp_root = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
+      target_path = Path.join(tmp_root, "custom_location.bin")
 
-      parts = String.split(key, "/")
-      assert length(parts) == 3
-      assert String.length(Enum.at(parts, 0)) == 2
-      assert String.length(Enum.at(parts, 1)) == 2
-      assert String.length(Enum.at(parts, 2)) == 36
+      assert {:ok, %Ref{key: ^target_path}} =
+               Storage.put("content", path: target_path, name: "custom.bin")
+    end
+
+    test "put returns error without opts[:path]" do
+      assert {:error, :path_required} = Storage.put("data", name: "no-path.txt")
+    end
+
+    test "absolute path resolves on get" do
+      tmp_root = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
+      target_path = Path.join(tmp_root, "resolvable.bin")
+
+      assert {:ok, ref} = Storage.put("accessible", path: target_path, name: "r.bin")
+      assert {:ok, "accessible"} = Storage.get(ref)
     end
   end
 
-  describe "atomic writes" do
-    test "no orphan .tmp files after successful write" do
-      assert {:ok, %Ref{key: key}} = Storage.put("test", name: "t.txt")
+  describe "with_local_path is zero-copy" do
+    test "path is the original absolute path" do
+      tmp_root = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
+      target_path = Path.join(tmp_root, "zero_copy.bin")
 
-      tmp_root = Application.get_env(:quire, :data_dir)
-      dir = Path.join(tmp_root, key) |> Path.dirname()
+      assert {:ok, ref} = Storage.put("data", path: target_path, name: "z.bin")
 
-      assert Enum.empty?(Path.wildcard(Path.join(dir, "*.tmp.*")))
-    end
-
-    test "no half-written ref after simulated crash" do
-      assert {:ok, ref} = Storage.put("survivor", name: "survivor.txt")
-
-      tmp_root = Application.get_env(:quire, :data_dir)
-      tmp = Path.join(tmp_root, ref.key) <> ".tmp.crashed"
-      File.write!(tmp, "half-written")
-
-      assert {:ok, "survivor"} = Storage.get(ref)
+      Storage.with_local_path(ref, fn path ->
+        assert path == target_path
+        assert File.exists?(path)
+      end)
     end
   end
 
   describe "edge cases" do
-    test "get returns error for missing ref" do
-      ref = %Ref{adapter: Web, key: "aa/bb/nonexistent", name: "missing.txt"}
+    test "get returns error for missing file" do
+      ref = %Ref{
+        adapter: Local,
+        key: "/tmp/nonexistent_#{:rand.uniform(1_000_000)}.dat",
+        name: "missing.dat"
+      }
+
       assert {:error, _} = Storage.get(ref)
     end
 
-    test "defaults name from key tail" do
-      assert {:ok, ref} = Storage.put("data", [])
-      assert String.length(Storage.name(ref)) == 36
-    end
-
     test "list_dir returns entries" do
-      assert {:ok, r1} = Storage.put("a", name: "a.txt")
+      tmp_root = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
 
-      first2 = String.slice(r1.key, 0, 2)
-      dir_ref = %Ref{adapter: Web, key: first2, name: first2}
+      dir = Path.join(tmp_root, "list_test_#{:rand.uniform(1_000_000)}")
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "a.txt"), "a")
+      File.write!(Path.join(dir, "b.txt"), "b")
 
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      dir_ref = %Ref{adapter: Local, key: dir, name: "list_test"}
       assert {:ok, entries} = Storage.list_dir(dir_ref)
-      assert length(entries) > 0
+      assert length(entries) == 2
+
+      names = Enum.map(entries, & &1.name) |> MapSet.new()
+      assert MapSet.member?(names, "a.txt")
+      assert MapSet.member?(names, "b.txt")
     end
   end
 end

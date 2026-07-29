@@ -1,49 +1,41 @@
 defmodule Quire.StorageCase do
   @moduledoc """
-  Shared test suite for every `Quire.Storage` adapter.
+  Shared helpers for every `Quire.Storage` adapter's test suite.
 
-  Usage:
-
-      defmodule Quire.Storage.WebTest do
-        use Quire.StorageCase, adapter: Quire.Storage.Web
-
-        test "put stores and get retrieves", %{adapter: adapter} do
-          assert_put_get(adapter)
-        end
-      end
-
-  The `setup` block configures a temporary storage root so tests do not
-  pollute production or development storage.
+  Each adapter's test file sets up a temporary storage root and overrides
+  the active adapter in its own `setup` block.
   """
 
-  use ExUnit.CaseTemplate
-
-  setup do
-    # Capture the current storage config and override with a temp dir for
-    # the duration of the test.
-    tmp_root = Path.join(System.tmp_dir!(), "quire_storage_test_#{:rand.uniform(1_000_000)}")
-
-    on_exit(fn ->
-      File.rm_rf!(tmp_root)
-    end)
-
-    {:ok, tmp_root: tmp_root}
+  @doc """
+  Creates and returns the path to a temporary directory for storage tests.
+  The caller must clean it up via `on_exit`.
+  """
+  def storage_tmp_root! do
+    Path.join(System.tmp_dir!(), "quire_storage_test_#{:rand.uniform(1_000_000)}")
   end
 
   @doc """
-  Shared callback that verifies all 11 behaviour functions compile and
-  dispatch without raising for the given adapter.
-
-  Adapter-specific tests (e.g. atomic-write crash recovery, the
-  `{:error, :unsupported}` contract for `pick_open`/`pick_save`, S3 stub
-  raising) live in the individual test files.
+  Overrides `:storage_adapter` to `adapter_mod` and returns a zero-arity
+  function that restores the previous value.  The caller passes this to
+  `on_exit/1`.
   """
-  def assert_behaviour_callbacks_compile(adapter) do
-    callbacks = Quire.Storage.behaviour_info(:callbacks)
-
-    for {name, arity} <- callbacks do
-      assert function_exported?(adapter, name, arity),
-             "expected #{inspect(adapter)} to export #{name}/#{arity}"
-    end
+  def adapter_setup(adapter_mod) do
+    current = Application.fetch_env!(:quire, :storage_adapter)
+    Application.put_env(:quire, :storage_adapter, adapter_mod)
+    fn -> Application.put_env(:quire, :storage_adapter, current) end
   end
+
+  @doc """
+  Returns put opts for the given adapter.
+  """
+  def put_opts(Quire.Storage.Web, _data), do: [name: "test.bin"]
+  def put_opts(Quire.Storage.Web.Filesystem, _data), do: [name: "test.bin"]
+
+  def put_opts(Quire.Storage.Local, _data) do
+    tmp_root = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
+    path = Path.join(tmp_root, "local_test_#{:rand.uniform(1_000_000)}.bin")
+    [path: path, name: "test.bin"]
+  end
+
+  def put_opts(_adapter, _data), do: [name: "test.bin"]
 end

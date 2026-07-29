@@ -1,5 +1,5 @@
 defmodule Quire.StorageTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Quire.Storage
   alias Quire.Storage.Ref
