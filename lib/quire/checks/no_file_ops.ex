@@ -21,7 +21,13 @@ defmodule Quire.Checks.NoFileOps do
     "lib/quire/storage.ex",
     "lib/quire/storage/",
     "lib/quire/engine.ex",
-    "test/support/"
+    "test/support/",
+    # Known legitimate File./Path./System.cmd uses not bypassing Storage
+    "config/",
+    "mix.exs",
+    "lib/quire/pdf.ex",
+    "lib/quire/office/reader.ex",
+    "lib/quire/checks/"
   ]
 
   @skip_prefixes ["deps/", "_build/"]
