@@ -1,8 +1,6 @@
 defmodule Quire.EngineWrapperTest do
   use ExUnit.Case, async: false
 
-  alias Quire.Storage.Ref
-
   # A 1×1 pixel PNG (valid 67-byte binary)
   @tiny_png <<
     0x89,
@@ -80,8 +78,8 @@ defmodule Quire.EngineWrapperTest do
     orig_backend = Application.get_env(:quire, :storage_backend)
     orig_data_dir = Application.get_env(:quire, :data_dir)
 
-    Application.put_env(:quire, :storage_adapter, Quire.Storage.Local)
-    Application.put_env(:quire, :storage_backend, nil)
+    Application.put_env(:quire, :storage_adapter, Quire.Storage.Web)
+    Application.put_env(:quire, :storage_backend, Quire.Storage.Web.Filesystem)
     tmp_root = Path.join(System.tmp_dir!(), "engine_test_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp_root)
     Application.put_env(:quire, :data_dir, tmp_root)
@@ -100,7 +98,7 @@ defmodule Quire.EngineWrapperTest do
     test "module exists and exports callbacks" do
       assert function_exported?(Quire.Render.Pdfium, :page_count, 1)
       assert function_exported?(Quire.Render.Pdfium, :render_page, 3)
-      assert function_exported?(Quire.Render.Pdfium, :thumbnails, 3)
+      assert function_exported?(Quire.Render.Pdfium, :thumbnails, 2)
       assert function_exported?(Quire.Render.Pdfium, :extract_text, 2)
       assert function_exported?(Quire.Render.Pdfium, :extract_images, 2)
       assert function_exported?(Quire.Render.Pdfium, :outline, 1)
@@ -108,24 +106,31 @@ defmodule Quire.EngineWrapperTest do
       assert function_exported?(Quire.Render.Pdfium, :annotations, 1)
       assert function_exported?(Quire.Render.Pdfium, :search, 3)
       assert function_exported?(Quire.Render.Pdfium, :page_geometry, 1)
-      assert function_exported?(Quire.Render.Pdfium, :save, 1)
+      assert function_exported?(Quire.Render.Pdfium, :save, 2)
       assert function_exported?(Quire.Render.Pdfium, :import_pages, 3)
       assert function_exported?(Quire.Render.Pdfium, :new_document, 1)
-      assert function_exported?(Quire.Render.Pdfium, :add_page_objects, 2)
+      assert function_exported?(Quire.Render.Pdfium, :add_page, 3)
     end
 
-    test "returns {:error, :unsupported} for write operations" do
-      assert {:error, _} = Quire.Render.Pdfium.new_document([])
-      assert {:error, _} = Quire.Render.Pdfium.add_page_objects(:doc, [])
-      assert {:error, _} = Quire.Render.Pdfium.save(:doc)
-      assert {:error, _} = Quire.Render.Pdfium.import_pages(:doc, :src, [0])
+    test "mutation operations work end to end" do
+      # new_document creates a 1-page PDF and stores it
+      {:ok, ref} = Quire.Render.Pdfium.new_document(format: "A4")
+      assert %Quire.Storage.Ref{} = ref
+
+      # The saved document is a valid PDF
+      {:ok, pages} = Quire.Render.Pdfium.page_count(ref)
+      assert pages >= 1
+
+      # save round-trips through Storage
+      {:ok, saved_ref} = Quire.Render.Pdfium.save(ref, [])
+      assert %Quire.Storage.Ref{} = saved_ref
+      {:ok, saved_count} = Quire.Render.Pdfium.page_count(saved_ref)
+      assert saved_count >= 1
     end
 
     test "handles invalid PDF with error" do
-      dir = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
-      path = Path.join(dir, "bad.pdf")
-      File.write!(path, "not a pdf")
-      ref = %Ref{adapter: Quire.Storage.Local, key: path, name: "bad.pdf"}
+      content = "not a pdf"
+      {:ok, ref} = Quire.Storage.put(content, name: "bad.pdf")
 
       assert {:error, _} = Quire.Render.Pdfium.page_count(ref)
     end

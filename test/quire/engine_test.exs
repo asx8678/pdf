@@ -16,7 +16,7 @@ defmodule Quire.EngineTest do
       assert Map.has_key?(callbacks, :outline)
       assert Map.has_key?(callbacks, :import_pages)
       assert Map.has_key?(callbacks, :new_document)
-      assert Map.has_key?(callbacks, :add_page_objects)
+      assert Map.has_key?(callbacks, :add_page)
       assert Map.has_key?(callbacks, :save)
     end
 
@@ -240,9 +240,12 @@ defmodule Quire.EngineTest do
 
     test "matching check result logic" do
       result = Quire.Engine.check()
+      optional = Quire.Engine.optional_engines()
 
       expected =
-        Enum.all?(result.engines, fn {_mod, s} -> s.state == :ok end) &&
+        result.engines
+        |> Enum.reject(fn {mod, _s} -> mod in optional end)
+        |> Enum.all?(fn {_mod, s} -> s.state == :ok end) &&
           Enum.all?(result.smoke_tests, fn {_n, s} -> s == :ok end)
 
       assert Quire.Engine.healthy?() == expected

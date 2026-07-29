@@ -473,7 +473,11 @@ defmodule Quire.Engine do
       duration = System.monotonic_time() - start
       :telemetry.execute([:quire, :engine, :stop], %{duration: duration}, metadata)
 
-      {:ok, result}
+      case result do
+        {:ok, _} -> result
+        {:error, _} -> result
+        _ -> {:ok, result}
+      end
     rescue
       e ->
         duration = System.monotonic_time() - start

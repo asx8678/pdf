@@ -52,7 +52,7 @@ defmodule Quire.Render.Client do
   def new_document(_opts), do: {:error, :unavailable}
 
   @impl Quire.Render
-  def add_page_objects(_ref, _objects, _opts), do: {:error, :unavailable}
+  def add_page(_ref, _page_size, _opts), do: {:error, :unavailable}
 
   @impl Quire.Render
   def save(_ref, _opts), do: {:error, :unavailable}

@@ -1376,8 +1376,9 @@ vendor the fork) — the MIT licence makes this painless.
 preview rendering degrades to the browser: pdf.js already renders every page
 the user looks at, so the viewer hook captures downscaled canvas PNGs and
 uploads them. This is slower and only covers pages actually viewed, which is
-fine for a degraded mode — and it keeps *reading* fully functional even with
-the NIF gone. Server-authoritative text extraction has no client substitute;
+fine for a degraded mode — without the NIF, page count, geometry and encryption detection are
+unavailable, so document open cannot proceed. Client-side thumbnail
+contribution is available through a LiveView event handler. Server-authoritative text extraction has no client substitute;
 `extract_text` simply reports `unavailable` and text-dependent features
 degrade per §7.2.
 
@@ -1682,6 +1683,9 @@ MUST be implemented (T-032) — this is a productivity app.
 - Every panel needs an empty state (no bookmarks, no comments, no
   attachments, no signatures) — the reference app has them and their absence
   reads as broken.
+- Degraded-mode banner The workspace displays a persistent banner when PDFium
+  is unavailable ("Server rendering unavailable — thumbnails use browser
+  capture"). Dismissable until reload.
 
 ---
 
@@ -2181,7 +2185,13 @@ Every path into the workspace converges here:
    **range-request-capable controller** (`document_controller.ex`) so pdf.js
    can fetch progressively — do not send the whole file in one response.
 
-**Corrupt-file handling:** PDFium's loader is deliberately tolerant and
+   **PDFium requirement.** PDFium is required for document open. Without it:
+   - `Render.page_count` and `page_geometry` are unavailable
+   - Encryption detection cannot proceed
+   - Document open reports an error with a message naming the remedy (install
+     the PDFium NIF)
+
+**Corrupt-file handling: PDFium's loader is deliberately tolerant and
 repairs broken xref tables on load. Attempt a load-and-resave repair, tell
 the user what was wrong, and open the repaired copy as revision 1 with a
 note. Files that even tolerant loading rejects get a clear, specific error —

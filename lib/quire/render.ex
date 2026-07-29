@@ -101,7 +101,11 @@ defmodule Quire.Render do
   `page_nums` is a list of zero-based page numbers to import.
   Returns `{:ok, ref}` pointing to the resulting document.
   """
-  @callback import_pages(source_ref :: Ref.t(), dest_ref :: Ref.t(), page_nums :: [non_neg_integer()]) ::
+  @callback import_pages(
+              source_ref :: Ref.t(),
+              dest_ref :: Ref.t(),
+              page_nums :: [non_neg_integer()]
+            ) ::
               {:ok, Ref.t()} | {:error, term()}
 
   @doc """
@@ -113,11 +117,12 @@ defmodule Quire.Render do
   @callback new_document(opts :: keyword()) :: {:ok, Ref.t()} | {:error, term()}
 
   @doc """
-  Adds content objects (text, images, paths) to an existing document.
+  Adds a blank page to an existing document.
 
-  Returns `{:ok, ref}` pointing to the updated document.
+  `page_size` is an atom like `:letter` or `:a4`.  Returns `{:ok, ref}`
+  pointing to the updated document.
   """
-  @callback add_page_objects(ref :: Ref.t(), objects :: list(), opts :: keyword()) ::
+  @callback add_page(ref :: Ref.t(), page_size :: atom(), opts :: keyword()) ::
               {:ok, Ref.t()} | {:error, term()}
 
   @doc """
@@ -273,13 +278,16 @@ defmodule Quire.Render do
   end
 
   @doc """
-  Adds content objects to a document.
+  Adds a blank page to a document.
+
+  `page_size` is an atom like `:letter` or `:a4`.  `opts` may include
+  `:page` (zero-based index at which to insert the new page).
   """
-  @spec add_page_objects(ref :: Ref.t(), objects :: list(), opts :: keyword()) ::
+  @spec add_page(ref :: Ref.t(), page_size :: atom(), opts :: keyword()) ::
           {:ok, Ref.t()} | {:error, term()}
-  def add_page_objects(ref, objects, opts \\ []) do
-    Quire.Engine.trace(__MODULE__, :add_page_objects, [ref, objects, opts], fn ->
-      adapter().add_page_objects(ref, objects, opts)
+  def add_page(ref, page_size, opts \\ []) do
+    Quire.Engine.trace(__MODULE__, :add_page, [ref, page_size, opts], fn ->
+      adapter().add_page(ref, page_size, opts)
     end)
   end
 
