@@ -102,6 +102,31 @@ else
   fail "autoconf not installed — run: brew bundle --no-upgrade"
 fi
 
+# OCR build prerequisites (ADR 0002). §3.4 permits a NIF's system C library only
+# with an ADR *and* a doctor assertion, so these are that assertion. pkg-config
+# is checked separately because Xcode CLT does not ship it and it is a
+# build-only dep of the tesseract formula — pouring the bottle does not install
+# it, and a clean second machine fails at image_ocr's Makefile without it.
+if command -v pkg-config >/dev/null 2>&1; then
+  pass "pkg-config $(pkg-config --version 2>/dev/null)"
+else
+  fail "pkg-config not installed — run: brew bundle --no-upgrade (formula is pkgconf)"
+fi
+
+if command -v pkg-config >/dev/null 2>&1 && pkg-config --atleast-version=5.0.0 tesseract 2>/dev/null; then
+  pass "tesseract $(pkg-config --modversion tesseract) / leptonica $(pkg-config --modversion lept 2>/dev/null)"
+else
+  fail "tesseract >= 5.0.0 not visible to pkg-config — image_ocr will not build (ADR 0002)"
+fi
+
+# §9.10's automatic page rotation needs osd.traineddata, which ships with the
+# base tesseract formula rather than tesseract-lang.
+if [ -f "$(brew --prefix 2>/dev/null)/share/tessdata/osd.traineddata" ]; then
+  pass "osd.traineddata present (auto-rotate)"
+else
+  fail "osd.traineddata missing — §9.10 auto-rotate will not work"
+fi
+
 # Appendix B.3 wants Chromium resolved from config, never discovery (§3.6.6).
 # That config key arrives with chromic_pdf in T-072, so there is nothing to
 # resolve yet; degrade with a clear message rather than guessing a path.

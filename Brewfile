@@ -20,13 +20,23 @@ brew "autoconf"      # kerl.
 # want to skip this cask.
 cask "chromium"
 
-# Tesseract is NOT enabled yet. Appendix B.2 makes it conditional on the T-019
-# ADR (pdf-9qh) choosing a system Tesseract over a vendored or static one, and
-# pdf-tuj (P0) has to first establish whether an in-process Tesseract NIF exists
-# at all. Uncomment both lines only when that ADR lands.
+# OCR. docs/adr/0002-tesseract-sourcing.md settled this: `image_ocr` 0.2.0 links
+# against a Homebrew Tesseract, which §3.4 permits for a NIF's system C library
+# given an ADR. Revisit at T-180 — a NIF linking /opt/homebrew cannot ship in a
+# distributed .app (§12.1 step 8).
 #
-# `tesseract-lang` is ~1.5 GB; if that is too much, drop it and let T-141
-# download language packs on demand.
-#
-# brew "tesseract"
-# brew "tesseract-lang"
+# The base formula is load-bearing for more than the shared libraries: it also
+# supplies osd.traineddata, which §9.10's automatic page rotation needs. Do not
+# swap it for a libraries-only source without seeding `osd` some other way.
+brew "tesseract"
+
+# REQUIRED, and easy to miss. image_ocr's Makefile locates Tesseract with
+# pkg-config. Xcode CLT does not ship it, and pkgconf is a *build-only*
+# dependency of the tesseract formula (`brew deps --include-build tesseract`
+# lists it; `brew deps tesseract` does not), so pouring the bottle does NOT
+# install it. Without this line a clean second machine — exactly what Gate 0
+# tests — fails with "image_ocr requires tesseract >= 5.0.0 (found none)".
+brew "pkgconf"
+
+# `tesseract-lang` (~1.5 GB) is deliberately NOT here: image_ocr vendors `eng`
+# tessdata_fast in priv/ and T-141 fetches further packs on demand.

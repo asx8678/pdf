@@ -1,6 +1,7 @@
 # ADR 0001 — Native NIF artefacts on Apple Silicon
 
-- **Status:** accepted for `ex_pdfium` and `vix`; open for OCR
+- **Status:** accepted for `ex_pdfium` and `vix`. OCR is settled separately in
+  [ADR 0002](0002-tesseract-sourcing.md).
 - **Date:** 2026-07-29
 - **Tasks:** T-003 (pdf-86r). T-021 (pdf-n2g) and T-022 (pdf-euy) record their
   dirty-scheduler outcomes here. T-019 (pdf-9qh) will append the OCR decision.
@@ -63,7 +64,9 @@ fallback and for Tauri in §12.
 ### T-021 dirty schedulers — satisfied by construction
 
 All 45 `#[rustler::nif]` attributes in `native/ex_pdfium/src/lib.rs` are
-`#[rustler::nif(schedule = "DirtyCpu")]`; there are no exceptions. The package's
+`#[rustler::nif(schedule = "DirtyCpu")]`; there are no exceptions. (45 is the
+NIF count. The Elixir surface is 51 distinct public function names across 59
+`def` clauses — an earlier draft of this ADR conflated the two.) The package's
 own module doc states the intent: "pdfium work is synchronous and CPU-heavy ->
 every NIF is DirtyCpu." Resource teardown is handed to a cleanup thread so a
 GC-driven close cannot block a normal scheduler. T-021's benchmark should still
@@ -87,7 +90,12 @@ libraries plus MPL-2.0 cairo; plan3.md's claim that vix is "LGPL-2.1,
 dynamically linked" is inaccurate on both counts, and §12's Tauri packaging
 inherits obligations the plan currently assumes away.
 
-### OCR — deferred to T-019, but `tesseract_elixir` does not exist
+### OCR — decided in [ADR 0002](0002-tesseract-sourcing.md)
+
+`image_ocr` 0.2.0 over Homebrew Tesseract, revisited at T-180. The evidence that
+led there is kept below.
+
+### `tesseract_elixir` does not exist
 
 `tesseract_elixir`, named in Appendix A, Appendix D, T-003 and T-019, **has never
 been published to Hex**. Those rows must be deleted, not version-corrected.
