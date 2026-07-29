@@ -52,8 +52,7 @@ defmodule Quire.Checks.NoFileOps do
               [
                 format_issue(
                   issue_meta,
-                  message:
-                    "File/Path/System operation outside allowed files: #{match}",
+                  message: "File/Path/System operation outside allowed files: #{match}",
                   line_no: line_no,
                   trigger: match
                 )
