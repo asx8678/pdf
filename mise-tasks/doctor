@@ -94,6 +94,27 @@ else
   fail "openssl@3 not installed — run: brew bundle --no-upgrade"
 fi
 
+# kerl needs it to build OTP from source. Appendix E: every system dependency
+# is asserted here, never assumed to be present.
+if command -v autoconf >/dev/null 2>&1; then
+  pass "autoconf $(autoconf --version 2>/dev/null | head -1 | awk '{print $NF}')"
+else
+  fail "autoconf not installed — run: brew bundle --no-upgrade"
+fi
+
+# Appendix B.3 wants Chromium resolved from config, never discovery (§3.6.6).
+# That config key arrives with chromic_pdf in T-072, so there is nothing to
+# resolve yet; degrade with a clear message rather than guessing a path.
+if [ -n "${CHROME_EXECUTABLE:-}" ]; then
+  if [ -x "$CHROME_EXECUTABLE" ]; then
+    pass "Chromium at \$CHROME_EXECUTABLE"
+  else
+    fail "CHROME_EXECUTABLE is set to '$CHROME_EXECUTABLE' but is not executable"
+  fi
+else
+  skip "Chromium not configured (T-072 adds config :chromic_pdf, chrome_executable; or set CHROME_EXECUTABLE in .mise.local.toml)"
+fi
+
 # OTP must have actually linked against it, not merely had the flag set.
 if erl -noshell -eval 'case catch crypto:info_lib() of {"EXIT",_} -> halt(1); _ -> halt(0) end.' 2>/dev/null; then
   pass "OTP crypto loads (kerl found OpenSSL)"
