@@ -179,6 +179,187 @@ fn page_count(doc: ResourceArc<DocumentResource>) -> Result<usize, Atom> {
     Ok(guard.doc.get_pages().len())
 }
 
+// ── Real decimal-point fix ──────────────────────────────────────────────────
+//
+// lopdf's writer serialises Object::Real with f32's Display trait, which
+// omits the decimal point for integral values (612.0 → "612"). The parser
+// then reads "612" as an integer, and for values ≥ 1e19 the i64 parse
+// overflows and the ENTIRE OBJECT is dropped — data loss.
+//
+// The fix: before saving, replace each problematic Real with a Name marker
+// whose byte length matches the desired "<digits>.0" replacement. After
+// saving, replace each marker in-place (same byte length → xref offsets stay
+// valid). Then restore the original Reals in the live document.
+
+/// One nested Real value whose Display representation lacked a decimal point.
+///
+/// `path` encodes the sequence of dict keys and array indices needed to reach
+/// this value from the top-level object in `doc.objects`, so we can restore
+/// the original Real after save.
+struct RealFix {
+    pattern: Vec<u8>,     // full "/Q..." marker in the output
+    replacement: Vec<u8>,  // "<digits>.0", same byte length as pattern
+    top_id: ObjectId,      // the top-level object that contains this value
+    path: Vec<MarkerStep>, // steps to reach the value from top_id
+    original: Object,      // the Object::Real that was replaced (for restore)
+}
+
+/// One step in the path to a nested Real value.
+#[derive(Clone)]
+enum MarkerStep {
+    DictKey(Vec<u8>),
+    ArrayIndex(usize),
+}
+
+/// Build a same-length marker for the given `digits` counter.
+///
+/// When `needs_space` is true the replacement gets a leading space (for
+/// dict-value entries where lopdf omits whitespace before Name values), and
+/// the marker is padded to match.
+fn make_marker(digits: &str, counter: usize, needs_space: bool) -> (Vec<u8>, Vec<u8>) {
+    let replacement = if needs_space {
+        format!(" {}.0", digits).into_bytes()
+    } else {
+        format!("{}.0", digits).into_bytes()
+    };
+    let repl_len = replacement.len();
+    let ctr = format!("{}", counter);
+    let pad_len = repl_len.saturating_sub(2 + ctr.len());
+    let padding: String = std::iter::repeat('z').take(pad_len).collect();
+    let name_raw = format!("Q{}{}", padding, ctr);
+    let marker = format!("/{}", name_raw).into_bytes();
+    debug_assert_eq!(marker.len(), repl_len);
+    (marker, replacement)
+}
+
+/// Recursively walk an Object tree, replacing any Object::Real whose Display
+/// output lacks a decimal point with a same-length Name marker.
+fn mark_reals_in_object(
+    obj: &mut Object,
+    fixes: &mut Vec<RealFix>,
+    top_id: ObjectId,
+    path: &[MarkerStep],
+) {
+    match obj {
+        Object::Real(f) => {
+            let s = format!("{}", f);
+            if !s.contains('.') {
+                let needs_space = matches!(path.last(), Some(MarkerStep::DictKey(_)));
+                let (pattern, replacement) = make_marker(&s, fixes.len(), needs_space);
+                let name_bytes = pattern[1..].to_vec(); // strip leading '/'
+                fixes.push(RealFix {
+                    pattern,
+                    replacement,
+                    top_id,
+                    path: path.to_vec(),
+                    original: Object::Real(*f),
+                });
+                *obj = Object::Name(name_bytes);
+            }
+        }
+        Object::Array(items) => {
+            for (i, item) in items.iter_mut().enumerate() {
+                let mut child_path = path.to_vec();
+                child_path.push(MarkerStep::ArrayIndex(i));
+                mark_reals_in_object(item, fixes, top_id, &child_path);
+            }
+        }
+        Object::Dictionary(dict) => {
+            // Collect keys first to avoid borrow issues with iter_mut
+            let keys: Vec<Vec<u8>> = dict.iter().map(|(k, _)| k.clone()).collect();
+            for key in keys {
+                if let Ok(value) = dict.get_mut(&key) {
+                    let mut child_path = path.to_vec();
+                    child_path.push(MarkerStep::DictKey(key));
+                    mark_reals_in_object(value, fixes, top_id, &child_path);
+                }
+            }
+        }
+        Object::Stream(stream) => {
+            // Streams have a dictionary with potentially problematic Reals
+            let keys: Vec<Vec<u8>> =
+                stream.dict.iter().map(|(k, _)| k.clone()).collect();
+            for key in keys {
+                if let Ok(value) = stream.dict.get_mut(&key) {
+                    let mut child_path = path.to_vec();
+                    child_path.push(MarkerStep::DictKey(key));
+                    mark_reals_in_object(value, fixes, top_id, &child_path);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Walk all top-level objects in the document and apply the recursive Real
+/// marker replacement. Returns the collected fixes.
+fn mark_problematic_reals(doc: &mut Document) -> Vec<RealFix> {
+    let mut fixes = Vec::new();
+    let ids: Vec<ObjectId> = doc.objects.keys().copied().collect();
+    for id in &ids {
+        if let Some(obj) = doc.objects.get_mut(id) {
+            mark_reals_in_object(obj, &mut fixes, *id, &[]);
+        }
+    }
+    fixes
+}
+
+/// Follow a path of `MarkerStep`s from a top-level object and set its value.
+fn set_at_path(obj: &mut Object, path: &[MarkerStep], value: Object) {
+    let mut current = obj;
+    for step in path {
+        match step {
+            MarkerStep::DictKey(key) => {
+                if let Object::Dictionary(dict) = current {
+                    current = dict.get_mut(key).expect("key vanished");
+                }
+            }
+            MarkerStep::ArrayIndex(idx) => {
+                if let Object::Array(arr) = current {
+                    current = &mut arr[*idx];
+                }
+            }
+        }
+    }
+    *current = value;
+}
+
+/// Restore original Real values that were replaced by markers, then fix the
+/// output bytes by replacing each marker pattern with the proper number.
+fn restore_reals_and_fix_output(
+    doc: &mut Document,
+    fixes: &[RealFix],
+    out: &mut Vec<u8>,
+) {
+    // Restore originals by following the stored paths
+    for fix in fixes {
+        if let Some(obj) = doc.objects.get_mut(&fix.top_id) {
+            set_at_path(obj, &fix.path, fix.original.clone());
+        }
+    }
+
+    if fixes.is_empty() {
+        return;
+    }
+
+    // Replace markers in the output buffer. Since every marker has the same
+    // byte length as its replacement, xref offsets remain valid.
+    for fix in fixes {
+        let pat = &fix.pattern;
+        let rep = &fix.replacement;
+
+        let mut pos = 0;
+        while pos + pat.len() <= out.len() {
+            if &out[pos..pos + pat.len()] == pat.as_slice() {
+                out.splice(pos..pos + pat.len(), rep.iter().copied());
+                pos += rep.len();
+            } else {
+                pos += 1;
+            }
+        }
+    }
+}
+
 // ── Saving ───────────────────────────────────────────────────────────────────
 
 /// Serialise the whole document.
@@ -189,6 +370,8 @@ fn page_count(doc: ResourceArc<DocumentResource>) -> Result<usize, Atom> {
 #[rustler::nif(schedule = "DirtyCpu")]
 fn save(env: Env<'_>, doc: ResourceArc<DocumentResource>) -> Result<Binary<'_>, Atom> {
     let mut guard = lock(&doc)?;
+    let fixes = mark_problematic_reals(&mut guard.doc);
+
     let mut out = Vec::new();
 
     guard
@@ -196,6 +379,7 @@ fn save(env: Env<'_>, doc: ResourceArc<DocumentResource>) -> Result<Binary<'_>, 
         .save_to(&mut out)
         .map_err(|err| io_error_atom(&err))?;
 
+    restore_reals_and_fix_output(&mut guard.doc, &fixes, &mut out);
     to_binary(env, &out)
 }
 
@@ -220,6 +404,8 @@ fn save_with(
         .build();
 
     let mut guard = lock(&doc)?;
+    let fixes = mark_problematic_reals(&mut guard.doc);
+
     let mut out = Vec::new();
 
     guard
@@ -227,6 +413,7 @@ fn save_with(
         .save_with_options(&mut out, options)
         .map_err(|err| io_error_atom(&err))?;
 
+    restore_reals_and_fix_output(&mut guard.doc, &fixes, &mut out);
     to_binary(env, &out)
 }
 
@@ -248,9 +435,8 @@ fn incremental_save(env: Env<'_>, doc: ResourceArc<DocumentResource>) -> Result<
     let previous =
         Document::load_mem(&guard.origin).map_err(|err| error_atom(&err, atoms::open_failed()))?;
 
-    // Collect before constructing the IncrementalDocument: `create_from` takes
-    // `previous` by value, and `get_prev_documents()` borrows the whole
-    // IncrementalDocument, which would conflict with mutating `new_document`.
+    // Compute the diff against the original bytes. These are the objects that
+    // will appear in the appended revision.
     let mut changed: Vec<(ObjectId, Object)> = Vec::new();
     for (id, object) in &guard.doc.objects {
         if previous.objects.get(id) != Some(object) {
@@ -258,15 +444,26 @@ fn incremental_save(env: Env<'_>, doc: ResourceArc<DocumentResource>) -> Result<
         }
     }
 
+    // Apply markers recursively to the changed objects (not to the live
+    // document), so the incremental revision serialises Name markers that
+    // we fix up in the output.
+    let mut fixes: Vec<RealFix> = Vec::new();
+    for (id, obj) in &mut changed {
+        mark_reals_in_object(obj, &mut fixes, *id, &[]);
+    }
+
     let max_id = guard.doc.max_id.max(previous.max_id);
     let version = guard.doc.version.clone();
 
+    // Drop the immutable guard before building the incremental document.
+    // `changed` owns its objects, so markers survive.
+    drop(guard);
+
+    let mut guard = lock(&doc)?;
     let mut incremental = IncrementalDocument::create_from(guard.origin.clone(), previous);
     for (id, object) in changed {
         incremental.new_document.set_object(id, object);
     }
-    // `Document::new_from_prev` hardcodes version 1.4 and copies only the
-    // previous `max_id`; both would be wrong for the appended revision.
     incremental.new_document.max_id = max_id;
     incremental.new_document.version = version;
 
@@ -275,6 +472,9 @@ fn incremental_save(env: Env<'_>, doc: ResourceArc<DocumentResource>) -> Result<
         .save_to(&mut out)
         .map_err(|err| io_error_atom(&err))?;
 
+    // Markers are only in the new revision, not in the live document,
+    // so no restore is needed. Just fix the output.
+    restore_reals_and_fix_output(&mut guard.doc, &fixes, &mut out);
     to_binary(env, &out)
 }
 
@@ -816,9 +1016,16 @@ fn term_to_object(term: Term<'_>) -> Result<Object, Atom> {
         return Ok(Object::Integer(term.decode::<i64>().map_err(|_| atoms::bad_object())?));
     }
 
-    // float
+    // float — reject non-finite values (NaN, ±inf) that can't be serialised
+    // as a valid PDF real, and also avoids them producing a Display output
+    // without a decimal point that would corrupt the round-trip.
     if term.is_float() {
-        return Ok(Object::Real((term.decode::<f64>().map_err(|_| atoms::bad_object())?) as f32));
+        let f: f64 = term.decode().map_err(|_| atoms::bad_object())?;
+        let f32_val = f as f32;
+        if !f32_val.is_finite() {
+            return Err(atoms::bad_object());
+        }
+        return Ok(Object::Real(f32_val));
     }
 
     // binary → String (callers use {:name, ...} for names)

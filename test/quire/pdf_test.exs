@@ -646,6 +646,87 @@ defmodule Quire.PdfTest do
     end
   end
 
+  describe "large real round trips" do
+    defp large_real_doc do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+
+      # A value = 1.0e19 — Display serialises it as "10000000000000000000"
+      # (no decimal point), which overflows i64 on re-read and drops the object.
+      dict = %{
+        "/Type" => {:name, "Page"},
+        "/LargeReal" => 10_000_000_000_000_000_000.0
+      }
+
+      assert :ok = Quire.Pdf.set_object(doc, 50, dict)
+      doc
+    end
+
+    test "save/1 preserves a large real" do
+      doc = large_real_doc()
+      {:ok, saved} = Quire.Pdf.save(doc)
+      {:ok, reopened} = Quire.Pdf.open(saved)
+
+      assert {:ok, %{"/LargeReal" => large}} = Quire.Pdf.get_object(reopened, 50)
+      assert is_float(large), "large real came back as #{inspect(large)} (#{is_integer(large)})"
+    end
+
+    test "save_with/2 preserves a large real" do
+      doc = large_real_doc()
+      {:ok, saved} = Quire.Pdf.save_with(doc, use_object_streams: false, use_xref_streams: false)
+      {:ok, reopened} = Quire.Pdf.open(saved)
+
+      assert {:ok, %{"/LargeReal" => large}} = Quire.Pdf.get_object(reopened, 50)
+      assert is_float(large), "large real came back as #{inspect(large)}"
+    end
+
+    test "incremental_save/1 preserves a large real" do
+      doc = large_real_doc()
+      {:ok, saved} = Quire.Pdf.incremental_save(doc)
+      {:ok, reopened} = Quire.Pdf.open(saved)
+
+      assert {:ok, %{"/LargeReal" => large}} = Quire.Pdf.get_object(reopened, 50)
+      assert is_float(large), "large real came back as #{inspect(large)}"
+    end
+
+    test "integral real survives as float, not integer" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+
+      dict = %{
+        "/Type" => {:name, "Page"},
+        "/Width" => 612.0,
+        "/Height" => 792.0
+      }
+
+      assert :ok = Quire.Pdf.set_object(doc, 50, dict)
+      {:ok, saved} = Quire.Pdf.save(doc)
+      {:ok, reopened} = Quire.Pdf.open(saved)
+
+      assert {:ok, %{"/Width" => w, "/Height" => h}} = Quire.Pdf.get_object(reopened, 50)
+      assert is_float(w), "Width is #{inspect(w)} (integer)"
+      assert is_float(h), "Height is #{inspect(h)} (integer)"
+    end
+
+    test "small integral real preserves type through incremental_save" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+      dict = %{"/Val" => 42.0}
+      assert :ok = Quire.Pdf.set_object(doc, 10, dict)
+
+      {:ok, saved} = Quire.Pdf.incremental_save(doc)
+      {:ok, reopened} = Quire.Pdf.open(saved)
+
+      assert {:ok, %{"/Val" => val}} = Quire.Pdf.get_object(reopened, 10)
+      assert is_float(val), "Value came back as #{inspect(val)}"
+    end
+
+    test "readers can parse a document with a large real" do
+      doc = large_real_doc()
+      {:ok, saved} = Quire.Pdf.save(doc)
+
+      # An independent parser (ExPdfium) must be able to open the document.
+      assert {:ok, _} = ExPdfium.open(saved)
+    end
+  end
+
   describe "Quire.Pdf.AcroForm" do
     defp form_pdf do
       {:ok, doc} = ExPdfium.new()
