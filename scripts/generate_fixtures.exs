@@ -8,11 +8,12 @@ defmodule GenerateFixtures do
   @pdf "test/fixtures/pdfs"
   @off "test/fixtures/office"
   @img "test/fixtures/images"
+  @txt "test/fixtures/texts"
 
   def run do
-    [@pdf, @off, @img] |> Enum.each(&File.mkdir_p!/1)
-    pdfs(); office(); images()
-    c = Enum.sum_by([@pdf, @off, @img], &(Path.wildcard(&1 <> "/*") |> length()))
+    [@pdf, @off, @img, @txt] |> Enum.each(&File.mkdir_p!/1)
+    pdfs(); office(); images(); texts()
+    c = Enum.sum_by([@pdf, @off, @img, @txt], &(Path.wildcard(&1 <> "/*") |> length()))
     IO.puts("Generated #{c} fixtures")
   end
 
@@ -304,8 +305,6 @@ defmodule GenerateFixtures do
     IO.puts("  white_1x1.png")
 
     # 2x1 white RGBA — built manually as valid PNG
-    # Filter byte (0-none) + RGB bytes per pixel, raw unfiltered = 7 bytes
-    # Compressed with zlib (minimal overhead via :zlib gemerate)
     raw = <<0, 255, 255, 255, 255, 255, 255>>
     z = :zlib.open()
     :zlib.deflateInit(z)
@@ -321,6 +320,126 @@ defmodule GenerateFixtures do
       idat::binary, iend::binary>>
     write(@img, "white_2x1.png", png2)
     IO.puts("  white_2x1.png")
+
+    vips = Code.ensure_loaded?(Vix.Vips)
+
+    vips_fixtures = fn ->
+      # Use new_from_list to create images (API available in this vix version)
+      row100 = List.duplicate(128, 100)
+      grid100 = List.duplicate(row100, 100)
+      {:ok, gray_img} = Vix.Vips.Image.new_from_list(grid100)
+      {:ok, rgb_img} = Vix.Vips.Operation.colourspace(gray_img, :VIPS_INTERPRETATION_sRGB)
+      {:ok, jpg} = Vix.Vips.Image.write_to_buffer(rgb_img, ".jpg")
+      write(@img, "photo.jpg", jpg); IO.puts("  photo.jpg")
+
+      row200 = List.duplicate(200, 200)
+      grid200 = List.duplicate(row200, 100)
+      {:ok, can_img} = Vix.Vips.Image.new_from_list(grid200)
+      {:ok, s_rgb} = Vix.Vips.Operation.colourspace(can_img, :VIPS_INTERPRETATION_sRGB)
+      {:ok, png} = Vix.Vips.Image.write_to_buffer(s_rgb, ".png")
+      write(@img, "screenshot.png", png); IO.puts("  screenshot.png")
+
+      row50 = List.duplicate(100, 50)
+      grid50 = List.duplicate(row50, 20)
+      {:ok, scan_img} = Vix.Vips.Image.new_from_list(grid50)
+      {:ok, tiff} = Vix.Vips.Image.write_to_buffer(scan_img, ".tiff")
+      write(@img, "scan_gray.tiff", tiff); IO.puts("  scan_gray.tiff")
+
+      # transparent.png — RGBA with alpha via addalpha
+      {:ok, rgb_t} = Vix.Vips.Operation.colourspace(scan_img, :VIPS_INTERPRETATION_sRGB)
+      {:ok, with_alpha} = Vix.Vips.Operation.addalpha(rgb_t)
+      {:ok, t_png} = Vix.Vips.Image.write_to_buffer(with_alpha, ".png")
+      write(@img, "transparent.png", t_png); IO.puts("  transparent.png")
+
+      # cmyk.jpg
+      {:ok, cmyk} = Vix.Vips.Operation.colourspace(gray_img, :VIPS_INTERPRETATION_CMYK)
+      {:ok, cmyk_jpg} = Vix.Vips.Image.write_to_buffer(cmyk, ".jpg")
+      write(@img, "cmyk.jpg", cmyk_jpg); IO.puts("  cmyk.jpg")
+    end
+
+    if vips do
+      try do
+        vips_fixtures.()
+      rescue
+        e -> IO.puts("  (vix fixtures skipped: #{Exception.message(e)})")
+      end
+    else
+      IO.puts("  (vix fixtures skipped — Vix not loaded)")
+    end
+
+    # huge_dimensions.png — 100000x1, tiny actual data
+    # Manual PNG: IHDR says 100000x1, IDAT has 1 filter byte + 3 RGB bytes
+    raw_huge = <<0, 128, 128, 128>>
+    zh = :zlib.open()
+    :zlib.deflateInit(zh)
+    comp_huge = IO.iodata_to_binary(:zlib.deflate(zh, raw_huge, :finish))
+    :zlib.deflateEnd(zh)
+    :zlib.close(zh)
+    c_huge = &:erlang.crc32(&1)
+    # IHDR: 100000x1, 8-bit RGB (color type 2)
+    ihdr_huge = <<0, 0, 0, 13, 73, 72, 68, 82, 0, 1, 134, 160, 0, 0, 0, 1, 8, 2, 0, 0, 0>> <> <<c_huge.("IHDR" <> <<0, 1, 134, 160, 0, 0, 0, 1, 8, 2, 0, 0, 0>>)::32>>
+    l_huge = byte_size(comp_huge)
+    idat_huge = <<l_huge::32, 73, 68, 65, 84, comp_huge::binary, c_huge.("IDAT" <> comp_huge)::32>>
+    iend_huge = <<0, 0, 0, 0, 73, 69, 78, 68, c_huge.("IEND")::32>>
+    write(@img, "huge_dimensions.png", <<137, 80, 78, 71, 13, 10, 26, 10, ihdr_huge::binary, idat_huge::binary, iend_huge::binary>>)
+    IO.puts("  huge_dimensions.png")
+
+    # truncated.jpg — build a minimal JPEG then truncate
+    truncate_fixtures = fn ->
+      tiny_row = List.duplicate(64, 20)
+      tiny_grid = List.duplicate(tiny_row, 20)
+      {:ok, tiny_img} = Vix.Vips.Image.new_from_list(tiny_grid)
+      {:ok, tiny_rgb} = Vix.Vips.Operation.colourspace(tiny_img, :VIPS_INTERPRETATION_sRGB)
+      {:ok, full_jpg} = Vix.Vips.Image.write_to_buffer(tiny_rgb, ".jpg")
+      sz = byte_size(full_jpg)
+      truncated = binary_part(full_jpg, 0, max(0, sz - 50))
+      write(@img, "truncated.jpg", truncated); IO.puts("  truncated.jpg")
+
+      # exif_rotated.jpg — JPEG with EXIF Orientation=6 (90CW)
+      exif_row = List.duplicate(255, 50)
+      exif_grid = List.duplicate(exif_row, 50)
+      {:ok, exif_img} = Vix.Vips.Image.new_from_list(exif_grid)
+      {:ok, exif_rgb} = Vix.Vips.Operation.colourspace(exif_img, :VIPS_INTERPRETATION_sRGB)
+      {:ok, exif_raw} = Vix.Vips.Image.write_to_buffer(exif_rgb, ".jpg")
+
+      # EXIF APP1 with Orientation=6
+      exif_ifd = <<0x49, 0x49, 0x2A, 0x00, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, 6, 0, 0, 0, 0, 0, 0, 0>>
+      app1 = <<0xFF, 0xE1, (2 + byte_size(exif_ifd))::16, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00, exif_ifd::binary>>
+      <<0xFF, 0xD8, rest::binary>> = exif_raw
+      write(@img, "exif_rotated.jpg", <<0xFF, 0xD8, app1::binary, rest::binary>>); IO.puts("  exif_rotated.jpg")
+    end
+
+    if vips do
+      try do
+        truncate_fixtures.()
+      rescue
+        e -> IO.puts("  (truncated/exif skipped: #{Exception.message(e)})")
+      end
+    else
+      IO.puts("  (truncated/exif skipped — Vix not loaded)")
+    end
+
+    # multipage.tiff — save twice with page_height option
+    if vips do
+      try do
+        mp_row = List.duplicate(128, 50)
+        mp_grid = List.duplicate(mp_row, 20)
+        {:ok, mp_img} = Vix.Vips.Image.new_from_list(mp_grid)
+        {:ok, multi} = Vix.Vips.Image.write_to_buffer(mp_img, ".tiff", page_height: 20, n: 2)
+        write(@img, "multipage.tiff", multi); IO.puts("  multipage.tiff")
+      rescue
+        e -> IO.puts("  (multipage.tiff skipped: #{Exception.message(e)})")
+      end
+    else
+      IO.puts("  (multipage.tiff skipped — Vix not loaded)")
+    end
+  end
+
+  defp texts do
+    File.mkdir_p!(@txt)
+    write(@txt, "notes.txt", "Hello World\nThis is a text fixture.\n"); IO.puts("  notes.txt")
+    write(@txt, "data.csv", "id,name,value\n1,foo,100\n2,bar,200\n"); IO.puts("  data.csv")
+    write(@txt, "readme.md", "# Fixtures\n\nText fixtures for direct-to-HTML rendering.\n"); IO.puts("  readme.md")
   end
 end
 

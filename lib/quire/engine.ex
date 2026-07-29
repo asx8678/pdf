@@ -125,11 +125,18 @@ defmodule Quire.Engine do
     {"PDF object model (lopdf Rustler NIF)", Quire.Pdf}
   ]
 
+  @optional_engines [
+    Quire.Ocr.Engine
+  ]
+
   @doc false
   def registered_engines, do: @registered_engines
 
   @doc false
   def nif_engines, do: @nif_engines
+
+  @doc false
+  def optional_engines, do: @optional_engines
 
   @doc """
   All engines known to the registry (behaviour + NIF).
@@ -504,19 +511,24 @@ defmodule Quire.Engine do
   end
 
   @doc """
-  Returns true when every engine is `:ok` and every smoke test passes.
+  Returns true when every **mandatory** engine is `:ok` and every smoke test
+  passes.  Optional engines (`Quire.Ocr.Engine`, etc.) may be `:unavailable`
+  or `:degraded` without failing the check.
+
   Used by `mise run doctor` to determine the exit code.
   """
   def healthy? do
     result = check()
 
-    all_engines_ok? =
-      Enum.all?(result.engines, fn {_mod, status} -> status.state == :ok end)
+    mandatory_engines_ok? =
+      result.engines
+      |> Enum.reject(fn {mod, _status} -> mod in @optional_engines end)
+      |> Enum.all?(fn {_mod, status} -> status.state == :ok end)
 
     smoke_ok? =
       Enum.all?(result.smoke_tests, fn {_name, state} -> state == :ok end)
 
-    all_engines_ok? && smoke_ok?
+    mandatory_engines_ok? && smoke_ok?
   end
 
   @doc """

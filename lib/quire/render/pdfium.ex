@@ -4,8 +4,7 @@ defmodule Quire.Render.Pdfium do
   introspection (§7.2, §7.3).
 
   Wraps `ExPdfium` (== 0.5.1, via pdfium-render) behind the `Quire.Render`
-  behaviour. Every public callback emits telemetry through
-  `Quire.Engine.trace/4`.
+  behaviour.
 
   ## Size and page limits
 
@@ -14,17 +13,16 @@ defmodule Quire.Render.Pdfium do
 
   ## Dirty CPU
 
-  `render_page/3` and `thumbnails/3` delegate to pdfium's rasteriser, which
+  `render_page/3` and `thumbnails/2` delegate to pdfium's rasteriser, which
   blocks the calling OS thread for potentially hundreds of milliseconds.
   ExPdfium's NIF already runs its render calls inside Rust's thread pool
-  (`spawn_blocking`), so no separate DirtyCpu annotation is needed. However,
+  (`spawn_blocking`), so no separate DirtyCpu annotation is needed.  However,
   if these functions were backed by a bare NIF directly, they **would** need
   `:dirty_cpu` on their NIF spec.
   """
 
   @behaviour Quire.Render
 
-  alias Quire.Engine
   alias Quire.Storage
   alias Quire.Storage.Ref
 
@@ -35,41 +33,56 @@ defmodule Quire.Render.Pdfium do
   @doc false
   @impl Quire.Render
   def page_count(ref) do
-    Engine.trace(__MODULE__, :page_count, [ref], fn ->
-      with_doc(ref, fn doc ->
-        count = ok!(ExPdfium.page_count(doc))
+    with_doc(ref, fn doc ->
+      count = ok!(ExPdfium.page_count(doc))
 
-        if count > @max_pages do
-          raise ArgumentError,
-                "Page count #{count} exceeds maximum of #{@max_pages}"
-        end
+      if count > @max_pages do
+        raise ArgumentError,
+              "Page count #{count} exceeds maximum of #{@max_pages}"
+      end
 
-        count
-      end)
+      count
     end)
   end
 
   @doc false
   @impl Quire.Render
   def page_geometry(ref) do
-    Engine.trace(__MODULE__, :page_geometry, [ref], fn ->
-      with_doc(ref, fn doc ->
-        count = ok!(ExPdfium.page_count(doc))
+    with_doc(ref, fn doc ->
+      count = ok!(ExPdfium.page_count(doc))
 
-        Enum.map(0..(count - 1), fn page ->
-          info = ok!(ExPdfium.page_info(doc, page))
-          {trunc(info.width), trunc(info.height)}
-        end)
+      Enum.map(0..(count - 1), fn page ->
+        info = ok!(ExPdfium.page_info(doc, page))
+        %{width: trunc(info.width), height: trunc(info.height), rotate: 0}
       end)
     end)
   end
 
   @doc false
   @impl Quire.Render
-  def render_page(ref, page, dpi) do
-    Engine.trace(__MODULE__, :render_page, [ref, page, dpi], fn ->
-      with_doc(ref, fn doc ->
-        bitmap = ok!(ExPdfium.render_page(doc, page, dpi: dpi))
+  def render_page(ref, page_num, opts) do
+    dpi = Keyword.get(opts, :dpi, 150)
+
+    with_doc(ref, fn doc ->
+      bitmap = ok!(ExPdfium.render_page(doc, page_num, dpi: dpi))
+      bitmap_to_png!(bitmap)
+    end)
+  end
+
+  @doc false
+  @impl Quire.Render
+  def thumbnails(ref, opts) do
+    pages = Keyword.get(opts, :pages, [0])
+    max_dimension = Keyword.get(opts, :max_dimension, 256)
+
+    with_doc(ref, fn doc ->
+      Enum.map(pages, fn page ->
+        info = ok!(ExPdfium.page_info(doc, page))
+        scale = max_dimension / max(info.width, info.height)
+        w = round(info.width * scale)
+        h = round(info.height * scale)
+
+        bitmap = ok!(ExPdfium.render_page(doc, page, width: w, height: h))
         bitmap_to_png!(bitmap)
       end)
     end)
@@ -77,35 +90,26 @@ defmodule Quire.Render.Pdfium do
 
   @doc false
   @impl Quire.Render
-  def thumbnails(ref, pages, max_dimension) do
-    Engine.trace(__MODULE__, :thumbnails, [ref, pages, max_dimension], fn ->
-      with_doc(ref, fn doc ->
-        Enum.map(pages, fn page ->
-          info = ok!(ExPdfium.page_info(doc, page))
-          scale = max_dimension / max(info.width, info.height)
-          w = round(info.width * scale)
-          h = round(info.height * scale)
-
-          bitmap = ok!(ExPdfium.render_page(doc, page, width: w, height: h))
-          bitmap_to_png!(bitmap)
-        end)
-      end)
-    end)
-  end
-
-  @doc false
-  @impl Quire.Render
   def extract_text(ref, opts) do
-    Engine.trace(__MODULE__, :extract_text, [ref, opts], fn ->
-      with_doc(ref, fn doc ->
-        text = ok!(ExPdfium.extract_text(doc))
+    with_doc(ref, fn doc ->
+      count = ok!(ExPdfium.page_count(doc))
 
-        if Keyword.get(opts, :repair) do
-          {text, _report} = ExPdfium.Text.repair(text, regimes: :auto)
-          text
-        else
-          text
-        end
+      Enum.map(0..(count - 1), fn page ->
+        page_text =
+          case ExPdfium.extract_text(doc, page) do
+            {:ok, t} ->
+              if Keyword.get(opts, :repair) do
+                {repaired, _report} = ExPdfium.Text.repair(t, regimes: :auto)
+                repaired
+              else
+                t
+              end
+
+            _ ->
+              ""
+          end
+
+        %{page: page, spans: [%{text: page_text}]}
       end)
     end)
   end
@@ -113,19 +117,17 @@ defmodule Quire.Render.Pdfium do
   @doc false
   @impl Quire.Render
   def search(ref, query, opts) do
-    Engine.trace(__MODULE__, :search, [ref, query, opts], fn ->
-      with_doc(ref, fn doc ->
-        count = ok!(ExPdfium.page_count(doc))
+    with_doc(ref, fn doc ->
+      count = ok!(ExPdfium.page_count(doc))
 
-        Enum.flat_map(0..(count - 1), fn page ->
-          case ExPdfium.search_text(doc, page, query, opts) do
-            {:ok, matches} ->
-              Enum.map(matches, &Map.put(&1, :page, page))
+      Enum.flat_map(0..(count - 1), fn page ->
+        case ExPdfium.search_text(doc, page, query, opts) do
+          {:ok, matches} ->
+            Enum.map(matches, &Map.put(&1, :page, page))
 
-            {:error, _reason} ->
-              []
-          end
-        end)
+          {:error, _reason} ->
+            []
+        end
       end)
     end)
   end
@@ -133,49 +135,45 @@ defmodule Quire.Render.Pdfium do
   @doc false
   @impl Quire.Render
   def form_fields(ref) do
-    Engine.trace(__MODULE__, :form_fields, [ref], fn ->
-      with_doc(ref, fn doc ->
-        ok!(ExPdfium.form_fields(doc))
-      end)
+    with_doc(ref, fn doc ->
+      ok!(ExPdfium.form_fields(doc))
     end)
   end
 
   @doc false
   @impl Quire.Render
   def annotations(ref) do
-    Engine.trace(__MODULE__, :annotations, [ref], fn ->
-      with_doc(ref, fn doc ->
-        count = ok!(ExPdfium.page_count(doc))
+    with_doc(ref, fn doc ->
+      count = ok!(ExPdfium.page_count(doc))
 
-        Enum.flat_map(0..(count - 1), fn page ->
-          case ExPdfium.annotations(doc, page) do
-            {:ok, anns} -> anns
-            {:error, _reason} -> []
-          end
-        end)
+      Enum.flat_map(0..(count - 1), fn page ->
+        case ExPdfium.annotations(doc, page) do
+          {:ok, anns} -> anns
+          {:error, _reason} -> []
+        end
       end)
     end)
   end
 
   @doc false
   @impl Quire.Render
-  def extract_images(ref, opts) do
-    Engine.trace(__MODULE__, :extract_images, [ref, opts], fn ->
-      with_doc(ref, fn doc ->
-        count = ok!(ExPdfium.page_count(doc))
+  def extract_images(ref, _opts) do
+    with_doc(ref, fn doc ->
+      count = ok!(ExPdfium.page_count(doc))
 
-        Enum.flat_map(0..(count - 1), fn page ->
-          case ExPdfium.images(doc, page) do
-            {:ok, images} ->
-              Enum.map(images, fn img ->
-                bitmap = ok!(ExPdfium.image_data(doc, page, img.index))
-                bitmap_to_png!(bitmap)
-              end)
+      Enum.flat_map(0..(count - 1), fn page ->
+        case ExPdfium.images(doc, page) do
+          {:ok, images} ->
+            Enum.map(images, fn img ->
+              bitmap = ok!(ExPdfium.image_data(doc, page, img.index))
+              png = bitmap_to_png!(bitmap)
+              {:ok, ref} = Storage.put(png, [])
+              ref
+            end)
 
-            {:error, _reason} ->
-              []
-          end
-        end)
+          {:error, _reason} ->
+            []
+        end
       end)
     end)
   end
@@ -183,10 +181,8 @@ defmodule Quire.Render.Pdfium do
   @doc false
   @impl Quire.Render
   def outline(ref) do
-    Engine.trace(__MODULE__, :outline, [ref], fn ->
-      with_doc(ref, fn doc ->
-        ok!(ExPdfium.outline(doc))
-      end)
+    with_doc(ref, fn doc ->
+      ok!(ExPdfium.outline(doc))
     end)
   end
 
@@ -194,7 +190,7 @@ defmodule Quire.Render.Pdfium do
 
   @doc false
   @impl Quire.Render
-  def import_pages(_dest, _source, _pages) do
+  def import_pages(_source_ref, _dest_ref, _page_nums) do
     {:error, unsupported_error(:import_pages)}
   end
 
@@ -206,20 +202,20 @@ defmodule Quire.Render.Pdfium do
 
   @doc false
   @impl Quire.Render
-  def add_page_objects(_doc, _objects) do
+  def add_page_objects(_ref, _objects, _opts) do
     {:error, unsupported_error(:add_page_objects)}
   end
 
   @doc false
   @impl Quire.Render
-  def save(_doc) do
+  def save(_ref, _opts) do
     {:error, unsupported_error(:save)}
   end
 
   # ── Helpers ──────────────────────────────────────────────────────────────
 
   defp unsupported_error(operation) do
-    %Engine.Error{
+    %Quire.Engine.Error{
       engine: __MODULE__,
       operation: operation,
       code: :invalid_argument,

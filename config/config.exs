@@ -13,7 +13,7 @@ config :quire, :scopes,
     module: Quire.Accounts.Scope,
     assign_key: :current_scope,
     access_path: [:user, :id],
-    schema_key: :user_id,
+    schema_key: :owner_id,
     schema_type: :binary_id,
     schema_table: :users,
     test_data_fixture: Quire.AccountsFixtures,
@@ -24,7 +24,8 @@ config :quire,
   ecto_repos: [Quire.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true],
   storage_adapter: Quire.Storage.Web,
-  storage_backend: Quire.Storage.Web.Filesystem
+  storage_backend: Quire.Storage.Web.Filesystem,
+  render_adapter: Quire.Render.Pdfium
 
 config :quire, Oban,
   repo: Quire.Repo,
