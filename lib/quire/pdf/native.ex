@@ -41,4 +41,6 @@ defmodule Quire.Pdf.Native do
   def catalog(_doc), do: :erlang.nif_error(:nif_not_loaded)
   def get_object(_doc, _obj_num, _gen_num), do: :erlang.nif_error(:nif_not_loaded)
   def set_object(_doc, _obj_num, _gen_num, _object), do: :erlang.nif_error(:nif_not_loaded)
+
+  def allocate_object_id(_doc), do: :erlang.nif_error(:nif_not_loaded)
 end

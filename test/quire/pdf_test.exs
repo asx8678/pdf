@@ -67,11 +67,11 @@ defmodule Quire.PdfTest do
     test "round-trips a title that is not ASCII" do
       {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
 
-      assert :ok = Quire.Pdf.set_outline(doc, [%{title: "Überschrift — 目次", page: 0}])
+      assert :ok = Quire.Pdf.set_outline(doc, [%{title: "Ueberschrift - 目次", page: 0}])
       {:ok, saved} = Quire.Pdf.save(doc)
       {:ok, reopened} = Quire.Pdf.open(saved)
 
-      assert {:ok, [%{title: "Überschrift — 目次", page: 0, children: []}]} =
+      assert {:ok, [%{title: "Ueberschrift - 目次", page: 0, children: []}]} =
                Quire.Pdf.outline(reopened)
     end
 
@@ -173,21 +173,16 @@ defmodule Quire.PdfTest do
       {:ok, bytes} = ExPdfium.save_to_bytes(doc)
       {:ok, doc} = Quire.Pdf.open(bytes)
 
-      # Pages are at objects 4, 5, 6... (obj 3 is metadata).
-      # Map page ref -> 0-based page index.
       doc
     end
 
     defp link_named_dest(doc, name, page_obj_id, dest_name) do
-      # Create name tree at object 50
       :ok = Quire.Pdf.set_object(doc, 50, %{"/Names" => [dest_name, {:ref, 60, 0}]})
       :ok = Quire.Pdf.set_object(doc, 60, [{:ref, page_obj_id, 0}, {:name, "XYZ"}, 0, 0, nil])
 
-      # Wire /Dests into catalog
       {:ok, cat} = Quire.Pdf.catalog(doc)
       :ok = Quire.Pdf.set_object(doc, 1, Map.put(cat, "/Dests", {:ref, 50, 0}))
 
-      # Create outline item with Dest = dest_name (a string key)
       :ok =
         Quire.Pdf.set_object(
           doc,
@@ -207,8 +202,8 @@ defmodule Quire.PdfTest do
           "/Parent" => {:ref, 80, 0}
         })
 
-      # Link outline and dests into catalog
       {:ok, cat2} = Quire.Pdf.catalog(doc)
+
       :ok =
         Quire.Pdf.set_object(
           doc,
@@ -221,7 +216,7 @@ defmodule Quire.PdfTest do
 
     test "resolves a named destination from a string Dest key" do
       doc = named_dest_pdf(3)
-      :ok = link_named_dest(doc, "Chap1", 5, "chap1")  # obj 5 = page 1 (0-indexed)
+      :ok = link_named_dest(doc, "Chap1", 5, "chap1")
 
       assert {:ok, [%{title: "Chap1", page: 1}]} = Quire.Pdf.outline(doc)
     end
@@ -233,10 +228,34 @@ defmodule Quire.PdfTest do
       :ok = Quire.Pdf.set_object(doc, 60, [{:ref, 6, 0}, {:name, "XYZ"}, 0, 0, nil])
       {:ok, cat} = Quire.Pdf.catalog(doc)
       :ok = Quire.Pdf.set_object(doc, 1, Map.put(cat, "/Dests", {:ref, 50, 0}))
-      :ok = Quire.Pdf.set_object(doc, 80, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 71, 0}, "/Last" => {:ref, 71, 0}, "/Count" => 1})
-      :ok = Quire.Pdf.set_object(doc, 71, %{"/Title" => "T2", "/Dest" => {:name, "t2"}, "/Parent" => {:ref, 80, 0}})
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          80,
+          %{
+            "/Type" => {:name, "Outlines"},
+            "/First" => {:ref, 71, 0},
+            "/Last" => {:ref, 71, 0},
+            "/Count" => 1
+          }
+        )
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          71,
+          %{"/Title" => "T2", "/Dest" => {:name, "t2"}, "/Parent" => {:ref, 80, 0}}
+        )
+
       {:ok, cat2} = Quire.Pdf.catalog(doc)
-      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}, "/Dests" => {:ref, 50, 0}}))
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          1,
+          Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}, "/Dests" => {:ref, 50, 0}})
+        )
 
       assert {:ok, [%{title: "T2", page: 2}]} = Quire.Pdf.outline(doc)
     end
@@ -248,21 +267,76 @@ defmodule Quire.PdfTest do
       :ok = Quire.Pdf.set_object(doc, 60, [{:ref, 4, 0}, {:name, "XYZ"}, 0, 0, nil])
       {:ok, cat} = Quire.Pdf.catalog(doc)
       :ok = Quire.Pdf.set_object(doc, 1, Map.put(cat, "/Dests", {:ref, 50, 0}))
-      :ok = Quire.Pdf.set_object(doc, 82, %{"/Title" => "GoTo", "/A" => %{"/S" => {:name, "GoTo"}, "/D" => "gt"}, "/Parent" => {:ref, 83, 0}})
-      :ok = Quire.Pdf.set_object(doc, 83, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 82, 0}, "/Last" => {:ref, 82, 0}, "/Count" => 1})
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          82,
+          %{
+            "/Title" => "GoTo",
+            "/A" => %{"/S" => {:name, "GoTo"}, "/D" => "gt"},
+            "/Parent" => {:ref, 83, 0}
+          }
+        )
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          83,
+          %{
+            "/Type" => {:name, "Outlines"},
+            "/First" => {:ref, 82, 0},
+            "/Last" => {:ref, 82, 0},
+            "/Count" => 1
+          }
+        )
+
       {:ok, cat2} = Quire.Pdf.catalog(doc)
-      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 83, 0}, "/Dests" => {:ref, 50, 0}}))
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          1,
+          Map.merge(cat2, %{"/Outlines" => {:ref, 83, 0}, "/Dests" => {:ref, 50, 0}})
+        )
 
       assert {:ok, [%{title: "GoTo", page: 0}]} = Quire.Pdf.outline(doc)
     end
 
     test "returns nil for a non-existent named destination" do
       doc = named_dest_pdf(3)
-      {:ok, cat} = Quire.Pdf.catalog(doc)
-      :ok = Quire.Pdf.set_object(doc, 80, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 72, 0}, "/Last" => {:ref, 72, 0}, "/Count" => 1})
-      :ok = Quire.Pdf.set_object(doc, 72, %{"/Title" => "Missing", "/Dest" => "nonexistent", "/Parent" => {:ref, 80, 0}})
-      {:ok, cat2} = Quire.Pdf.catalog(doc)
-      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}}))
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          80,
+          %{
+            "/Type" => {:name, "Outlines"},
+            "/First" => {:ref, 72, 0},
+            "/Last" => {:ref, 72, 0},
+            "/Count" => 1
+          }
+        )
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          72,
+          %{
+            "/Title" => "Missing",
+            "/Dest" => "nonexistent",
+            "/Parent" => {:ref, 80, 0}
+          }
+        )
+
+      {:ok, catalog} = Quire.Pdf.catalog(doc)
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          1,
+          Map.merge(catalog, %{"/Outlines" => {:ref, 80, 0}})
+        )
 
       assert {:ok, [%{title: "Missing", page: nil}]} = Quire.Pdf.outline(doc)
     end
@@ -279,11 +353,38 @@ defmodule Quire.PdfTest do
 
     test "still resolves a direct array Dest (regression)" do
       doc = named_dest_pdf(3)
-      {:ok, cat} = Quire.Pdf.catalog(doc)
-      :ok = Quire.Pdf.set_object(doc, 80, %{"/Type" => {:name, "Outlines"}, "/First" => {:ref, 74, 0}, "/Last" => {:ref, 74, 0}, "/Count" => 1})
-      :ok = Quire.Pdf.set_object(doc, 74, %{"/Title" => "Direct", "/Dest" => [{:ref, 4, 0}, {:name, "XYZ"}, 0, 0, nil], "/Parent" => {:ref, 80, 0}})
-      {:ok, cat2} = Quire.Pdf.catalog(doc)
-      :ok = Quire.Pdf.set_object(doc, 1, Map.merge(cat2, %{"/Outlines" => {:ref, 80, 0}}))
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          80,
+          %{
+            "/Type" => {:name, "Outlines"},
+            "/First" => {:ref, 74, 0},
+            "/Last" => {:ref, 74, 0},
+            "/Count" => 1
+          }
+        )
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          74,
+          %{
+            "/Title" => "Direct",
+            "/Dest" => [{:ref, 4, 0}, {:name, "XYZ"}, 0, 0, nil],
+            "/Parent" => {:ref, 80, 0}
+          }
+        )
+
+      {:ok, catalog} = Quire.Pdf.catalog(doc)
+
+      :ok =
+        Quire.Pdf.set_object(
+          doc,
+          1,
+          Map.merge(catalog, %{"/Outlines" => {:ref, 80, 0}})
+        )
 
       assert {:ok, [%{title: "Direct", page: 0}]} = Quire.Pdf.outline(doc)
     end
@@ -293,9 +394,6 @@ defmodule Quire.PdfTest do
     test "object streams produce a binary no larger than a plain save" do
       source = blank_pdf(60)
 
-      # Separate handles: lopdf's writer mutates the document it serialises
-      # (see Quire.Pdf.save/1), so comparing two saves of one handle would be
-      # comparing two different documents.
       {:ok, plain_doc} = Quire.Pdf.open(source)
       {:ok, compressed_doc} = Quire.Pdf.open(source)
 
@@ -304,9 +402,6 @@ defmodule Quire.PdfTest do
       {:ok, compressed} =
         Quire.Pdf.save_with(compressed_doc, use_object_streams: true, use_xref_streams: true)
 
-      # Strictly smaller, not merely "no larger" — object streams are the whole
-      # reason save_with/2 exists (ADR 0003 D3, replacing dropped linearization),
-      # so an equal-sized result means it silently did nothing.
       assert byte_size(compressed) < byte_size(plain)
       assert {:ok, 60} = Quire.Pdf.page_count(elem(Quire.Pdf.open(compressed), 1))
     end
@@ -321,9 +416,6 @@ defmodule Quire.PdfTest do
       {:ok, xref_only} =
         Quire.Pdf.save_with(xref_only_doc, use_object_streams: false, use_xref_streams: true)
 
-      # lopdf's writer short-circuits to the plain writer when object streams
-      # are off, ignoring use_xref_streams entirely. Pinned so that if lopdf
-      # ever fixes it, this test tells us rather than the behaviour drifting.
       assert byte_size(xref_only) == byte_size(plain)
     end
 
@@ -342,8 +434,6 @@ defmodule Quire.PdfTest do
 
       assert {:ok, appended} = Quire.Pdf.incremental_save(doc)
 
-      # The property the whole thing exists for: an existing /ByteRange over
-      # the original revision still covers the same bytes.
       assert byte_size(appended) > byte_size(source)
       assert binary_part(appended, 0, byte_size(source)) == source
 
@@ -366,9 +456,6 @@ defmodule Quire.PdfTest do
   end
 
   describe "output accepted by an independent parser" do
-    # lopdf reading back what lopdf wrote proves only self-consistency. PDFium
-    # is a separate implementation — and per ADR 0003 it is the one that cannot
-    # *write* an outline, so its reader is exactly the check that matters.
     for {label, function, extra_args} <- [
           {"save/1", :save, []},
           {"save_with/2", :save_with, [[]]},
@@ -389,7 +476,6 @@ defmodule Quire.PdfTest do
     end
   end
 
-  # `outline/1` always returns every key; the input form may omit some.
   defp expected_nodes do
     [
       %{
@@ -411,6 +497,28 @@ defmodule Quire.PdfTest do
 
       assert catalog["/Type"] == {:name, "Catalog"}
       assert match?({:ref, _, _}, catalog["/Pages"])
+    end
+  end
+
+  describe "allocate_object_id/1" do
+    test "returns sequential unique ids" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+
+      {:ok, id1} = Quire.Pdf.allocate_object_id(doc)
+      {:ok, id2} = Quire.Pdf.allocate_object_id(doc)
+
+      assert is_integer(id1) and id1 > 0
+      assert is_integer(id2) and id2 > 0
+      assert id1 != id2
+      assert id2 == id1 + 1
+    end
+
+    test "returns fresh ids that can store and retrieve objects" do
+      {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
+
+      {:ok, obj_id} = Quire.Pdf.allocate_object_id(doc)
+      assert :ok = Quire.Pdf.set_object(doc, {obj_id, 0}, "stored_value")
+      assert {:ok, "stored_value"} = Quire.Pdf.get_object(doc, {obj_id, 0})
     end
   end
 
@@ -477,7 +585,7 @@ defmodule Quire.PdfTest do
     test "round-trips a stream with binary data" do
       {:ok, doc} = Quire.Pdf.open(blank_pdf(1))
       assert :ok = Quire.Pdf.set_object(doc, 10, {:stream, %{}, "raw data"})
-      assert {:ok, {:stream, dict, data}} = Quire.Pdf.get_object(doc, 10)
+      assert {:ok, {:stream, _dict, data}} = Quire.Pdf.get_object(doc, 10)
       assert is_binary(data)
     end
 
@@ -535,6 +643,163 @@ defmodule Quire.PdfTest do
 
       assert {:ok, "first"} = Quire.Pdf.get_object(doc, 1)
       assert {:ok, "second"} = Quire.Pdf.get_object(doc, 2)
+    end
+  end
+
+  describe "Quire.Pdf.AcroForm" do
+    defp form_pdf do
+      {:ok, doc} = ExPdfium.new()
+      {:ok, doc} = ExPdfium.add_page(doc, {595.0, 842.0})
+      {:ok, bytes} = ExPdfium.save_to_bytes(doc)
+
+      {:ok, qdoc} = Quire.Pdf.open(bytes)
+
+      widget = %{
+        "/Type" => {:name, "Annot"},
+        "/Subtype" => {:name, "Widget"},
+        "/FT" => {:name, "Tx"},
+        "/T" => "FullName",
+        "/V" => "Ada Lovelace",
+        "/DA" => "/Helv 12 Tf 0 g",
+        "/Rect" => [50, 700, 400, 740],
+        "/P" => {:ref, 4, 0},
+        "/F" => 4
+      }
+
+      :ok = Quire.Pdf.set_object(qdoc, 10, widget)
+
+      {:ok, page} = Quire.Pdf.get_object(qdoc, 4)
+      :ok = Quire.Pdf.set_object(qdoc, 4, Map.put(page, "/Annots", [{:ref, 10, 0}]))
+
+      :ok =
+        Quire.Pdf.set_object(qdoc, 11, %{
+          "/Fields" => [{:ref, 10, 0}],
+          "/DR" => %{"/Font" => %{"/Helv" => {:ref, 20, 0}}}
+        })
+
+      {:ok, catalog} = Quire.Pdf.catalog(qdoc)
+      :ok = Quire.Pdf.set_object(qdoc, 1, Map.put(catalog, "/AcroForm", {:ref, 11, 0}))
+
+      qdoc
+    end
+
+    test "generate_appearances/1 writes /AP and content-stream with the value" do
+      qdoc = form_pdf()
+
+      assert :ok = Quire.Pdf.AcroForm.generate_appearances(qdoc)
+
+      {:ok, widget} = Quire.Pdf.get_object(qdoc, 10)
+      ap = Map.get(widget, "/AP", %{})
+      assert %{"/N" => {:ref, stream_num, 0}} = ap
+
+      {:ok, {:stream, _dict, data}} = Quire.Pdf.get_object(qdoc, {stream_num, 0})
+      assert String.contains?(data, "Ada Lovelace")
+      assert String.contains?(data, "BT")
+      assert String.contains?(data, "Tf")
+      assert String.contains?(data, "Tj")
+    end
+
+    test "generate_appearances/1 saves, flattens and renders the value" do
+      qdoc = form_pdf()
+
+      assert :ok = Quire.Pdf.AcroForm.generate_appearances(qdoc)
+
+      {:ok, saved} = Quire.Pdf.save(qdoc)
+
+      {:ok, pdfium_doc} = ExPdfium.open(saved)
+      {:ok, flat_doc} = ExPdfium.flatten(pdfium_doc)
+
+      {:ok, bitmap} =
+        ExPdfium.render_page(flat_doc, 0,
+          annotations: false,
+          form_fields: false
+        )
+
+      raw = bitmap.data
+      bpp = 4
+      width = bitmap.width
+
+      non_white =
+        raw
+        |> :binary.bin_to_list()
+        |> Enum.chunk_every(bpp)
+        |> Enum.with_index()
+        |> Enum.any?(fn {pixels, idx} ->
+          row = div(idx, width)
+          col = rem(idx, width)
+
+          col >= 55 and col <= 395 and row >= 105 and row <= 137 and
+            (Enum.at(pixels, 0) < 200 or Enum.at(pixels, 1) < 200 or
+               Enum.at(pixels, 2) < 200)
+        end)
+
+      assert non_white, "Expected text value to be visible after flatten"
+    end
+
+    test "fields without /V are skipped" do
+      {:ok, doc} = ExPdfium.new()
+      {:ok, doc} = ExPdfium.add_page(doc, {595.0, 842.0})
+      {:ok, bytes} = ExPdfium.save_to_bytes(doc)
+
+      {:ok, qdoc} = Quire.Pdf.open(bytes)
+
+      widget = %{
+        "/Type" => {:name, "Annot"},
+        "/Subtype" => {:name, "Widget"},
+        "/FT" => {:name, "Tx"},
+        "/T" => "EmptyField",
+        "/DA" => "/Helv 12 Tf 0 g",
+        "/Rect" => [50, 700, 400, 740],
+        "/P" => {:ref, 4, 0},
+        "/F" => 4
+      }
+
+      :ok = Quire.Pdf.set_object(qdoc, 10, widget)
+      {:ok, page} = Quire.Pdf.get_object(qdoc, 4)
+      :ok = Quire.Pdf.set_object(qdoc, 4, Map.put(page, "/Annots", [{:ref, 10, 0}]))
+      :ok = Quire.Pdf.set_object(qdoc, 11, %{"/Fields" => [{:ref, 10, 0}]})
+      {:ok, catalog} = Quire.Pdf.catalog(qdoc)
+      :ok = Quire.Pdf.set_object(qdoc, 1, Map.put(catalog, "/AcroForm", {:ref, 11, 0}))
+
+      assert :ok = Quire.Pdf.AcroForm.generate_appearances(qdoc)
+
+      {:ok, updated_widget} = Quire.Pdf.get_object(qdoc, 10)
+      refute Map.has_key?(updated_widget, "/AP")
+    end
+
+    test "flatten WITHOUT generate_appearances produces no visible text" do
+      qdoc = form_pdf()
+
+      {:ok, saved} = Quire.Pdf.save(qdoc)
+      {:ok, pdfium_doc} = ExPdfium.open(saved)
+      {:ok, flat_doc} = ExPdfium.flatten(pdfium_doc)
+
+      {:ok, bitmap} =
+        ExPdfium.render_page(flat_doc, 0,
+          annotations: false,
+          form_fields: false
+        )
+
+      raw = bitmap.data
+      bpp = 4
+      width = bitmap.width
+
+      non_white =
+        raw
+        |> :binary.bin_to_list()
+        |> Enum.chunk_every(bpp)
+        |> Enum.with_index()
+        |> Enum.any?(fn {pixels, idx} ->
+          row = div(idx, width)
+          col = rem(idx, width)
+
+          col >= 55 and col <= 395 and row >= 105 and row <= 137 and
+            (Enum.at(pixels, 0) < 200 or Enum.at(pixels, 1) < 200 or
+               Enum.at(pixels, 2) < 200)
+        end)
+
+      refute non_white,
+             "Without generate_appearances, flatten bakes the old empty appearance"
     end
   end
 

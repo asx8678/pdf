@@ -25,6 +25,9 @@ defmodule Quire.Pdf do
   bytes verbatim and appends a new revision, which is what keeps an existing
   digital signature verifiable.
 
+  Sub-modules: `Quire.Pdf.Outline` (outline write via lopdf Bookmark/Outline)
+  and `Quire.Pdf.AcroForm` (/AP appearance-stream generation for form fields).
+
   ## Known limits of the underlying `lopdf` 0.44.0
 
     * `SaveOptions` has a `linearize` flag that **nothing in the writer reads** —
@@ -156,9 +159,20 @@ defmodule Quire.Pdf do
     end
   end
 
+  @doc """
+  Allocate a fresh, unused object id and advance the document's counter.
+
+  Callers writing new objects need an id that does not collide with an existing
+  one. Each call increments the document's `max_id` and returns the new value,
+  so two consecutive calls never return the same id. No concurrent writer
+  touches the same document handle.
+  """
+  @spec allocate_object_id(t()) :: {:ok, pos_integer()} | {:error, atom()}
+  def allocate_object_id(doc) when is_reference(doc), do: Native.allocate_object_id(doc)
+
   # Matches MAX_OUTLINE_DEPTH in native/quire_pdf/src/lib.rs. Checked here as
   # well as there because the NIF's argument decoder recurses on the Rust
-  # stack before any of our code runs — this is the guard that actually
+  # stack before any of our code reaches it — this is the guard that actually
   # prevents a pathological term from overflowing it.
   @max_outline_depth 64
 

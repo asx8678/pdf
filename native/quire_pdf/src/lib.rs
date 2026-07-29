@@ -947,4 +947,16 @@ fn set_object(
     Ok(atoms::ok())
 }
 
+/// Allocate a fresh, unused object id and advance the document's counter.
+///
+/// Callers writing new objects need an id that does not collide with an existing
+/// one. Each call increments the document's `max_id` and returns the new value,
+/// so two consecutive calls never return the same id.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn allocate_object_id(doc: ResourceArc<DocumentResource>) -> Result<u32, Atom> {
+    let mut guard = lock(&doc)?;
+    guard.doc.max_id = guard.doc.max_id.saturating_add(1);
+    Ok(guard.doc.max_id)
+}
+
 rustler::init!("Elixir.Quire.Pdf.Native");

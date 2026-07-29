@@ -2761,7 +2761,7 @@ renders identically in Acrobat, Chrome and Preview.
 | T-120 | Field properties dialogs (per type, full option set). |
 | T-121 | Field list panel with drag tab-order editing. |
 | T-122 | Highlight fields toggle. |
-| T-123 | Form data import/export (FDF, XFDF, JSON, CSV) + flatten (PDFium). |
+| T-123 | Form data import/export (FDF, XFDF, JSON, CSV) + flatten (PDFium). ⚠️ Flatten is `/AP`-only: value writes need `Quire.Pdf.AcroForm.generate_appearances/1` or `render_page/3` instead. |
 | T-124 | Reset form. |
 | T-125 | Auto-create fields from a scanned form. |
 | T-126 | Acrobat + Chrome compatibility test for authored forms. |
