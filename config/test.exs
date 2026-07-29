@@ -29,6 +29,17 @@ config :quire, Quire.Mailer, adapter: Swoosh.Adapters.Test
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
+# Cloak vault for at-rest encryption — static test key.
+config :quire, Quire.Vault,
+  ciphers: [
+    default:
+      {Cloak.Ciphers.AES.GCM,
+       tag: "AES.GCM.V1",
+       key:
+         <<178, 247, 240, 164, 221, 41, 4, 82, 100, 234, 45, 61, 183, 6, 123, 204, 182, 6, 96,
+           211, 2, 9, 253, 253, 9, 91, 132, 190, 131, 0, 106, 145>>}
+  ]
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

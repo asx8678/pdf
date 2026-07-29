@@ -10,6 +10,7 @@ defmodule Quire.Application do
     children = [
       QuireWeb.Telemetry,
       Quire.Repo,
+      Quire.Vault,
       {DNSCluster, query: Application.get_env(:quire, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Quire.PubSub},
       # Start a worker by calling: Quire.Worker.start_link(arg)

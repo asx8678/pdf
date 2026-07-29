@@ -6,7 +6,7 @@ defmodule Quire.Accounts do
   import Ecto.Query, warn: false
   alias Quire.Repo
 
-  alias Quire.Accounts.{User, UserToken, UserNotifier}
+  alias Quire.Accounts.{User, UserToken, UserNotifier, SigningCredential}
 
   ## Database getters
 
@@ -281,6 +281,58 @@ defmodule Quire.Accounts do
   def delete_user_session_token(token) do
     Repo.delete_all(from(UserToken, where: [token: ^token, context: "session"]))
     :ok
+  end
+
+  ## Signing credentials
+
+  @doc """
+  Lists all signing credentials for the given user.
+  """
+  def list_signing_credentials(user_id) do
+    Repo.all(from sc in SigningCredential, where: sc.user_id == ^user_id, order_by: sc.label)
+  end
+
+  @doc """
+  Gets a single signing credential.
+
+  Raises `Ecto.NoResultsError` if none exists.
+  """
+  def get_signing_credential!(id), do: Repo.get!(SigningCredential, id)
+
+  @doc """
+  Creates a signing credential for the given user.
+
+  **Must be called from within sudo mode (§11.1).**
+  `user_id` is set programmatically from the `user` struct and is never
+  taken from `attrs`.
+  """
+  def create_signing_credential(%{id: user_id} = _user, attrs) do
+    %SigningCredential{user_id: user_id}
+    |> SigningCredential.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  Updates a signing credential. **Must be called from within sudo mode.**
+  """
+  def update_signing_credential(%SigningCredential{} = credential, attrs) do
+    credential
+    |> SigningCredential.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Deletes a signing credential. **Must be called from within sudo mode.**
+  """
+  def delete_signing_credential(%SigningCredential{} = credential) do
+    Repo.delete(credential)
+  end
+
+  @doc """
+  Changeset for the signing-credential form.
+  """
+  def change_signing_credential(credential, attrs \\ %{}) do
+    SigningCredential.changeset(credential, attrs)
   end
 
   ## Token helper

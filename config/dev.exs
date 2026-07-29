@@ -55,6 +55,19 @@ config :quire, QuireWeb.Endpoint,
 # Enable dev routes for dashboard and mailbox
 config :quire, dev_routes: true
 
+# Cloak vault for at-rest encryption — static dev key.
+# **Never** use this key in production; configure via CLOAK_ENCRYPTION_KEY in
+# config/runtime.exs.
+config :quire, Quire.Vault,
+  ciphers: [
+    default:
+      {Cloak.Ciphers.AES.GCM,
+       tag: "AES.GCM.V1",
+       key:
+         <<178, 247, 240, 164, 221, 41, 4, 82, 100, 234, 45, 61, 183, 6, 123, 204, 182, 6, 96,
+           211, 2, 9, 253, 253, 9, 91, 132, 190, 131, 0, 106, 145>>}
+  ]
+
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"
 
