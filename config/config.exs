@@ -26,6 +26,25 @@ config :quire,
   storage_adapter: Quire.Storage.Web,
   storage_backend: Quire.Storage.Web.Filesystem
 
+config :quire, Oban,
+  repo: Quire.Repo,
+  queues: [
+    render: 1,
+    transform: 1,
+    convert: 1,
+    ocr: 1,
+    secure: 2,
+    esign: 2,
+    translate: 2,
+    batch: 1,
+    maintenance: 1
+  ],
+  plugins: [
+    {Oban.Plugins.Pruner, max_age: 604_800},
+    {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(30)},
+    {Oban.Plugins.Reindexer, schedule: "@weekly"}
+  ]
+
 # Configure the endpoint
 config :quire, QuireWeb.Endpoint,
   url: [host: "localhost"],
