@@ -1,8 +1,6 @@
 defmodule Quire.Storage.WebTest do
   use ExUnit.Case, async: false
 
-  import Quire.StorageCase
-
   alias Quire.Storage
   alias Quire.Storage.Ref
   alias Quire.Storage.Web
@@ -19,6 +17,20 @@ defmodule Quire.Storage.WebTest do
   end
 
   defp adapter, do: Web
+
+  # ── Inline helpers (avoid compile-time dep on Quire.StorageCase) ────────
+
+  defp storage_tmp_root! do
+    Path.join(System.tmp_dir!(), "quire_storage_test_#{:rand.uniform(1_000_000)}")
+  end
+
+  defp adapter_setup(adapter_mod) do
+    current = Application.fetch_env!(:quire, :storage_adapter)
+    Application.put_env(:quire, :storage_adapter, adapter_mod)
+    fn -> Application.put_env(:quire, :storage_adapter, current) end
+  end
+
+  defp put_opts(_adapter, _data), do: [name: "test.bin"]
 
   # ── Shared StorageCase suite (identical structure in LocalTest) ─────────
 
@@ -37,6 +49,25 @@ defmodule Quire.Storage.WebTest do
       data = "hello storage"
       assert {:ok, ref} = Storage.put(data, put_opts(adapter(), data))
       assert {:ok, ^data} = Storage.get(ref)
+    end
+
+    test "key scheme matches ADR 0005" do
+      assert {:ok, ref} = Storage.put("key-scheme", put_opts(adapter(), "key-scheme"))
+      parts = String.split(ref.key, "/")
+      assert length(parts) == 3, "Web key must have two-level fan-out, got: #{inspect(ref.key)}"
+      [first2, next2, uuid] = parts
+
+      assert String.match?(first2, ~r/^[0-9a-f]{2}$/),
+             "Web key first component must be 2 hex chars, got: #{inspect(first2)}"
+
+      assert String.match?(next2, ~r/^[0-9a-f]{2}$/),
+             "Web key second component must be 2 hex chars, got: #{inspect(next2)}"
+
+      assert String.match?(
+               uuid,
+               ~r/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+             ),
+             "Web key third component must be a UUID v7, got: #{inspect(uuid)}"
     end
 
     test "put + delete" do

@@ -1,8 +1,6 @@
 defmodule Quire.Storage.LocalTest do
   use ExUnit.Case, async: false
 
-  import Quire.StorageCase
-
   alias Quire.Storage
   alias Quire.Storage.Ref
   alias Quire.Storage.Local
@@ -19,6 +17,24 @@ defmodule Quire.Storage.LocalTest do
   end
 
   defp adapter, do: Local
+
+  # ── Inline helpers (avoid compile-time dep on Quire.StorageCase) ────────
+
+  defp storage_tmp_root! do
+    Path.join(System.tmp_dir!(), "quire_storage_test_#{:rand.uniform(1_000_000)}")
+  end
+
+  defp adapter_setup(adapter_mod) do
+    current = Application.fetch_env!(:quire, :storage_adapter)
+    Application.put_env(:quire, :storage_adapter, adapter_mod)
+    fn -> Application.put_env(:quire, :storage_adapter, current) end
+  end
+
+  defp put_opts(_adapter, _data) do
+    tmp_root = Application.get_env(:quire, :data_dir) || System.tmp_dir!()
+    path = Path.join(tmp_root, "local_test_#{:rand.uniform(1_000_000)}.bin")
+    [path: path, name: "test.bin"]
+  end
 
   # ── Shared StorageCase suite (identical structure in WebTest) ──────────
 
@@ -37,6 +53,13 @@ defmodule Quire.Storage.LocalTest do
       data = "hello storage"
       assert {:ok, ref} = Storage.put(data, put_opts(adapter(), data))
       assert {:ok, ^data} = Storage.get(ref)
+    end
+
+    test "key scheme matches ADR 0005" do
+      assert {:ok, ref} = Storage.put("key-scheme", put_opts(adapter(), "key-scheme"))
+
+      assert String.starts_with?(ref.key, "/"),
+             "Local key must be an absolute path, got: #{inspect(ref.key)}"
     end
 
     test "put + delete" do

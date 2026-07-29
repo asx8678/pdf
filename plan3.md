@@ -847,7 +847,7 @@ documents
   has_signatures boolean, is_tagged boolean, deleted_at,
   inserted_at, updated_at
 
-document_revisions              -- append-only, content-addressed
+document_revisions              -- append-only; sha256 is integrity-only (§5.2)
   id, document_id, parent_revision_id, seq integer,
   storage_ref (jsonb — an opaque Storage ref, §7.1), byte_size,
   sha256, page_count, produced_by (:upload | :client_save | :job),
@@ -1215,8 +1215,8 @@ depends on.
 **Rules:**
 
 - `Ref.key` is meaningless to callers. In the Web adapter's filesystem
-  backend it is a content-addressed relative path under the data root; in a
-  future S3 backend it would be an object key; in the Local adapter it is an
+  backend it is a relative path (<first2>/<next2>/<uuid>) under the data root;
+  in a future S3 backend it would be an object key; in the Local adapter it is an
   absolute path. **Nothing outside the adapter may inspect it.**
   Specifically: do not derive a filename from it for a download header —
   that is what `Ref.name` is for.
