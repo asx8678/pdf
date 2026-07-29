@@ -1,5 +1,18 @@
 #!/usr/bin/env bash
 # T-005: pre-push hook — blocks push unless `mise run check` passes
+# Validates only the committed + staged content; unstaged changes are
+# temporarily stashed and restored so they don't gate the push.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+
+# Stash unstaged changes so only committed + staged content is checked
+STASH_NAME="pre-push-$(date +%s)"
+git stash push --keep-index --include-untracked -m "$STASH_NAME" 2>/dev/null || true
+
+# Restore stashed changes on exit regardless of check result
+restore_stash() {
+  git stash list --format="%s" | grep -F "$STASH_NAME" >/dev/null 2>&1 && git stash pop || true
+}
+trap restore_stash EXIT
+
 mise run check
