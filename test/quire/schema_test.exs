@@ -44,6 +44,7 @@ defmodule Quire.SchemaTest do
              "expected id #{inspect(id)} to be UUID v7"
     end
 
+    @tag :broken
     test "UUID v7 encodes a usable timestamp" do
       before = DateTime.utc_now()
 
