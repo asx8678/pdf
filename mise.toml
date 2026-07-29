@@ -97,6 +97,7 @@ mix compile --warnings-as-errors
 mix test --exclude broken
 mix credo suggest --format oneline --checks Quire.Checks.NoFileOps 2>/dev/null | grep 'W. .' | grep 'lib/' && { echo "[blocking] NoFileOps check failed — File/Path/System.cmd outside Storage or Engine"; exit 1; } || true
 bash mise-tasks/check-licences
+MIX_ENV=test mix test test/quire/nif_fuzz_test.exs --no-compile
 
 # Advisory checks — warnings only, never block a push
 mix credo || echo "[advisory] credo: warnings found"

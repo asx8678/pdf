@@ -58,12 +58,14 @@ defmodule Quire.Render.Pdfium do
           Enum.reduce_while(0..(count - 1), {:ok, []}, fn page, {:ok, acc} ->
             case ExPdfium.page_info(doc, page) do
               {:ok, info} ->
+                {width, height} = page_dimensions(info)
+
                 {:cont,
                  {:ok,
                   [
                     %{
-                      width: trunc(info.width),
-                      height: trunc(info.height),
+                      width: width,
+                      height: height,
                       rotate: info.rotation
                     }
                     | acc
@@ -149,24 +151,39 @@ defmodule Quire.Render.Pdfium do
       with {:ok, count} <- ok!(ExPdfium.page_count(doc), :extract_text) do
         pages =
           Enum.reduce_while(0..(count - 1), {:ok, []}, fn page, {:ok, acc} ->
-            case ExPdfium.text_segments(doc, page) do
-              {:ok, segments} ->
-                spans =
-                  Enum.map(segments, fn s ->
-                    %{text: s.text, bounds: s.bounds}
-                  end)
+            case ExPdfium.page_info(doc, page) do
+              {:ok, info} ->
+                boxes = info.boxes
 
-                {:cont, {:ok, [%{page: page, spans: spans} | acc]}}
+                case ExPdfium.text_segments(doc, page) do
+                  {:ok, segments} ->
+                    spans =
+                      Enum.map(segments, fn s ->
+                        %{text: s.text, bounds: media_to_crop(s.bounds, boxes)}
+                      end)
 
-              {:error, _reason} ->
-                # Fallback to extract_text/2 for repair mode
-                page_text =
-                  case ExPdfium.extract_text(doc, page, opts) do
-                    {:ok, t} -> t
-                    _ -> ""
-                  end
+                    {:cont, {:ok, [%{page: page, spans: spans} | acc]}}
 
-                {:cont, {:ok, [%{page: page, spans: [%{text: page_text, bounds: nil}]} | acc]}}
+                  {:error, _reason} ->
+                    # Fallback to extract_text/2 for repair mode
+                    page_text =
+                      case ExPdfium.extract_text(doc, page, opts) do
+                        {:ok, t} -> t
+                        _ -> ""
+                      end
+
+                    {:cont,
+                     {:ok, [%{page: page, spans: [%{text: page_text, bounds: nil}]} | acc]}}
+                end
+
+              {:error, reason} ->
+                {:halt,
+                 {:error,
+                  error(
+                    :extract_text,
+                    :nif,
+                    "page_info for page #{page} failed: #{inspect(reason)}"
+                  )}}
             end
           end)
 
@@ -185,14 +202,23 @@ defmodule Quire.Render.Pdfium do
       with {:ok, count} <- ok!(ExPdfium.page_count(doc), :search) do
         results =
           Enum.reduce_while(0..(count - 1), {:ok, []}, fn page, {:ok, acc} ->
-            case ExPdfium.search_text(doc, page, query, opts) do
-              {:ok, matches} ->
-                results =
-                  Enum.map(matches, fn m ->
-                    Map.put(m, :page, page)
-                  end)
+            case ExPdfium.page_info(doc, page) do
+              {:ok, info} ->
+                boxes = info.boxes
 
-                {:cont, {:ok, results ++ acc}}
+                case ExPdfium.search_text(doc, page, query, opts) do
+                  {:ok, matches} ->
+                    results =
+                      Enum.map(matches, fn m ->
+                        rects = Enum.map(m.rects, &media_to_crop(&1, boxes))
+                        %{m | rects: rects} |> Map.put(:page, page)
+                      end)
+
+                    {:cont, {:ok, results ++ acc}}
+
+                  {:error, _reason} ->
+                    {:cont, {:ok, acc}}
+                end
 
               {:error, _reason} ->
                 {:cont, {:ok, acc}}
@@ -222,9 +248,21 @@ defmodule Quire.Render.Pdfium do
       with {:ok, count} <- ok!(ExPdfium.page_count(doc), :annotations) do
         results =
           Enum.reduce_while(0..(count - 1), {:ok, []}, fn page, {:ok, acc} ->
-            case ExPdfium.annotations(doc, page) do
-              {:ok, anns} -> {:cont, {:ok, anns ++ acc}}
-              {:error, _reason} -> {:cont, {:ok, acc}}
+            case ExPdfium.page_info(doc, page) do
+              {:ok, info} ->
+                boxes = info.boxes
+
+                case ExPdfium.annotations(doc, page) do
+                  {:ok, anns} ->
+                    anns = Enum.map(anns, &%{&1 | bounds: media_to_crop(&1.bounds, boxes)})
+                    {:cont, {:ok, anns ++ acc}}
+
+                  {:error, _reason} ->
+                    {:cont, {:ok, acc}}
+                end
+
+              {:error, _reason} ->
+                {:cont, {:ok, acc}}
             end
           end)
 
@@ -466,6 +504,28 @@ defmodule Quire.Render.Pdfium do
   rescue
     e -> {:error, Exception.message(e)}
   end
+
+  # ── CropBox helpers ──────────────────────────────────────────────────────
+
+  defp page_dimensions(%{boxes: %{crop: nil}} = info),
+    do: {trunc(info.width), trunc(info.height)}
+
+  defp page_dimensions(%{boxes: %{crop: crop}}),
+    do: {trunc(crop.right - crop.left), trunc(crop.top - crop.bottom)}
+
+  defp media_to_crop(nil, _boxes), do: nil
+
+  defp media_to_crop(point, boxes) do
+    case boxes.crop do
+      nil -> point
+
+      %{left: l, bottom: b} ->
+        %{point | left: point.left - l, right: point.right - l,
+          top: point.top - b, bottom: point.bottom - b}
+    end
+  end
+
+  # ── Bitmap ──────────────────────────────────────────────────────────────────
 
   defp bitmap_to_png!(%ExPdfium.Bitmap{data: data, width: w, height: h, format: format}) do
     {converted, bands} = normalize_bitmap(data, format)

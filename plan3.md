@@ -796,6 +796,11 @@ implementing a feature, look it up here first.
 and journaled; if it produces a new file, it is server-side and creates a
 revision.
 
+- **Decrypt-at-ingest rule.** Encrypted documents are decrypted at open and stored
+  as plaintext. Re-encryption happens only on export/save. The open password lives
+  in the session only (never persisted, never sent to the client).
+  See ADR 0008.
+
 ---
 
 ## 5. Data model
@@ -2195,6 +2200,12 @@ Every path into the workspace converges here:
 2. `Documents.ingest/2`: validate the PDF header, detect encryption (PDFium
    load attempt reports a password requirement), and if encrypted prompt for
    the password before anything else touches it.
+
+   **Encryption handling.** The password is stored in the session only, never in the DB
+   or client. The document is decrypted at ingest and its plaintext bytes stored;
+   the `encrypted` boolean remains true. On export/save, the bytes are re-encrypted
+   using the session-held password and the stored `security_policies` permission flags.
+   See ADR 0008.
 3. `Render.page_count` + `page_geometry` → `document_pages` rows.
 4. Create `documents` + revision 1.
 5. Enqueue thumbnail rendering (`:render`) and a text-layer probe (does the
