@@ -16,6 +16,14 @@ defmodule Quire.Office.Reader do
   """
 
   @doc """
+  Callback for format-specific reader modules.
+
+  Implementations receive raw document bytes and must return
+  `{:ok, Quire.Office.Layout.t()}` or `{:error, reason}`.
+  """
+  @callback read_bytes(binary()) :: {:ok, Quire.Office.Layout.t()} | {:error, term()}
+
+  @doc """
   Read an office document from bytes.
 
   The `filename` is used to detect the format by extension. Returns
