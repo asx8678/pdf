@@ -62,18 +62,15 @@ defmodule Quire.StorageTest do
 
     test "dispatch looks up adapter at runtime" do
       # Storage reads Application.fetch_env!(:quire, :storage_adapter)
-      # on every call — no compile-time alias.  The function exists but
-      # raises when no adapter is configured (test environment).
+      # on every call — no compile-time alias.
       assert {:adapter, 0} in Storage.__info__(:functions),
              "Storage.adapter/0 must exist for runtime dispatch"
 
-      assert Application.fetch_env(:quire, :storage_adapter) == :error,
-             "storage_adapter must not be set in test config"
+      # The adapter is configured in config/config.exs
+      assert Application.fetch_env(:quire, :storage_adapter) == {:ok, Quire.Storage.Web},
+             "storage_adapter must be set in config"
 
-      # Calling adapter/0 without a configured value raises
-      assert_raise ArgumentError, ~r/could not fetch application environment/, fn ->
-        Storage.adapter()
-      end
+      assert Storage.adapter() == Quire.Storage.Web
     end
   end
 

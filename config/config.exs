@@ -22,7 +22,9 @@ config :quire, :scopes,
 
 config :quire,
   ecto_repos: [Quire.Repo],
-  generators: [timestamp_type: :utc_datetime, binary_id: true]
+  generators: [timestamp_type: :utc_datetime, binary_id: true],
+  storage_adapter: Quire.Storage.Web,
+  storage_backend: Quire.Storage.Web.Filesystem
 
 # Configure the endpoint
 config :quire, QuireWeb.Endpoint,
