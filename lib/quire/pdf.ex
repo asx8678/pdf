@@ -25,8 +25,31 @@ defmodule Quire.Pdf do
   bytes verbatim and appends a new revision, which is what keeps an existing
   digital signature verifiable.
 
-  Sub-modules: `Quire.Pdf.Outline` (outline write via lopdf Bookmark/Outline)
-  and `Quire.Pdf.AcroForm` (/AP appearance-stream generation for form fields).
+  Sub-modules: `Quire.Pdf.Outline` (outline write and re-attachment after page import)
+  and `Quire.Pdf.AcroForm` (/AP appearance-stream generation and field rebuild after page import).
+
+  ## Post-import fixup
+
+  `ExPdfium.append/2` (merge) and `ExPdfium.extract_pages/2` (split) drop the
+  `/AcroForm` and `/Outlines` catalog entries from the output document while
+  leaving widget annotations and page objects intact. Call the fixup functions
+  after any page-import operation to re-attach both:
+
+      # After merge (append)
+      {:ok, merged} = ExPdfium.append(dest, source)
+      {:ok, merged_bytes} = ExPdfium.save_to_bytes(merged)
+      {:ok, merged_q} = Quire.Pdf.open(merged_bytes)
+      {:ok, source_q} = Quire.Pdf.open(source_pdf_bytes)
+      {:ok, dest_count} = Quire.Pdf.page_count(merged_q)
+      {:ok, src_count} = Quire.Pdf.page_count(source_q)
+      page_offset = dest_count - src_count
+      :ok = Quire.Pdf.fixup_after_append(merged_q, source_q, page_offset)
+
+      # After split (extract)
+      {:ok, extracted} = ExPdfium.extract_pages(source, [1, 3, 5])
+      {:ok, ext_bytes} = ExPdfium.save_to_bytes(extracted)
+      {:ok, ext_q} = Quire.Pdf.open(ext_bytes)
+      :ok = Quire.Pdf.fixup_after_extract(ext_q, [1, 3, 5])
 
   ## Known limits of the underlying `lopdf` 0.44.0
 
@@ -44,7 +67,9 @@ defmodule Quire.Pdf do
 
   """
 
+  alias Quire.Pdf.AcroForm
   alias Quire.Pdf.Native
+  alias Quire.Pdf.Outline
 
   @typedoc "An open document. Released by the garbage collector."
   @opaque t :: reference()
@@ -360,6 +385,78 @@ defmodule Quire.Pdf do
     case Map.get(entry, :children, []) do
       list when is_list(list) -> list
       _ -> [:invalid]
+    end
+  end
+
+  # ── Post-import fixup convenience ──────────────────────────────────────────
+
+  @doc """
+  Re-attach `/AcroForm` and `/Outlines` after a page import (merge via
+  `ExPdfium.append/2`).
+
+  `ExPdfium.append/2` (merge) drops the `/AcroForm` and `/Outlines` catalog
+  entries while keeping widget annotations on imported pages. This function
+  calls `Quire.Pdf.AcroForm.rebuild_fields/1` to rediscover widget annotations
+  and rebuild the `/AcroForm /Fields` array, then calls
+  `Quire.Pdf.Outline.transfer/3` to merge the source document's outline entries
+  (shifted by `page_offset`).
+
+  `page_offset` is the number of pages that were in the destination document
+  *before* the append — each source outline entry's `:page` index is incremented
+  by this amount.
+
+  ## Example
+
+      {:ok, merged} = ExPdfium.append(dest_ex, source_ex)
+      {:ok, merged_bytes} = ExPdfium.save_to_bytes(merged)
+      {:ok, merged_q} = Quire.Pdf.open(merged_bytes)
+      {:ok, source_q} = Quire.Pdf.open(source_pdf_bytes)
+
+      {:ok, dest_count} = Quire.Pdf.page_count(merged_q)
+      {:ok, src_count} = Quire.Pdf.page_count(source_q)
+      page_offset = dest_count - src_count
+
+      :ok = Quire.Pdf.fixup_after_append(merged_q, source_q, page_offset)
+      {:ok, final_bytes} = Quire.Pdf.save(merged_q)
+  """
+  @spec fixup_after_append(t(), t(), non_neg_integer()) :: :ok | {:error, atom()}
+  def fixup_after_append(merged_doc, source_doc, page_offset)
+      when is_reference(merged_doc) and is_reference(source_doc) and
+             is_integer(page_offset) and page_offset >= 0 do
+    with :ok <- AcroForm.rebuild_fields(merged_doc),
+         :ok <- Outline.transfer(merged_doc, source_doc, page_offset) do
+      :ok
+    end
+  end
+
+  @doc """
+  Re-attach `/AcroForm` and `/Outlines` after a page extraction (split via
+  `ExPdfium.extract_pages/2`).
+
+  `ExPdfium.extract_pages/2` (split) drops the `/AcroForm` and `/Outlines` catalog
+  entries while keeping widget annotations on extracted pages. This function calls
+  `Quire.Pdf.AcroForm.rebuild_fields/1` to rediscover widget annotations and
+  rebuild the `/AcroForm /Fields` array, then calls
+  `Quire.Pdf.Outline.filter_for_pages/2` to keep only outline entries whose page is
+  in `kept_indices` and remap page indices.
+
+  `kept_indices` is the same list of 0-indexed page indices passed to
+  `ExPdfium.extract_pages/2`.
+
+  ## Example
+
+      {:ok, extracted} = ExPdfium.extract_pages(source_ex, [1, 3, 5])
+      {:ok, ext_bytes} = ExPdfium.save_to_bytes(extracted)
+      {:ok, ext_q} = Quire.Pdf.open(ext_bytes)
+      :ok = Quire.Pdf.fixup_after_extract(ext_q, [1, 3, 5])
+      {:ok, final_bytes} = Quire.Pdf.save(ext_q)
+  """
+  @spec fixup_after_extract(t(), [non_neg_integer()]) :: :ok | {:error, atom()}
+  def fixup_after_extract(extracted_doc, kept_indices)
+      when is_reference(extracted_doc) and is_list(kept_indices) do
+    with :ok <- AcroForm.rebuild_fields(extracted_doc),
+         :ok <- Outline.filter_for_pages(extracted_doc, kept_indices) do
+      :ok
     end
   end
 end

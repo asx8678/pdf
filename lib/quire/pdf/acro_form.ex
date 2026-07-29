@@ -21,6 +21,14 @@ defmodule Quire.Pdf.AcroForm do
   stream means parsing `/DA`, measuring text extents and emitting content-stream
   operators. This module handles the common case.
 
+  ## Field rebuild after page import
+
+  `ExPdfium.append/2` (merge) and `extract_pages/2` (split) copy page content
+  including widget annotations but drop the document `/AcroForm` catalog entry.
+  `rebuild_fields/1` walks every page in the document, discovers widget
+  annotations by their `/FT` or `/Subtype == /Widget`, and builds (or merges
+  into) the `/AcroForm /Fields` array in the catalog.
+
   ## Fork alternative: `FPDFAnnot_SetAP`
 
   PDFium's own escape hatch for supplying an appearance, `FPDFAnnot_SetAP`, IS on
@@ -98,6 +106,168 @@ defmodule Quire.Pdf.AcroForm do
       end)
     end
   end
+
+  # ── Field rebuild after page import ────────────────────────────────────────
+
+  @doc """
+  Walk every page in the document, discover widget annotations, and rebuild
+  the `/AcroForm /Fields` array in the catalog.
+
+  After a page import operation (`ExPdfium.append/2` or `extract_pages/2`), the
+  source document's widget annotations are present on the imported pages (they
+  are part of page content) but the `/AcroForm` catalog entry is missing or
+  incomplete. This function re-discovers them by walking the page tree and
+  collecting annotations with `/FT` or `/Subtype == /Widget`.
+
+  Preserves existing `/AcroForm` properties (`/DR`, `/NeedAppearances`,
+  `/SigFlags`, `/CO`) — when the document already has an `/AcroForm` (from a
+  destination that had one before a merge), the existing fields and resources
+  are retained and new widget annotations are appended and deduplicated.
+
+  No-op when no widget annotations are found.
+
+  For convenience, callers may use `Quire.Pdf.fixup_after_append/3` or
+  `Quire.Pdf.fixup_after_extract/2` which combine `rebuild_fields/1` with
+  the matching outline re-attachment in a single call.
+
+  ## Limitations
+
+  - Each page and annotation is fetched individually through the NIF boundary, so
+    on a large document (100+ pages with many annotations) this may be slow. A
+    future batch walker NIF can eliminate the per-object round trips.
+  - Only merged field-widget objects are detected (an annotation dict with `/FT`
+    or `/Subtype == /Widget`). Multi-widget fields where the parent `/Kids`
+    array lives on the field-level dictionary (not on page `/Annots`) are
+    handled because each kid is a separate widget annotation on a page.
+  """
+  @spec rebuild_fields(Pdf.t()) :: :ok | {:error, atom()}
+  def rebuild_fields(doc) when is_reference(doc) do
+    with {:ok, page_refs} <- collect_pages(doc) do
+      widget_refs = find_widget_annotations(doc, page_refs)
+
+      if widget_refs == [] do
+        :ok
+      else
+        write_acroform(doc, widget_refs)
+      end
+    end
+  end
+
+  # Walk the /Pages -> /Kids page tree to collect every leaf page reference.
+  # Errors on individual pages are silently skipped — a partial page tree is
+  # better than failing the entire rebuild.
+  defp collect_pages(doc) do
+    with {:ok, catalog} <- Pdf.catalog(doc) do
+      case catalog["/Pages"] do
+        {:ref, num, gen} -> {:ok, walk_page_tree(doc, {num, gen}, [])}
+        _ -> {:ok, []}
+      end
+    end
+  end
+
+  defp walk_page_tree(doc, {num, gen}, acc) do
+    case Pdf.get_object(doc, {num, gen}) do
+      {:ok, dict} ->
+        case dict["/Type"] do
+          {:name, "Page"} ->
+            [{:ref, num, gen} | acc]
+
+          {:name, "Pages"} ->
+            dict
+            |> Map.get("/Kids", [])
+            |> Enum.reduce(acc, fn
+              {:ref, knum, kgen}, inner_acc ->
+                walk_page_tree(doc, {knum, kgen}, inner_acc)
+
+              _, inner_acc ->
+                inner_acc
+            end)
+
+          _ ->
+            acc
+        end
+
+      {:error, _} ->
+        acc
+    end
+  end
+
+  defp find_widget_annotations(doc, page_refs) do
+    page_refs
+    |> Enum.flat_map(fn {:ref, num, gen} ->
+      case Pdf.get_object(doc, {num, gen}) do
+        {:ok, page_dict} ->
+          page_dict
+          |> Map.get("/Annots", [])
+          |> Enum.filter(fn
+            {:ref, anum, agen} ->
+              case Pdf.get_object(doc, {anum, agen}) do
+                {:ok, annot_dict} ->
+                  has_ft = Map.has_key?(annot_dict, "/FT")
+                  is_widget = Map.get(annot_dict, "/Subtype") == {:name, "Widget"}
+                  has_ft or is_widget
+
+                _ ->
+                  false
+              end
+
+            _ ->
+              false
+          end)
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp write_acroform(doc, widget_refs) do
+    case Pdf.catalog(doc) do
+      {:ok, catalog} ->
+        {existing, existing_id} = read_existing(doc, catalog)
+
+        existing_fields = Map.get(existing, "/Fields", []) |> List.wrap()
+        all_fields = Enum.uniq(existing_fields ++ widget_refs)
+
+        acroform_dict =
+          existing
+          |> Map.drop(["/Fields"])
+          |> Map.put("/Fields", all_fields)
+
+        {num, gen} =
+          case existing_id do
+            nil ->
+              {:ok, id} = Pdf.allocate_object_id(doc)
+              {id, 0}
+
+            {n, g} ->
+              {n, g}
+          end
+
+        case Pdf.set_object(doc, {num, gen}, acroform_dict) do
+          :ok ->
+            updated_catalog = Map.put(catalog, "/AcroForm", {:ref, num, gen})
+            Pdf.set_object(doc, 1, updated_catalog)
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # Read the existing /AcroForm dictionary and its object id, if present.
+  defp read_existing(doc, %{"/AcroForm" => {:ref, num, gen}}) do
+    case Pdf.get_object(doc, {num, gen}) do
+      {:ok, af} -> {af, {num, gen}}
+      _ -> {%{}, nil}
+    end
+  end
+
+  defp read_existing(_doc, _catalog), do: {%{}, nil}
 
   # ── Field walk ──────────────────────────────────────────────────────────────
 
