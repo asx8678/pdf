@@ -241,6 +241,91 @@ defmodule QuireWeb.Live.CommentsPanel do
     {:noreply, socket |> assign(:status, :loading) |> load_data()}
   end
 
+  # ── Export / Import events ──────────────────────────────────────────────
+
+  def handle_event("export_fdf", _params, socket) do
+    doc_id = socket.assigns.document_id
+
+    case Quire.Export.FDF.generate(doc_id) do
+      {:ok, content} ->
+        send(self(), {:download, "annotations.fdf", content, "application/vnd.adobe.fdf"})
+
+      {:error, reason} ->
+        send(self(), {:export_error, "FDF export failed: #{inspect(reason)}"})
+    end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("export_xfdf", _params, socket) do
+    doc_id = socket.assigns.document_id
+
+    case Quire.Export.XFDF.generate(doc_id) do
+      {:ok, content} ->
+        send(self(), {:download, "annotations.xfdf", content, "application/vnd.adobe.xfdf"})
+
+      {:error, reason} ->
+        send(self(), {:export_error, "XFDF export failed: #{inspect(reason)}"})
+    end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("export_csv", _params, socket) do
+    doc_id = socket.assigns.document_id
+
+    case Quire.Export.CSV.generate(doc_id) do
+      {:ok, content} ->
+        send(self(), {:download, "annotations.csv", content, "text/csv"})
+
+      {:error, reason} ->
+        send(self(), {:export_error, "CSV export failed: #{inspect(reason)}"})
+    end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("export_summary_pdf", _params, socket) do
+    doc_id = socket.assigns.document_id
+
+    case Quire.Export.SummaryPdf.generate(doc_id) do
+      {:ok, content} ->
+        send(self(), {:download, "annotation-summary.pdf", content, "application/pdf"})
+
+      {:error, reason} ->
+        send(self(), {:export_error, "Summary PDF export failed: #{inspect(reason)}"})
+    end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("import_xfdf", %{"file" => file}, socket) do
+    doc_id = socket.assigns.document_id
+
+    # Accept both Plug.Upload (from form upload) and raw string (from JS hook)
+    case import_xml(file) do
+      {:ok, xml} ->
+        case Quire.Export.XFDF.import(xml, doc_id) do
+          {:ok, count} ->
+            send(self(), {:import_complete, count})
+            {:noreply, socket |> assign(:status, :loading) |> load_data()}
+
+          {:error, reason} ->
+            send(self(), {:export_error, "XFDF import failed: #{inspect(reason)}"})
+            {:noreply, socket}
+        end
+
+      {:error, reason} ->
+        send(self(), {:export_error, "File read error: #{inspect(reason)}"})
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("import_xfdf_trigger", _params, socket) do
+    # Push an event to trigger hidden file input click via JS
+    {:noreply, push_event(socket, "trigger_file_input", %{})}
+  end
+
   def handle_event("navigate_to_annotation", %{"id" => id}, socket) do
     id = coerce_id(id)
     annotation = Enum.find(socket.assigns.annotations, &(&1.id == id))
@@ -251,6 +336,13 @@ defmodule QuireWeb.Live.CommentsPanel do
 
     {:noreply, socket}
   end
+
+  defp import_xml(%Plug.Upload{} = upload) do
+    File.read(upload.path)
+  end
+
+  defp import_xml(content) when is_binary(content), do: {:ok, content}
+  defp import_xml(_), do: {:error, :invalid_input}
 
   # ── Data loading ────────────────────────────────────────────────────────
 
@@ -567,10 +659,70 @@ defmodule QuireWeb.Live.CommentsPanel do
   defp filters_bar(assigns) do
     ~H"""
     <div class="flex flex-col gap-2 border-b border-chrome-border dark:border-gray-600 pb-3">
-      <div class="flex items-center justify-between">
+      <!-- Export / Import toolbar -->
+      <div class="flex items-center justify-between gap-1">
         <h3 class="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
           Comments
         </h3>
+        <div class="flex items-center gap-1">
+          <button
+            type="button"
+            phx-click="export_fdf"
+            phx-target={@myself}
+            class="text-[10px] px-1.5 py-0.5 rounded bg-chrome-white dark:bg-gray-700 border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            title="Export FDF"
+          >
+            FDF
+          </button>
+          <button
+            type="button"
+            phx-click="export_xfdf"
+            phx-target={@myself}
+            class="text-[10px] px-1.5 py-0.5 rounded bg-chrome-white dark:bg-gray-700 border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            title="Export XFDF"
+          >
+            XFDF
+          </button>
+          <button
+            type="button"
+            phx-click="export_csv"
+            phx-target={@myself}
+            class="text-[10px] px-1.5 py-0.5 rounded bg-chrome-white dark:bg-gray-700 border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            title="Export CSV"
+          >
+            CSV
+          </button>
+          <button
+            type="button"
+            phx-click="export_summary_pdf"
+            phx-target={@myself}
+            class="text-[10px] px-1.5 py-0.5 rounded bg-chrome-white dark:bg-gray-700 border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
+            title="Export summary PDF"
+          >
+            PDF
+          </button>
+          <button
+            type="button"
+            phx-click="import_xfdf_trigger"
+            phx-target={@myself}
+            class="text-[10px] px-1.5 py-0.5 rounded bg-accent text-white hover:bg-accent/90 transition-colors cursor-pointer"
+            title="Import XFDF"
+          >
+            Import
+          </button>
+        </div>
+      </div>
+
+      <!-- Hidden file input for import -->
+      <input
+        id="xfdf-import-input"
+        type="file"
+        accept=".xfdf"
+        phx-hook="ImportFile"
+        class="hidden"
+      />
+
+      <div class="flex items-center justify-end -mt-1">
         <button
           type="button"
           phx-click={@on_clear}

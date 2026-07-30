@@ -150,8 +150,15 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:whiteout_mode_active, false)
       |> assign(:whiteout_warning_visible, false)
       |> assign(:whiteout_warning_dismissed, false)
+      |> assign(:image_ocr_uploading, false)
+      |> assign(:image_ocr_error, nil)
       |> load_user_settings()
       |> load_saved_signatures()
+      |> allow_upload(:image,
+        accept: ~w(image/png image/jpeg image/webp),
+        max_entries: 1,
+        max_file_size: 50_000_000
+      )
 
     Phoenix.PubSub.subscribe(Quire.PubSub, "document:#{id}")
 
@@ -1465,12 +1472,33 @@ defmodule QuireWeb.WorkspaceLive do
             tooltip="Configure OCR languages and options"
             disabled={@ocr_running}
           />
+          <.ribbon_button
+            icon="hero-photo"
+            label="Image OCR"
+            phx-click="upload_image_ocr"
+            tooltip="Upload an image (PNG/JPEG/WebP) and create a searchable PDF via OCR"
+            disabled={@image_ocr_uploading}
+          />
         </.ribbon_group>
 
         <.ribbon_group :if={@ocr_progress} label="Progress">
           <div class="flex items-center gap-2 px-2 py-1 text-xs text-gray-500">
             <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
             <span>{"#{@ocr_progress.pct}%"}</span>
+          </div>
+        </.ribbon_group>
+
+        <.ribbon_group :if={@image_ocr_uploading} label="Image OCR">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-gray-500">
+            <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+            <span>Processing…</span>
+          </div>
+        </.ribbon_group>
+
+        <.ribbon_group :if={@image_ocr_error} label="Image OCR">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-red-500">
+            <.icon name="hero-exclamation-circle" class="size-3.5" />
+            <span>{error_message(@image_ocr_error)}</span>
           </div>
         </.ribbon_group>
       </div>
@@ -1685,6 +1713,13 @@ defmodule QuireWeb.WorkspaceLive do
     ]
   end
 
+  # ── Helpers (T-143) ──────────────────────────────────────────────────
+
+  defp error_message({:invalid_image, msg}), do: msg
+  defp error_message({:pipeline_error, _}), do: "OCR processing failed"
+  defp error_message(nil), do: ""
+  defp error_message(_), do: "An unknown error occurred"
+
   # ── PubSub handlers (T-139) ──────────────────────────────────────────
 
   @impl true
@@ -1760,6 +1795,70 @@ defmodule QuireWeb.WorkspaceLive do
   @impl true
   def handle_info({:dismiss_ocr_confidence}, socket) do
     {:noreply, assign(socket, :show_ocr_confidence, false)}
+  end
+
+  # ── Annotation export / import handlers (T-111) ────────────────────────
+
+  @impl true
+  def handle_info({:download, filename, content, content_type}, socket) do
+    {:noreply,
+     push_event(socket, "download", %{
+       content: Base.encode64(content),
+       filename: filename,
+       content_type: content_type
+     })}
+  end
+
+  @impl true
+  def handle_info({:import_complete, count}, socket) do
+    {:noreply, put_flash(socket, :info, "Imported #{count} annotations from XFDF")}
+  end
+
+  @impl true
+  def handle_info({:export_error, reason}, socket) do
+    {:noreply, put_flash(socket, :error, reason)}
+  end
+
+  # ── Image OCR upload handlers (T-143) ─────────────────────────────────
+
+  @impl true
+  def handle_event("upload_image_ocr", _params, socket) do
+    {:noreply, push_event(socket, "trigger_image_picker", %{})}
+  end
+
+  @impl true
+  def handle_event("upload_image_ocr_submit", _params, socket) do
+    [%{meta: meta, bytes: image_bytes}] =
+      consume_uploaded_entries(socket, :image, fn meta, entry ->
+        %{meta: meta, bytes: File.read!(entry.path)}
+      end)
+
+    title = Path.rootname(meta.name, Path.extname(meta.name))
+
+    socket =
+      socket
+      |> assign(:image_ocr_uploading, true)
+      |> assign(:image_ocr_error, nil)
+
+    socket =
+      case Quire.Workers.ImageOcrWorker.process(image_bytes, title, socket.assigns.current_scope) do
+        {:ok, %{document: doc}} ->
+          push_navigate(socket, to: ~p"/workspace/#{doc.id}")
+
+        {:error, {:invalid_image, msg}} ->
+          socket
+          |> assign(:image_ocr_uploading, false)
+          |> assign(:image_ocr_error, {:invalid_image, msg})
+          |> put_flash(:error, msg)
+
+        {:error, reason} ->
+          socket
+          |> assign(:image_ocr_uploading, false)
+          |> assign(:image_ocr_error, {:pipeline_error, inspect(reason)})
+          |> put_flash(:error, "Image OCR failed: #{inspect(reason)}")
+      end
+
+    {:noreply, socket}
   end
 
   # ── Annotation commit helpers (T-107) ────────────────────────────────

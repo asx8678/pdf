@@ -1,7 +1,7 @@
 <Layouts.workspace flash={@flash}>
   <div
     id="workspace-shell"
-    phx-hook=".KeyboardShortcuts"
+    phx-hook=".KeyboardShortcuts .DownloadFile"
     phx-keydown="keydown"
     phx-keyup="keyup"
     tabindex="-1"
@@ -237,6 +237,20 @@
 
     <.shortcuts_modal :if={@show_shortcuts} on_close="close_shortcuts" />
 
+    <%!-- Hidden upload form triggered by the Image OCR ribbon button --%>
+    <form
+      id="image-ocr-upload-form"
+      phx-submit="upload_image_ocr_submit"
+      class="hidden"
+      phx-hook=".ImageFileTrigger"
+    >
+      <.live_file_input
+        upload={@uploads.image}
+        id="image-ocr-upload-input"
+        accept="image/png,image/jpeg,image/webp"
+      />
+    </form>
+
     <script :type={Phoenix.LiveView.ColocatedHook} name=".KeyboardShortcuts">
       export default {
         mounted() {
@@ -261,6 +275,38 @@
             if (e.target.closest("input, select, textarea, [contenteditable]")) return;
             e.preventDefault();
           }, true);
+        }
+      }
+    </script>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".ImageFileTrigger">
+      export default {
+        mounted() {
+          this.handleEvent("trigger_image_picker", () => {
+            const input = document.getElementById("image-ocr-upload-input");
+            if (input) input.click();
+          });
+        }
+      }
+    </script>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".DownloadFile">
+      export default {
+        mounted() {
+          this.handleEvent("download", ({ content, filename, content_type }) => {
+            const byteString = atob(content);
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+            const blob = new Blob([ab], { type: content_type || "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          });
         }
       }
     </script>
