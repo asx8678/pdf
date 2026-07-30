@@ -123,20 +123,32 @@ defmodule Quire.Editing.EditSession do
 
   @impl true
   def handle_call({:apply, op}, _from, state) when is_map(op) do
-    op_with_ts = Map.put(op, :timestamp, System.monotonic_time())
+    kind = Map.get(op, :kind) || op["kind"]
+    target = Map.get(op, :target) || op["target"]
+    raw_data = Map.get(op, :data) || op["data"] || op
+
+    # Preserve coalescing-relevant fields in data
+    data = if target, do: Map.put(raw_data, :target, target), else: raw_data
+
+    op_struct = %Quire.Editing.Operation{
+      kind: kind,
+      data: data,
+      inverse: compute_inverse(kind, op, state),
+      metadata: %{applied_by: self(), applied_at: DateTime.utc_now()},
+      timestamp: System.monotonic_time()
+    }
 
     {journal, redo_stack} =
       case state.journal do
         [last | rest] ->
-          if coalesce?(last, op_with_ts) do
-            # Coalesce: replace last entry with the new op (latest data wins)
-            {[op_with_ts | rest], state.redo_stack}
+          if coalesce?(last, op_struct) do
+            {[op_struct | rest], state.redo_stack}
           else
-            {[op_with_ts | state.journal], []}
+            {[op_struct | state.journal], []}
           end
 
         _ ->
-          {[op_with_ts | state.journal], []}
+          {[op_struct | state.journal], []}
       end
 
     new_state = %{state | journal: journal, redo_stack: redo_stack, dirty?: true}
@@ -155,7 +167,13 @@ defmodule Quire.Editing.EditSession do
       [] ->
         {:reply, {:error, :empty}, state}
 
+      [head | rest] when is_struct(head, Quire.Editing.Operation) ->
+        new_state = %{state | journal: rest, redo_stack: [head | state.redo_stack]}
+        {reply_state, _timers} = schedule_timers(new_state)
+        {:reply, {:ok, head.inverse}, reply_state}
+
       [head | rest] ->
+        # Legacy: raw maps without inverse — just move to redo_stack
         new_state = %{state | journal: rest, redo_stack: [head | state.redo_stack]}
         {reply_state, _timers} = schedule_timers(new_state)
         {:reply, {:ok, head}, reply_state}
@@ -167,6 +185,12 @@ defmodule Quire.Editing.EditSession do
     case state.redo_stack do
       [] ->
         {:reply, {:error, :empty}, state}
+
+      [head | rest] when is_struct(head, Quire.Editing.Operation) ->
+        # Re-apply the original operation — reconstruct the user-facing map
+        new_state = %{state | journal: [head | state.journal], redo_stack: rest}
+        {reply_state, _timers} = schedule_timers(new_state)
+        {:reply, {:ok, %{kind: head.kind, data: head.data}}, reply_state}
 
       [head | rest] ->
         new_state = %{state | journal: [head | state.journal], redo_stack: rest}
@@ -203,25 +227,43 @@ defmodule Quire.Editing.EditSession do
     {:stop, :normal, state}
   end
 
+  # ── Inverse computation ────────────────────────────────────────────────
+
+  defp compute_inverse(kind, op, state) do
+    case Quire.Editing.Operation.module_for_kind(kind) do
+      {:ok, mod} ->
+        case mod.invert(op, %{document_id: state.document_id, user_id: state.user_id}) do
+          {:ok, inverse} -> inverse
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
   # ── Coalescing ────────────────────────────────────────────────────────────
 
   @doc false
   def coalesce?(op1, op2) do
-    kind1 = Map.get(op1, :kind) || op1["kind"]
-    kind2 = Map.get(op2, :kind) || op2["kind"]
-    target1 = Map.get(op1, :target) || op1["target"]
-    target2 = Map.get(op2, :target) || op2["target"]
+    {kind1, target1, ts1} = coalesce_data(op1)
+    {kind2, target2, ts2} = coalesce_data(op2)
 
     coalescable_kind?(kind1) && kind1 == kind2 && target1 == target2 &&
-      within_coalesce_window?(op1, op2)
+      abs(ts2 - ts1) < 800_000
   end
 
   defp coalescable_kind?(kind), do: kind in ~w(text.style annot.update)
 
-  defp within_coalesce_window?(op1, op2) do
-    ts1 = Map.get(op1, :timestamp, 0)
-    ts2 = Map.get(op2, :timestamp, 0)
-    abs(ts2 - ts1) < 800_000
+  defp coalesce_data(%{__struct__: Quire.Editing.Operation} = op) do
+    {op.kind, op.data[:target] || op.data["target"], op.timestamp}
+  end
+
+  defp coalesce_data(op) when is_map(op) do
+    kind = Map.get(op, :kind) || op["kind"]
+    target = Map.get(op, :target) || op["target"]
+    ts = Map.get(op, :timestamp, 0)
+    {kind, target, ts}
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────
@@ -237,6 +279,7 @@ defmodule Quire.Editing.EditSession do
     hibernate_ref = Process.send_after(self(), :hibernate, @hibernate_after)
     terminate_ref = Process.send_after(self(), :terminate, @terminate_after)
 
-    {%{state | hibernate_timer: hibernate_ref, terminate_timer: terminate_ref}, {hibernate_ref, terminate_ref}}
+    {%{state | hibernate_timer: hibernate_ref, terminate_timer: terminate_ref},
+     {hibernate_ref, terminate_ref}}
   end
 end

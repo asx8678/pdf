@@ -87,8 +87,7 @@ defmodule Quire.Ocr.Preprocess do
              engine: __MODULE__,
              operation: :preprocess,
              code: :invalid_argument,
-             message:
-               "Image dimensions #{w}x#{h} exceed maximum #{@max_dimension} px per side",
+             message: "Image dimensions #{w}x#{h} exceed maximum #{@max_dimension} px per side",
              detail: nil
            }}
         else

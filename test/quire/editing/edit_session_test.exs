@@ -5,7 +5,9 @@ defmodule Quire.Editing.EditSessionTest do
     # The application starts the production-named Registry in its supervision
     # tree, so it is already available.  We start a test-named supervisor to
     # avoid colliding with the production DynamicSupervisor.
-    start_supervised!({DynamicSupervisor, strategy: :one_for_one, name: Quire.Editing.TestSupervisor})
+    start_supervised!(
+      {DynamicSupervisor, strategy: :one_for_one, name: Quire.Editing.TestSupervisor}
+    )
 
     %{doc_id: Ecto.UUID.autogenerate(), user_id: Ecto.UUID.autogenerate()}
   end
@@ -39,9 +41,9 @@ defmodule Quire.Editing.EditSessionTest do
       assert length(state.journal) == 1
 
       journal_op = hd(state.journal)
-      assert journal_op[:kind] == "annot.add"
-      assert journal_op[:data] == %{}
-      assert is_integer(journal_op[:timestamp])
+      assert journal_op.kind == "annot.add"
+      assert journal_op.data == %{}
+      assert is_integer(journal_op.timestamp)
     end
 
     test "clears redo_stack", %{doc_id: doc_id, user_id: user_id} do
@@ -71,9 +73,9 @@ defmodule Quire.Editing.EditSessionTest do
       {:ok, _op} = Quire.Editing.EditSession.apply(pid, %{kind: "annot.add", data: %{x: 1}})
       {:ok, undone} = Quire.Editing.EditSession.undo(pid)
 
-      # undone is the inverse of op — for now it returns the same op
+      # undone is the inverse of op — annot.add inverts to annot.delete
       assert is_map(undone)
-      assert undone.kind == "annot.add"
+      assert undone.kind == "annot.delete"
     end
 
     test "returns :empty on empty journal", %{doc_id: doc_id, user_id: user_id} do
@@ -89,7 +91,9 @@ defmodule Quire.Editing.EditSessionTest do
       pid =
         start_supervised!({Quire.Editing.EditSession, document_id: doc_id, user_id: user_id})
 
-      {:ok, _op} = Quire.Editing.EditSession.apply(pid, %{kind: "text.add", data: %{text: "hello"}})
+      {:ok, _op} =
+        Quire.Editing.EditSession.apply(pid, %{kind: "text.add", data: %{text: "hello"}})
+
       {:ok, _undone} = Quire.Editing.EditSession.undo(pid)
       {:ok, redone} = Quire.Editing.EditSession.redo(pid)
 
@@ -207,7 +211,7 @@ defmodule Quire.Editing.EditSessionTest do
 
     state = :sys.get_state(pid)
     assert length(state.journal) == 1
-    assert hd(state.journal)[:data][:font] == "italic"
+    assert hd(state.journal).data[:font] == "italic"
   end
 
   test "consecutive annot.update ops on same target coalesce", %{doc_id: doc_id, user_id: user_id} do

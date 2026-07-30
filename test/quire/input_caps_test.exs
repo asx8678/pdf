@@ -43,7 +43,7 @@ defmodule Quire.InputCapsTest do
     end
 
     test "allows images just under 50 MB" do
-      ok_size = (50 * @mb) - 1
+      ok_size = 50 * @mb - 1
       bytes = :binary.copy(<<0>>, ok_size)
 
       # Should pass size check but fail on actual image decode

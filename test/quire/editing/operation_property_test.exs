@@ -3,21 +3,59 @@ defmodule Quire.Editing.OperationPropertyTest do
   use ExUnitProperties
 
   @kinds [
-    "annot.add", "annot.update", "annot.delete", "annot.reply",
-    "text.add", "text.edit", "text.style", "image.insert", "link.add", "link.edit",
-    "mark.page_number", "mark.watermark", "mark.header_footer", "mark.bates", "mark.remove",
-    "page.insert", "page.delete", "page.move", "page.rotate", "page.replace",
-    "page.crop", "page.size", "page.margin", "page.background", "page.reverse",
-    "form.add_field", "form.update_field", "form.delete_field", "form.fill",
-    "sec.encrypt", "sec.permissions", "sec.redact_mark", "sec.redact_apply",
-    "sec.sanitize", "sec.strip_metadata",
-    "doc.merge", "doc.split", "doc.compress", "doc.ocr", "doc.convert", "doc.sign",
-    "doc.metadata", "doc.bookmark_add", "doc.bookmark_update", "doc.bookmark_delete", "doc.bookmark_move"
+    "annot.add",
+    "annot.update",
+    "annot.delete",
+    "annot.reply",
+    "text.add",
+    "text.edit",
+    "text.style",
+    "image.insert",
+    "link.add",
+    "link.edit",
+    "mark.page_number",
+    "mark.watermark",
+    "mark.header_footer",
+    "mark.bates",
+    "mark.remove",
+    "page.insert",
+    "page.delete",
+    "page.move",
+    "page.rotate",
+    "page.replace",
+    "page.crop",
+    "page.size",
+    "page.margin",
+    "page.background",
+    "page.reverse",
+    "form.add_field",
+    "form.update_field",
+    "form.delete_field",
+    "form.fill",
+    "sec.encrypt",
+    "sec.permissions",
+    "sec.redact_mark",
+    "sec.redact_apply",
+    "sec.sanitize",
+    "sec.strip_metadata",
+    "doc.merge",
+    "doc.split",
+    "doc.compress",
+    "doc.ocr",
+    "doc.convert",
+    "doc.sign",
+    "doc.metadata",
+    "doc.bookmark_add",
+    "doc.bookmark_update",
+    "doc.bookmark_delete",
+    "doc.bookmark_move"
   ]
 
   property "apply ∘ invert ∘ apply == apply for all kinds" do
-    check all kind <- StreamData.member_of(@kinds),
-              op_data <- op_data_for_kind(kind) do
+    check all(
+            kind <- StreamData.member_of(@kinds),
+            op_data <- op_data_for_kind(kind)
+          ) do
       {:ok, mod} = Quire.Editing.Operation.module_for_kind(kind)
       context = %{document_id: Ecto.UUID.generate(), user_id: Ecto.UUID.generate()}
 

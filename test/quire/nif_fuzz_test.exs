@@ -9,8 +9,8 @@ defmodule Quire.NifFuzzTest do
   ]
 
   @all_fixtures Enum.flat_map(@fixture_dirs, fn dir ->
-    for f <- File.ls!(dir), not File.dir?(Path.join(dir, f)), do: Path.join(dir, f)
-  end)
+                  for f <- File.ls!(dir), not File.dir?(Path.join(dir, f)), do: Path.join(dir, f)
+                end)
 
   @mb 1024 * 1024
 
@@ -46,7 +46,9 @@ defmodule Quire.NifFuzzTest do
             end
 
           case result do
-            {:ok, _} -> :ok
+            {:ok, _} ->
+              :ok
+
             {:crash, _} ->
               flunk("ExPdfium.open_blob crashed on #{unquote(fname)}: #{inspect(result)}")
           end
@@ -89,7 +91,9 @@ defmodule Quire.NifFuzzTest do
             end
 
           case result do
-            {:ok, _} -> :ok
+            {:ok, _} ->
+              :ok
+
             {:crash, _} ->
               flunk("Image.OCR crashed on #{unquote(fname)}: #{inspect(result)}")
           end
@@ -130,7 +134,9 @@ defmodule Quire.NifFuzzTest do
             end
 
           case result do
-            {:ok, _} -> :ok
+            {:ok, _} ->
+              :ok
+
             {:crash, _} ->
               flunk("libvips crashed on #{unquote(fname)}: #{inspect(result)}")
           end

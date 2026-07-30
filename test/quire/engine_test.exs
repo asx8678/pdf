@@ -144,7 +144,10 @@ defmodule Quire.EngineTest do
                end)
 
       assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], _, _}
-      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], measurements, metadata}
+
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], measurements,
+                      metadata}
+
       assert metadata.engine == Quire.Render
       assert is_integer(measurements.duration)
     end
@@ -162,14 +165,15 @@ defmodule Quire.EngineTest do
       assert metadata.engine == Quire.Pdf
     end
   end
-    test "function clause error is captured" do
-      fun = fn -> :erlang.error(:function_clause) end
 
-      assert {:error, error} =
-               Quire.Engine.trace(Quire.Pades, :sign, [], fun)
+  test "function clause error is captured" do
+    fun = fn -> :erlang.error(:function_clause) end
 
-      assert error.code == :function_clause
-    end
+    assert {:error, error} =
+             Quire.Engine.trace(Quire.Pades, :sign, [], fun)
+
+    assert error.code == :function_clause
+  end
 
   describe "Quire.Engine.check/0" do
     test "returns a map with engine keys" do

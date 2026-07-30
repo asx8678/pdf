@@ -517,11 +517,17 @@ defmodule Quire.Render.Pdfium do
 
   defp media_to_crop(point, boxes) do
     case boxes.crop do
-      nil -> point
+      nil ->
+        point
 
       %{left: l, bottom: b} ->
-        %{point | left: point.left - l, right: point.right - l,
-          top: point.top - b, bottom: point.bottom - b}
+        %{
+          point
+          | left: point.left - l,
+            right: point.right - l,
+            top: point.top - b,
+            bottom: point.bottom - b
+        }
     end
   end
 
