@@ -2349,8 +2349,9 @@ this phase is small: Rust comes from mise, the native libraries are already
 `arm64` dylibs bundled inside the NIF artefacts (or one Homebrew formula),
 and there is no collection of external tools to redistribute — no JVM, no
 Python, no office suite. What remains is genuinely desktop work: the shell,
-native file dialogs, localhost auth, code signing and notarisation, plus the
-two platforms you have not been developing on.
+native file dialogs, localhost auth, code signing and notarisation, plus
+one platform you have not been developing on (Windows; Linux is deferred
+post-1.0 per ADR 0011).
 
 **Two things make it less small than that paragraph reads, and both are
 licence/redistribution problems rather than code problems.** The bundled
@@ -3057,13 +3058,18 @@ provider.
 | T-180 | Native-library redistribution: verify the PDFium and libvips dylibs travel inside their NIF artefacts; make Tesseract + tessdata redistributable per ADR 0002; `otool -L` every binary and confirm nothing links back into `/opt/homebrew`. Also ship the **complete LGPL-3.0-or-later licence set** for everything statically inside `libvips-cpp.8.18.3.dylib` (§3.5) — the artefact we consume contains no licence files — and confirm cairo's exact MPL version while you are in there. **Budget more than a day: this is bigger than the plan's original estimate.** The `image_ocr` dylib closure alone is 14 libraries, the exit is a per-triple precompile matrix rather than a static link on macOS, and **T-183 is blocked independently of this task** — `image_ocr` does not build on Windows at all, so a macOS static link does not unblock it. |
 | T-181 | Window controls in the title bar wired to the shell. |
 | T-182 | macOS: entitlements (`allow-jit`, `allow-unsigned-executable-memory`, `allow-dyld-environment-variables`, `disable-library-validation`), codesign step, notarisation. |
-| T-183 | ∥ Windows: MSI/NSIS, code signing, WebView2 bootstrap. |
-| T-184 | ∥ Linux: deb + AppImage. **Test the ribbon and pdf.js on webkit2gtk** — this is where CSS breaks. |
+| T-183 | ∥ Windows: MSI/NSIS, code signing, WebView2 bootstrap. **Deferred to post-1.0** (ADR 0011). |
+| T-184 | ∥ Linux: deb + AppImage. **Test the ribbon and pdf.js on webkit2gtk** — this is where CSS breaks. **Deferred to post-1.0** (ADR 0011). |
 | T-185 | Auto-update (Tauri updater + signed manifests). |
 
-**Gate 13:** the app builds and runs on all three platforms; opening a file
-from a real folder works; **no LiveView or context code changed in this
-phase** (if it did, §7.1 was violated — fix that instead).
+**Gate 13:** the app builds and runs on macOS; opening a file from a real
+folder works; **no LiveView or context code changed in this phase** (if it
+did, §7.1 was violated — fix that instead).
+
+> Windows (T-183) and Linux (T-184) are deferred to a named post-1.0 phase
+> per ADR 0011. The macOS `.app` ships with full Local Folders, localhost
+> auth, and the complete ribbon.
+
 
 ---
 
@@ -3080,7 +3086,7 @@ phase** (if it did, §7.1 was violated — fix that instead).
 | T-192 | Error taxonomy: every failure maps to a user-facing message + a docs link. |
 | T-193 | Onboarding tour + per-tab help. |
 | T-194 | Documentation: README (with the §3.6 bootstrap), ARCHITECTURE.md, ADR log, runbook. The README's setup section is tested by doing it on a fresh macOS user account — if it takes more than the bootstrap sequence in §3.6.1, fix the setup, not the README. |
-| T-195 | Visual regression across all tabs, both themes, three widths. Three *platforms* only once Phase 13 exists; until then `darwin-arm64` baselines are the whole suite (§13). |
+| T-195 | Visual regression across all tabs, both themes, three widths. macOS only for v1; `darwin-arm64` baselines are the whole suite (§13). See ADR 0011. |
 | T-196 | ∥ Reproducibility check: clone into a fresh directory on a second machine (or a new macOS user account), run the §3.6.1 bootstrap, `mise run doctor`, `mise run check`, `mise run e2e`. Everything green with no manual intervention. Without a container image, this is the only real evidence that the `mise.toml` + `Brewfile` contract holds. |
 | T-197 | ∥ Final NIF crash-fuzz sweep over the entire corpus (§13) plus a 24-hour soak: OCR + render + convert queues saturated in a loop, asserting zero VM crashes and zero scheduler-stall budget violations. |
 
@@ -3243,7 +3249,7 @@ The doctor table (all asserted at boot and by `mise run doctor`):
 | **R-08** | Undo/redo across the hybrid boundary is subtly wrong | High | Property test in T-024; coalescing rules; revision-restore as the server inverse |
 | **R-09** | Coordinate bugs on rotated/cropped pages | High | §14.3 single-source geometry module + round-trip property test |
 | **R-10** | Chromium absent or changed → URL/Office→PDF breaks | Medium | Explicit configured path (§3.6.6); clean feature degradation (§7.2); version captured in About |
-| **R-11** | webkit2gtk on Linux breaks the UI in the desktop build | Medium | T-184 explicit test; Electron is the documented escape hatch |
+| **R-11** | webkit2gtk on Linux breaks the UI in the desktop build | Deferred | Post-1.0 (ADR 0011). ADR 0011 documents the Electron escape hatch |
 | **R-12** | Scope. This is 11 tabs and ~180 controls | **High** | Phase gates; ship Phases 0–4 as a usable product before continuing |
 | **R-13** | Trademark/trade-dress exposure | Medium | §2 — original name, logo and icons from day one |
 | **R-14** | A `brew upgrade` silently moves a native library | Medium | `brew bundle --no-upgrade`; doctor version assertions in every `check`; `Engine.versions/0` in Settings → About |
