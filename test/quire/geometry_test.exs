@@ -6,24 +6,24 @@ defmodule Quire.GeometryTest do
 
   property "CSS -> PDF -> CSS round-trip is identity within 0.01 pt" do
     check all(
-      page_w <- StreamData.integer(100..1200),
-      page_h <- StreamData.integer(100..1600),
-      x <- StreamData.integer(0..max(0, page_w - 10)),
-      y <- StreamData.integer(0..max(0, page_h - 10)),
-      w <- StreamData.integer(10..max(10, page_w - x)),
-      h <- StreamData.integer(10..max(10, page_h - y))
-    ) do
+            page_w <- StreamData.integer(100..1200),
+            page_h <- StreamData.integer(100..1600),
+            x <- StreamData.integer(0..max(0, page_w - 10)),
+            y <- StreamData.integer(0..max(0, page_h - 10)),
+            w <- StreamData.integer(10..max(10, page_w - x)),
+            h <- StreamData.integer(10..max(10, page_h - y))
+          ) do
       assert Geometry.round_trip_ok?(x, y, w, h, page_h)
     end
   end
 
   property "apply_rotation 0 deg is identity" do
     check all(
-      x <- StreamData.integer(0..1000),
-      y <- StreamData.integer(0..1000),
-      w <- StreamData.integer(100..1200),
-      h <- StreamData.integer(100..1600)
-    ) do
+            x <- StreamData.integer(0..1000),
+            y <- StreamData.integer(0..1000),
+            w <- StreamData.integer(100..1200),
+            h <- StreamData.integer(100..1600)
+          ) do
       assert {^x, ^y} = Geometry.apply_rotation(x, y, w, h, 0)
     end
   end

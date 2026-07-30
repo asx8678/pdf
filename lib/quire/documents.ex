@@ -17,6 +17,15 @@ defmodule Quire.Documents do
   """
   @spec get_document(binary(), scope :: term()) :: {:ok, Document.t()} | {:error, atom()}
   def get_document(id, scope) do
+    # Repo.get with an invalid UUID string raises CastError — guard early.
+    with {:ok, _} <- Ecto.UUID.cast(id) do
+      do_get_document(id, scope)
+    else
+      :error -> {:error, :not_found}
+    end
+  end
+
+  defp do_get_document(id, scope) do
     doc = Repo.get(Document, id)
 
     cond do
