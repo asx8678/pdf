@@ -8,7 +8,7 @@ defmodule Quire.Esign do
   import Ecto.Query, warn: false
 
   alias Quire.Repo
-  alias Quire.Esign.{Envelope, Signer, Field}
+  alias Quire.Esign.{Envelope, Signer, Field, AuditEvent}
 
   @doc """
   Creates a new envelope from the given attrs.
@@ -34,7 +34,14 @@ defmodule Quire.Esign do
       |> Envelope.put_status(:sent)
       |> Envelope.put_sent_at()
 
-    Repo.update(changeset)
+    case Repo.update(changeset) do
+      {:ok, updated} ->
+        record_audit_event(updated, "envelope_sent", %{})
+        {:ok, updated}
+
+      {:error, _} = error ->
+        error
+    end
   end
 
   def send_envelope(%Envelope{} = _envelope, _attrs) do
@@ -267,6 +274,59 @@ defmodule Quire.Esign do
       from(f in Field,
         where: f.envelope_id == ^envelope_id,
         order_by: f.page_index
+      )
+    )
+  end
+
+  # ── Audit trail (§9.9) ───────────────────────────────────────────────────
+
+  @doc """
+  Records an audit event for the given envelope.
+
+  Accepts an optional `signer` struct (second argument or third argument
+  with keyword list) to associate the event with a specific signer.
+  The `metadata` map can carry extra details such as IP address or
+  user agent.
+
+  Returns `{:ok, %AuditEvent{}}` on success. Logs on failure but does
+  not fail the caller — audit recording is best-effort.
+  """
+  def record_audit_event(envelope, event, metadata \\ %{}) do
+    record_audit_event(envelope, nil, event, metadata)
+  end
+
+  def record_audit_event(envelope, signer, event, metadata) do
+    now = DateTime.utc_now()
+
+    attrs = %{
+      envelope_id: envelope.id,
+      event: to_string(event),
+      metadata: metadata,
+      occurred_at: now
+    }
+
+    attrs = if signer, do: Map.put(attrs, :signer_id, signer.id), else: attrs
+
+    %AuditEvent{}
+    |> AuditEvent.changeset(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, _} = ok -> ok
+      {:error, changeset} ->
+        require Logger
+        Logger.warning("Failed to record audit event #{event}: #{inspect(changeset.errors)}")
+        {:error, changeset}
+    end
+  end
+
+  @doc """
+  Lists all audit events for an envelope, ordered chronologically.
+  """
+  def list_audit_events(envelope) do
+    Repo.all(
+      from(a in AuditEvent,
+        where: a.envelope_id == ^envelope.id,
+        order_by: a.occurred_at
       )
     )
   end
