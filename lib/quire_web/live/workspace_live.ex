@@ -2334,7 +2334,8 @@ defmodule QuireWeb.WorkspaceLive do
                       <div class="p-3 space-y-2">
                         <div class="text-xs text-gray-400 dark:text-gray-500">
                           {String.slice(result.original, 0, 200)}{if String.length(result.original) >
-                                                                       200, do: "…"}
+                                                                       200,
+                                                                     do: "…"}
                         </div>
                         <%= if result.translated do %>
                           <div class="text-xs text-gray-900 dark:text-gray-100 font-medium border-t border-gray-100 dark:border-gray-700 pt-2">
