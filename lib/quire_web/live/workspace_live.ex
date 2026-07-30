@@ -174,6 +174,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:convert_running, false)
       |> assign(:convert_format, nil)
       |> assign(:convert_error, nil)
+      |> assign(:translate_source, "detect")
+      |> assign(:translate_target, "en")
+      |> assign(:translate_mode, "overlay")
+      |> assign(:translate_provider_label, provider_label())
       |> load_user_settings()
       |> load_saved_signatures()
       |> allow_upload(:image,
@@ -2076,6 +2080,119 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
+      <!-- Translate tab ribbon (T-157) -->
+      <div :if={@active_tab == "translate"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Languages">
+          <div class="flex items-center gap-2 px-2">
+            <select
+              phx-change="translate_set_source"
+              class="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              aria-label="Source language"
+              value={@translate_source}
+            >
+              <option value="detect">Detect</option>
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="nl">Dutch</option>
+              <option value="pl">Polish</option>
+              <option value="ru">Russian</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+              <option value="ar">Arabic</option>
+            </select>
+            <.icon name="hero-arrow-right" class="size-3.5 text-gray-400" />
+            <select
+              phx-change="translate_set_target"
+              class="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+              aria-label="Target language"
+              value={@translate_target}
+            >
+              <option value="en">English</option>
+              <option value="es">Spanish</option>
+              <option value="fr">French</option>
+              <option value="de">German</option>
+              <option value="it">Italian</option>
+              <option value="pt">Portuguese</option>
+              <option value="nl">Dutch</option>
+              <option value="pl">Polish</option>
+              <option value="ru">Russian</option>
+              <option value="ja">Japanese</option>
+              <option value="ko">Korean</option>
+              <option value="zh">Chinese</option>
+              <option value="ar">Arabic</option>
+            </select>
+          </div>
+        </.ribbon_group>
+
+        <.ribbon_group label="Mode">
+          <div class="flex items-center gap-1 px-2">
+            <button
+              type="button"
+              phx-click="translate_set_mode"
+              phx-value-mode="overlay"
+              class={[
+                "px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                if(@translate_mode == "overlay",
+                  do: "bg-accent text-white",
+                  else: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                )
+              ]}
+            >
+              Overlay
+            </button>
+            <button
+              type="button"
+              phx-click="translate_set_mode"
+              phx-value-mode="sidecar"
+              class={[
+                "px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                if(@translate_mode == "sidecar",
+                  do: "bg-accent text-white",
+                  else: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                )
+              ]}
+            >
+              Sidecar
+            </button>
+            <button
+              type="button"
+              phx-click="translate_set_mode"
+              phx-value-mode="replace"
+              class={[
+                "px-2.5 py-1 rounded text-xs font-medium transition-colors",
+                if(@translate_mode == "replace",
+                  do: "bg-accent text-white",
+                  else: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                )
+              ]}
+            >
+              Replace
+            </button>
+          </div>
+        </.ribbon_group>
+
+        <.ribbon_group label="Action">
+          <.ribbon_button
+            icon="hero-language"
+            label="Translate"
+            phx-click="translate_document"
+            tooltip="Translate the document using the configured provider"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group :if={@translate_provider_label} label="Provider">
+          <div class="flex items-center gap-1.5 px-2 py-1 text-xs text-gray-500 dark:text-gray-400">
+            <.icon name="hero-information-circle" class="size-3.5" />
+            <span>{@translate_provider_label}</span>
+          </div>
+        </.ribbon_group>
+      </div>
+
       <!-- E-Sign tab ribbon (T-147) -->
       <div :if={@active_tab == "esign"} class="flex items-center gap-1 flex-1">
         <.ribbon_group label="Request">
@@ -2088,7 +2205,7 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
-      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and @active_tab != "page" and @active_tab != "esign"}>
+      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and @active_tab != "page" and @active_tab != "esign" and @active_tab != "translate"}>
         <p
           class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
         >
@@ -2185,6 +2302,12 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:attachments), do: "Attachments"
   defp panel_title(:signatures), do: "Signatures"
   defp panel_title(:comments), do: "Comments"
+
+  defp provider_label do
+    provider = Quire.Translation.Provider.configured()
+    mod = provider |> Module.split() |> Enum.join(".")
+    "Provider: #{mod}"
+  end
 
   defp builtin_stamps do
     [
@@ -2375,6 +2498,77 @@ defmodule QuireWeb.WorkspaceLive do
     else
       _ -> false
     end
+  end
+
+  @impl true
+  def handle_event("translate_set_source", %{"value" => source}, socket) do
+    {:noreply, assign(socket, :translate_source, source)}
+  end
+
+  @impl true
+  def handle_event("translate_set_target", %{"value" => target}, socket) do
+    {:noreply, assign(socket, :translate_target, target)}
+  end
+
+  @impl true
+  def handle_event("translate_set_mode", %{"mode" => mode}, socket) do
+    {:noreply, assign(socket, :translate_mode, mode)}
+  end
+
+  @impl true
+  def handle_event("translate_document", _params, socket) do
+    source = socket.assigns.translate_source
+    target = socket.assigns.translate_target
+    mode = socket.assigns.translate_mode
+
+    provider = Quire.Translation.Provider.configured()
+
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    socket =
+      with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+           {:ok, rev} <- Quire.Documents.current_revision(doc),
+           %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev) do
+        case Quire.Render.extract_text(ref, []) do
+          {:ok, page_results} ->
+            translations =
+              Enum.map(page_results, fn page_result ->
+                text =
+                  page_result.spans
+                  |> Enum.map(& &1.text)
+                  |> Enum.join("")
+
+                if text != "" do
+                  case provider.translate(text, source, target) do
+                    {:ok, result} ->
+                      %{page: page_result.page + 1, original: text, translated: result.translated_text, banner: result.banner}
+                    {:error, reason} ->
+                      %{page: page_result.page + 1, original: text, translated: nil, error: reason}
+                  end
+                else
+                  %{page: page_result.page + 1, original: "", translated: "", error: nil}
+                end
+              end)
+
+            total = length(translations)
+            ok = Enum.count(translations, &(not is_nil(&1.translated)))
+            errors = Enum.count(translations, &(not is_nil(&1.error)))
+
+            socket
+            |> assign(:translate_provider_label, provider_label())
+            |> assign(:translate_results, translations)
+            |> put_flash(:info, "Translation: #{ok}/#{total} pages done, #{errors} errors")
+
+          {:error, reason} ->
+            put_flash(socket, :error, "Text extraction failed: #{reason}")
+        end
+      else
+        _ ->
+          put_flash(socket, :error, "Could not load document for translation")
+      end
+
+    {:noreply, socket}
   end
 
   @impl true
