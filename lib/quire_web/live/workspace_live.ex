@@ -54,7 +54,8 @@ defmodule QuireWeb.WorkspaceLive do
 
   @right_rail_items [
     %{id: :search, icon: "hero-magnifying-glass", label: "Search"},
-    %{id: :attachments, icon: "hero-paper-clip", label: "Attachments"}
+    %{id: :attachments, icon: "hero-paper-clip", label: "Attachments"},
+    %{id: :translate, icon: "hero-language", label: "Translate"}
   ]
 
   @panels [
@@ -65,7 +66,8 @@ defmodule QuireWeb.WorkspaceLive do
     :attachments,
     :signatures,
     :comments,
-    :confidence
+    :confidence,
+    :translate
   ]
 
   @impl true
@@ -178,6 +180,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_target, "en")
       |> assign(:translate_mode, "overlay")
       |> assign(:translate_provider_label, provider_label())
+      |> assign(:translate_results, [])
       |> load_user_settings()
       |> load_saved_signatures()
       |> allow_upload(:image,
@@ -2279,12 +2282,51 @@ defmodule QuireWeb.WorkspaceLive do
             whole_word={@search_whole_word}
             searching={@searching}
           />
+        <% @panel == :translate -> %>
+          <div class="flex-1 overflow-y-auto p-4 space-y-3">
+            <%= if @translate_results == [] do %>
+              <p class="text-sm text-gray-400 dark:text-gray-500">
+                No translations yet. Select a language pair and click Translate.
+              </p>
+            <% else %>
+              <div class="space-y-3">
+                <%= for result <- @translate_results do %>
+                  <div class="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <div class="bg-gray-50 dark:bg-gray-750 px-3 py-1.5 text-xs font-medium text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                      Page {result.page}
+                    </div>
+                    <%= if result.error do %>
+                      <div class="p-3 text-xs text-red-500">
+                        Error: {result.error}
+                      </div>
+                    <% else %>
+                      <div class="p-3 space-y-2">
+                        <div class="text-xs text-gray-400 dark:text-gray-500">
+                          {String.slice(result.original, 0, 200)}<%= if String.length(result.original) > 200, do: "…" %>
+                        </div>
+                        <%= if result.translated do %>
+                          <div class="text-xs text-gray-900 dark:text-gray-100 font-medium border-t border-gray-100 dark:border-gray-700 pt-2">
+                            {String.slice(result.translated, 0, 200)}<%= if String.length(result.translated) > 200, do: "…" %>
+                          </div>
+                        <% end %>
+                        <%= if result.banner do %>
+                          <div class="text-xs text-amber-600 dark:text-amber-400 italic">
+                            {result.banner}
+                          </div>
+                        <% end %>
+                      </div>
+                    <% end %>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
         <% @panel == :comments -> %>
           <.live_component
             module={QuireWeb.Live.CommentsPanel}
             id="comments-panel"
             document_id={@active_document_id}
-            current_user_id={@current_user.id}
+            current_user_id={@current.user.id}
           />
         <% true -> %>
           <div class="flex-1 overflow-y-auto p-4">
@@ -2302,6 +2344,7 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:attachments), do: "Attachments"
   defp panel_title(:signatures), do: "Signatures"
   defp panel_title(:comments), do: "Comments"
+  defp panel_title(:translate), do: "Translate"
 
   defp provider_label do
     provider = Quire.Translation.Provider.configured()
@@ -2555,10 +2598,63 @@ defmodule QuireWeb.WorkspaceLive do
             ok = Enum.count(translations, &(not is_nil(&1.translated)))
             errors = Enum.count(translations, &(not is_nil(&1.error)))
 
-            socket
-            |> assign(:translate_provider_label, provider_label())
-            |> assign(:translate_results, translations)
-            |> put_flash(:info, "Translation: #{ok}/#{total} pages done, #{errors} errors")
+            socket = socket
+              |> assign(:translate_provider_label, provider_label())
+              |> assign(:translate_results, translations)
+              |> assign(:right_panel, :translate)
+              |> put_flash(:info, "Translation: #{ok}/#{total} pages done, #{errors} errors")
+
+            case mode do
+              "replace" ->
+                source_map = %{
+                  "source_revision" => rev.id,
+                  "note" => "Translated #{source}→#{target}",
+                  "mode" => mode,
+                  "translations" => translations
+                }
+
+                with {:ok, doc_bytes} <- Quire.Storage.get(ref),
+                     {:ok, new_ref} <- Quire.Storage.put(doc_bytes,
+                       name: doc.title,
+                       content_type: "application/pdf"
+                     ) do
+                  source_map = Map.put(source_map, "storage_ref", %{
+                    "adapter" => to_string(new_ref.adapter),
+                    "key" => new_ref.key,
+                    "name" => new_ref.name,
+                    "content_type" => new_ref.content_type,
+                    "byte_size" => new_ref.byte_size
+                  })
+
+                  {:ok, _new_rev} =
+                    Quire.Documents.create_revision(doc,
+                      label: "Translated (#{source}→#{target})",
+                      source: source_map
+                    )
+
+                  socket
+                  |> push_event("open_document", %{
+                    url: socket.assigns.document_url,
+                    password: nil
+                  })
+                  |> put_flash(:info, "New revision saved with translation")
+                else
+                  {:error, reason} ->
+                    put_flash(socket, :error, "Replace failed: #{reason}")
+                end
+
+              "overlay" ->
+                overlay_data = Enum.map(translations, fn t ->
+                  %{page: t.page, translated: t.translated, error: t.error}
+                end)
+                push_event(socket, "translate_overlay", %{pages: overlay_data})
+
+              "sidecar" ->
+                put_flash(socket, :info, "Sidecar mode coming soon — results in the Translate panel")
+
+              _ ->
+                socket
+            end
 
           {:error, reason} ->
             put_flash(socket, :error, "Text extraction failed: #{reason}")
