@@ -91,6 +91,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:zoom, 100)
       |> assign(:fullscreen, false)
       |> assign(:rotation, 0)
+      |> assign(:split_view, false)
+      |> assign(:snapshot_active, false)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
@@ -573,6 +575,23 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, step_search(socket, -1)}
   end
 
+  # ── Snapshot (T-055) event handlers ──────────────────────────────────────
+
+  def handle_event("toggle_snapshot_mode", _params, socket) do
+    active = !socket.assigns.snapshot_active
+
+    {:noreply,
+     socket
+     |> assign(:snapshot_active, active)
+     |> push_event("toggle_snapshot", %{active: active})}
+  end
+
+  def handle_event("snapshot_captured", %{"dataUrl" => _data_url}, socket) do
+    # Stub: clipboard and download handled on the client; future iterations
+    # may store to a server-side gallery or attach to the document.
+    {:noreply, socket}
+  end
+
   # ── Pre-existing event handlers ──────────────────────────────────────────
 
   @impl true
@@ -602,6 +621,10 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("toggle_fullscreen", _params, socket) do
     {:noreply, assign(socket, :fullscreen, !socket.assigns.fullscreen)}
+  end
+
+  def handle_event("toggle_split_view", _params, socket) do
+    {:noreply, assign(socket, :split_view, !socket.assigns.split_view)}
   end
 
   def handle_event("rotate_cw", _params, socket) do

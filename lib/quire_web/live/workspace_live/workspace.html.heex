@@ -52,8 +52,9 @@
 
       <main
         id="document-canvas"
-        phx-hook="PdfViewerHook"
+        phx-hook="PdfViewerHook .SnapshotHook"
         data-document-url={@document_url}
+        data-snapshot-active={@snapshot_active}
         class="flex-1 min-w-0 relative overflow-hidden bg-canvas dark:bg-gray-900"
         aria-label="Document canvas"
         tabindex="0"
@@ -64,11 +65,15 @@
         >
           <.no_document_placeholder />
         </div>
-        <div
-          id="pdf-viewer-container"
-          class="absolute inset-0 overflow-auto"
-        >
-        </div>
+        <%= if @split_view do %>
+          <div class="absolute inset-0 flex divide-x divide-chrome-border dark:divide-gray-600">
+            <div id="pdf-viewer-container-left" class="flex-1 overflow-auto"></div>
+            <div id="pdf-viewer-container-right" class="flex-1 overflow-auto"></div>
+          </div>
+        <% else %>
+          <div id="pdf-viewer-container" class="absolute inset-0 overflow-auto">
+          </div>
+        <% end %>
 
         <button
           :if={@fullscreen}
@@ -107,6 +112,8 @@
       total_pages={@total_pages}
       zoom={@zoom}
       rotation={@rotation}
+      split={@split_view}
+      snapshot_active={@snapshot_active}
       progress={@progress}
     />
 
@@ -156,5 +163,6 @@
         }
       }
     </script>
+
   </div>
 </Layouts.workspace>

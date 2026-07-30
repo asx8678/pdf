@@ -9,12 +9,16 @@ defmodule QuireWeb.Chrome.StatusBar do
 
   import QuireWeb.Chrome.PageNavPill, only: [page_nav_pill: 1]
   import QuireWeb.Chrome.RotateControl, only: [rotate_control: 1]
+  import QuireWeb.Chrome.SplitView, only: [split_view: 1]
   import QuireWeb.Chrome.ZoomControl, only: [zoom_control: 1]
+  import QuireWeb.CoreComponents, only: [icon: 1]
 
   attr :page, :integer, default: 1
   attr :total_pages, :integer, default: 1
   attr :zoom, :integer, default: 100
   attr :rotation, :integer, default: 0
+  attr :split, :boolean, default: false
+  attr :snapshot_active, :boolean, default: false
   attr :progress, :float, default: nil
   attr :progress_label, :string, default: nil
   attr :class, :string, default: nil
@@ -52,6 +56,24 @@ defmodule QuireWeb.Chrome.StatusBar do
         </div>
 
         <.rotate_control rotation={@rotation} />
+
+        <.split_view split={@split} />
+
+        <button
+          type="button"
+          phx-click="toggle_snapshot_mode"
+          class={[
+            "p-1 rounded transition-colors",
+            if(@snapshot_active,
+              do: "bg-accent/10 text-accent",
+              else: "hover:bg-gray-100 dark:hover:bg-gray-700"
+            )
+          ]}
+          aria-label="Snapshot"
+          aria-pressed={@snapshot_active}
+        >
+          <.icon name="hero-camera" class="size-3.5" />
+        </button>
 
         <.zoom_control zoom={@zoom} />
       </div>
