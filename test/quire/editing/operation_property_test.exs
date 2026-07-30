@@ -93,12 +93,24 @@ defmodule Quire.Editing.OperationPropertyTest do
           baseline_y: 0.0,
           bold: false,
           italic: false,
-          chars: [%{char: "t", font_size: 12.0, bounds: %{left: 0.0, bottom: 0.0, right: 5.0, top: 10.0}}]
+          chars: [
+            %{
+              char: "t",
+              font_size: 12.0,
+              bounds: %{left: 0.0, bottom: 0.0, right: 5.0, top: 10.0}
+            }
+          ]
         },
         new_text: "edited",
         page_index: 0,
         # Ref stub — check_font_available only looks at font_name
-        ref: %Quire.Storage.Ref{adapter: :local, key: "test", name: "test.pdf", content_type: "application/pdf", byte_size: 0}
+        ref: %Quire.Storage.Ref{
+          adapter: :local,
+          key: "test",
+          name: "test.pdf",
+          content_type: "application/pdf",
+          byte_size: 0
+        }
       })
     else
       StreamData.constant(%{kind: kind, id: Ecto.UUID.generate()})

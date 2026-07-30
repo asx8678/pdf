@@ -1736,7 +1736,7 @@ defmodule QuireWeb.WorkspaceLive do
   # T-110: annotation navigation from the Comments panel LiveComponent.
   @impl true
   def handle_info({:navigate_to_annotation, page_index, rect}, socket) do
-    page = page_index + 1 |> max(1) |> min(socket.assigns.total_pages)
+    page = (page_index + 1) |> max(1) |> min(socket.assigns.total_pages)
 
     {:noreply,
      socket
