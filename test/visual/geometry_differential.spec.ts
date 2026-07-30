@@ -5,72 +5,66 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Load geometry.js as text so we can inject it into the page context
+// Load Elixir fixture (pre-computed by scripts/generate_geometry_fixture.exs)
+const fixturePath = path.resolve(__dirname, '../fixtures/geometry_differential_fixture.json');
+const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf-8'));
+const tuples = fixture.tuples as Array<{
+  pw: number; ph: number; css_x: number; css_y: number;
+  css_w: number; css_h: number; rot: number;
+  pdf_x: number; pdf_y: number; pdf_w: number; pdf_h: number;
+}>;
+
+// Load geometry.js as text
 const geometryPath = path.resolve(__dirname, '../../assets/js/pdf/geometry.js');
 const geometrySource = fs.readFileSync(geometryPath, 'utf-8');
 
-// Strip ESM exports and convert to global scope for page.evaluate access
+// Strip ESM exports so they become globals for page.evaluate access
 const geometryScript = geometrySource
   .replace(/^export function /gm, 'function ')
   .replace(/^export /gm, '')
   .replace(/^const /gm, 'var ')
   .replace(/^let /gm, 'var ');
 
-test('JS and Elixir geometry agree over 1000 random tuples', async ({ page }) => {
+test('JS cssToPdfRotated agrees with pre-computed Elixir on 1000 random tuples', async ({ page }) => {
   await page.goto('about:blank');
   await page.addScriptTag({ content: geometryScript });
 
-  const result = await page.evaluate(() => {
-    function seededRandom(seed) {
-      let s = seed;
-      return () => {
-        s = (s * 1664525 + 1013904223) & 0x7FFFFFFF;
-        return s / 0x80000000;
-      };
-    }
-
-    const random = seededRandom(42);
-    const failures = [];
-
-    // Generate 1000 random tuples
-    for (let i = 0; i < 1000; i++) {
-      var pw = Math.floor(random() * 1100) + 100;  // 100-1200
-      var ph = Math.floor(random() * 1500) + 100;  // 100-1600
-      var x = Math.floor(random() * Math.max(1, pw - 10));
-      var y = Math.floor(random() * Math.max(1, ph - 10));
-      var bw = Math.floor(random() * Math.max(10, pw - x)) + 10;
-      var bh = Math.floor(random() * Math.max(10, ph - y)) + 10;
-      var rot = [0, 90, 180, 270][Math.floor(random() * 4)];
-
-      // Round trip: CSS → PDF → CSS should be identity
-      var ok = window.roundTripOk(x, y, bw, bh, pw, ph, rot);
-      if (!ok) {
-        failures.push(`Round trip: (${x},${y}) ${bw}x${bh} pw=${pw} ph=${ph} rot=${rot}`);
+  // Pass the fixture data to page context and evaluate each tuple
+  const mismatches = await page.evaluate((data) => {
+    const failures: string[] = [];
+    for (const t of data) {
+      // Run JS cssToPdfRotated
+      const js = cssToPdfRotated(t.css_x, t.css_y, t.css_w, t.css_h, t.pw, t.ph, t.rot);
+      const dx = Math.abs(js.x - t.pdf_x);
+      const dy = Math.abs(js.y - t.pdf_y);
+      const dw = Math.abs(js.width - t.pdf_w);
+      const dh = Math.abs(js.height - t.pdf_h);
+      if (dx > 0.01 || dy > 0.01 || dw > 0.01 || dh > 0.01) {
+        failures.push(
+          `Tuple #${failures.length}: css=(${t.css_x},${t.css_y}) ${t.css_w}x${t.css_h} ` +
+          `pw=${t.pw} ph=${t.ph} rot=${t.rot}: ` +
+          `JS (${js.x.toFixed(2)},${js.y.toFixed(2)}) vs ` +
+          `Elixir (${t.pdf_x.toFixed(2)},${t.pdf_y.toFixed(2)})`
+        );
         if (failures.length >= 5) break;
       }
     }
+    return failures;
+  }, tuples);
 
-    return { failureCount: failures.length, failures };
-  });
-
-  if (result.failureCount > 0) {
-    console.log('Failures:', JSON.stringify(result.failures, null, 2));
-  }
-  expect(result.failureCount).toBe(0);
+  expect(mismatches.length).toBe(0);
 });
 
 test('deliberately broken implementation is caught by the suite', async ({ page }) => {
-  // Inject a broken version of applyRotation and verify the round trip catches it
   await page.goto('about:blank');
   await page.addScriptTag({ content: `
     function brokenRoundTripOk(x, y, w, h, pw, ph, rot) {
-      // Off-by-one in rotation 90 y-flip and rotation 270 x formula
       var d = ((rot % 360) + 360) % 360;
       var px, py;
       switch (d) {
-        case 90:  px = pw + y;  py = -x - h + 1; break;  // off by +1
+        case 90:  px = pw + y;  py = -x - h + 1; break;
         case 180: px = pw - x;  py = ph - y - h; break;
-        case 270: px = y + 1;   py = ph - x - h; break;  // off by +1
+        case 270: px = y + 1;   py = ph - x - h; break;
         default:  px = x;       py = ph - y - h;
       }
       var cx, cy;
