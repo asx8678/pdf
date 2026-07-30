@@ -78,6 +78,30 @@ defmodule Quire.Editing.OperationPropertyTest do
   end
 
   defp op_data_for_kind(kind) do
-    StreamData.constant(%{kind: kind, id: Ecto.UUID.generate()})
+    # Text.edit requires run, new_text, and ref for validation.
+    # Generate a minimal valid payload that passes through apply.
+    if kind == "text.edit" do
+      StreamData.constant(%{
+        kind: kind,
+        id: Ecto.UUID.generate(),
+        run: %{
+          text: "test",
+          font_name: "Helvetica",
+          font_size: 12.0,
+          color: [0.0, 0.0, 0.0],
+          bbox: [0.0, 0.0, 10.0, 10.0],
+          baseline_y: 0.0,
+          bold: false,
+          italic: false,
+          chars: [%{char: "t", font_size: 12.0, bounds: %{left: 0.0, bottom: 0.0, right: 5.0, top: 10.0}}]
+        },
+        new_text: "edited",
+        page_index: 0,
+        # Ref stub — check_font_available only looks at font_name
+        ref: %Quire.Storage.Ref{adapter: :local, key: "test", name: "test.pdf", content_type: "application/pdf", byte_size: 0}
+      })
+    else
+      StreamData.constant(%{kind: kind, id: Ecto.UUID.generate()})
+    end
   end
 end

@@ -16,6 +16,7 @@ defmodule QuireWeb.WorkspaceLive do
   use QuireWeb, :live_view
 
   alias Quire.Editing
+  alias Quire.Ocr.Results, as: OcrResults
 
   import QuireWeb.Chrome.AttachmentsPanel, only: [attachments_panel: 1]
   import QuireWeb.Chrome.Backstage, only: [backstage: 1]
@@ -44,7 +45,8 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :thumbnails, icon: "hero-squares-2x2", label: "Thumbnails"},
     %{id: :bookmarks, icon: "hero-bookmark", label: "Bookmarks"},
     %{id: :layers, icon: "hero-rectangle-stack", label: "Layers"},
-    %{id: :signatures, icon: "hero-pencil", label: "Signatures"}
+    %{id: :signatures, icon: "hero-pencil", label: "Signatures"},
+    %{id: :comments, icon: "hero-chat-bubble-left-right", label: "Comments"}
   ]
 
   @right_rail_items [
@@ -52,7 +54,7 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :attachments, icon: "hero-paper-clip", label: "Attachments"}
   ]
 
-  @panels [:thumbnails, :bookmarks, :layers, :search, :attachments, :signatures]
+  @panels [:thumbnails, :bookmarks, :layers, :search, :attachments, :signatures, :comments]
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -123,6 +125,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:ocr_running, false)
       |> assign(:ocr_progress, nil)
       |> assign(:show_ocr_options, false)
+      |> assign(:show_ocr_confidence, false)
+      |> assign(:ocr_confidence_result, nil)
       |> assign(:measure_mode_active, false)
       |> assign(:active_measure_mode, nil)
       |> assign(:calibrating, false)
@@ -563,6 +567,47 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
+  @doc """
+  Handles a click on text in edit mode (T-091, pdf-8vsn).
+
+  Identifies the text run at the click position via
+  `RunIdentifier.identify_runs/2`, checks font availability, and pushes
+  an `open_text_editor` event to the client.
+  """
+  def handle_event("edit_text_click", %{"page_index" => pi, "x" => x, "y" => y}, socket) do
+    doc_id = socket.assigns.active_document_id
+
+    socket =
+      with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+           {:ok, rev} <- Quire.Documents.current_revision(doc),
+           %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+           {:ok, runs} <- Quire.Editor.RunIdentifier.identify_runs(ref, pi) do
+        run = find_run_at_click(runs, x, y)
+
+        if run do
+          case Quire.Editor.RunIdentifier.check_font_available(run) do
+            :ok ->
+              push_event(socket, "open_text_editor", %{
+                text: run.text,
+                bbox: run.bbox,
+                font_name: run.font_name,
+                font_size: run.font_size,
+                page_index: pi
+              })
+
+            {:error, :font_unavailable, msg} ->
+              put_flash(socket, :warning, msg)
+          end
+        else
+          put_flash(socket, :info, "No editable text found at that position.")
+        end
+      else
+        _ -> put_flash(socket, :error, "Could not identify text at click position.")
+      end
+
+    {:noreply, socket}
+  end
+
   def handle_event("open_attachments_panel", _params, socket) do
     {:noreply, assign(socket, :right_panel, :attachments)}
   end
@@ -595,16 +640,27 @@ defmodule QuireWeb.WorkspaceLive do
     enqueue_ocr(socket, default_opts)
   end
 
-  defp enqueue_ocr(socket, options) do
+  defp enqueue_ocr(socket, options, page_range \\ nil) do
     doc_id = socket.assigns.active_document_id
 
     with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
          {:ok, rev} <- Quire.Documents.current_revision(doc) do
-      %{
-        "doc_id" => doc_id,
-        "revision_id" => rev.id,
-        "options" => options
-      }
+      args =
+        %{
+          "doc_id" => doc_id,
+          "revision_id" => rev.id,
+          "options" => options
+        }
+
+      # Pass page_range when re-running selected pages
+      args =
+        if page_range do
+          Map.put(args, "page_range", page_range)
+        else
+          args
+        end
+
+      args
       |> Quire.Workers.OcrWorker.new([])
       |> Oban.insert!()
 
@@ -1248,6 +1304,27 @@ defmodule QuireWeb.WorkspaceLive do
     |> assign(:document_title, new_title)
   end
 
+  # ── Edit-mode helpers (pdf-8vsn, pdf-un45) ─────────────────────────────
+
+  @doc false
+  # Finds the text run closest to the click position (x, y in PDF points).
+  # Returns the run or nil if no run contains or is near the point.
+  defp find_run_at_click(runs, x, y) do
+    # Fallback: find the run with the closest center
+    Enum.find(runs, fn run ->
+      [x0, y0, x1, y1] = run.bbox
+      x >= x0 and x <= x1 and y >= y0 and y <= y1
+    end) ||
+      Enum.min_by(runs, fn run ->
+        [x0, y0, x1, y1] = run.bbox
+        cx = (x0 + x1) / 2
+        cy = (y0 + y1) / 2
+        :math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+      end)
+  rescue
+    _ -> nil
+  end
+
   defp coerce_id(id) when is_binary(id), do: id
   defp coerce_id(id) when is_integer(id), do: Integer.to_string(id)
 
@@ -1268,6 +1345,28 @@ defmodule QuireWeb.WorkspaceLive do
           user_id={@current_user.id}
           ocr_running={@ocr_running}
           ocr_progress={@ocr_progress}
+        />
+      </div>
+    </div>
+    """
+  end
+
+  attr :ocr_result, :any, default: nil
+  attr :ocr_running, :boolean, default: false
+
+  defp ocr_confidence_panel(assigns) do
+    ~H"""
+    <div
+      class="border-b border-chrome-border dark:border-gray-600 bg-chrome-white dark:bg-gray-800 shadow-sm"
+      role="region"
+      aria-label="OCR confidence report"
+    >
+      <div class="max-w-md mx-auto">
+        <.live_component
+          module={QuireWeb.OcrConfidenceLive}
+          id="ocr-confidence"
+          ocr_result={@ocr_result}
+          ocr_running={@ocr_running}
         />
       </div>
     </div>
@@ -1493,6 +1592,8 @@ defmodule QuireWeb.WorkspaceLive do
   attr :search_match_case, :boolean, default: false
   attr :search_whole_word, :boolean, default: false
   attr :searching, :boolean, default: false
+  attr :active_document_id, :string, default: nil
+  attr :current_user_id, :any, default: nil
 
   defp side_panel(assigns) do
     ~H"""
@@ -1537,6 +1638,13 @@ defmodule QuireWeb.WorkspaceLive do
             whole_word={@search_whole_word}
             searching={@searching}
           />
+        <% @panel == :comments -> %>
+          <.live_component
+            module={QuireWeb.Live.CommentsPanel}
+            id="comments-panel"
+            document_id={@active_document_id}
+            current_user_id={@current_user.id}
+          />
         <% true -> %>
           <div class="flex-1 overflow-y-auto p-4">
             <p class="text-sm text-gray-400 dark:text-gray-500">Unknown panel</p>
@@ -1552,6 +1660,7 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
   defp panel_title(:signatures), do: "Signatures"
+  defp panel_title(:comments), do: "Comments"
 
   defp builtin_stamps do
     [
@@ -1574,6 +1683,18 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:ocr_progress, nil)
       |> push_event("revision_updated", %{revision_id: rev.id})
 
+    # Fetch confidence data for this revision to show the confidence panel.
+    ocr_result = OcrResults.by_revision(rev.id)
+
+    socket =
+      if ocr_result do
+        socket
+        |> assign(:show_ocr_confidence, true)
+        |> assign(:ocr_confidence_result, ocr_result)
+      else
+        socket
+      end
+
     {:noreply, socket}
   end
 
@@ -1595,6 +1716,38 @@ defmodule QuireWeb.WorkspaceLive do
       |> Map.new()
 
     enqueue_ocr(socket, options)
+  end
+
+  @impl true
+  def handle_info({:rerun_ocr, page_list, options}, socket) do
+    # Options from the LiveComponent may have atom or string keys;
+    # normalise to string keys for Oban job args.
+    options =
+      options
+      |> Enum.map(fn
+        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+        {k, v} -> {k, v}
+      end)
+      |> Map.new()
+
+    enqueue_ocr(socket, options, page_list)
+  end
+
+  # T-110: annotation navigation from the Comments panel LiveComponent.
+  @impl true
+  def handle_info({:navigate_to_annotation, page_index, rect}, socket) do
+    page = page_index + 1 |> max(1) |> min(socket.assigns.total_pages)
+
+    {:noreply,
+     socket
+     |> assign(:page, page)
+     |> push_event("navigate_page", %{page: page})
+     |> push_event("select_annotation", %{rect: rect, page_index: page_index})}
+  end
+
+  @impl true
+  def handle_info({:dismiss_ocr_confidence}, socket) do
+    {:noreply, assign(socket, :show_ocr_confidence, false)}
   end
 
   # ── Annotation commit helpers (T-107) ────────────────────────────────
