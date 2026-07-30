@@ -98,7 +98,41 @@ defmodule QuireWeb.UserLive.Settings do
 
       <hr class="my-8 border-chrome-border dark:border-gray-700" />
 
-      <!-- OCR Tessdata Management -->
+      <!-- Form & Sign settings -->
+      <div>
+        <.header>
+          Form &amp; Sign
+          <:subtitle>Form field display and signature preferences</:subtitle>
+        </.header>
+
+        <div class="mt-4 space-y-4">
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Highlight fields</p>
+              <p class="text-xs text-gray-500 mt-1">Show a light-blue overlay on all form fields</p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={@highlight_fields}
+              aria-label="Highlight fields"
+              phx-click="toggle_highlight_fields"
+              class={[
+                "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
+                if(@highlight_fields, do: "bg-indigo-600", else: "bg-gray-200 dark:bg-gray-700")
+              ]}
+            >
+              <span aria-hidden="true" class={[
+                "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                if(@highlight_fields, do: "translate-x-5", else: "translate-x-0")
+              ]}></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <hr class="my-8 border-chrome-border dark:border-gray-700" />
+
       <div>
         <.header>
           OCR Languages
@@ -157,6 +191,98 @@ defmodule QuireWeb.UserLive.Settings do
             </button>
           </div>
         </div>
+
+        <hr class="my-8 border-chrome-border dark:border-gray-700" />
+
+        <!-- TOTP Two-Factor Authentication (T-163) -->
+        <div>
+          <.header>
+            Two-Factor Authentication
+            <:subtitle>Add an extra layer of security with a time-based one-time password</:subtitle>
+          </.header>
+
+          <div :if={!@totp_enabled} class="mt-4 space-y-4">
+            <div class="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+              <!-- Show generate button when no secret yet -->
+              <div :if={is_nil(@totp_secret)} class="text-center">
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Generate a secret key to set up two-factor authentication.
+                </p>
+                <.button type="button" phx-click="generate_totp_secret">
+                  Generate Secret Key
+                </.button>
+              </div>
+
+              <!-- Show secret + verify form after generation -->
+              <div :if={!is_nil(@totp_secret)}>
+                <p class="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                  Enter the secret below into your authenticator app (e.g. Google Authenticator, Authy).
+                </p>
+
+                <div class="text-center mb-4">
+                  <p class="text-xs text-gray-500 mb-1">Secret key:</p>
+                  <code class="text-sm font-mono bg-gray-100 dark:bg-gray-700 px-4 py-2 rounded-lg text-base tracking-widest select-all">
+                    {@totp_secret}
+                  </code>
+                </div>
+
+                <.form
+                  for={@totp_form}
+                  id="totp-enable-form"
+                  phx-submit="enable_totp"
+                  class="space-y-3"
+                >
+                  <.input
+                    field={@totp_form[:code]}
+                    type="text"
+                    label="Enter the 6-digit code from your authenticator app"
+                    placeholder="000000"
+                    maxlength="6"
+                    autocomplete="off"
+                    required
+                    class="text-center text-lg tracking-widest"
+                  />
+                  <div class="flex gap-2">
+                    <.button type="submit" class="flex-1">
+                      Enable Two-Factor Authentication
+                    </.button>
+                    <.button
+                      type="button"
+                      variant="outline"
+                      phx-click="generate_totp_secret"
+                    >
+                      Regenerate
+                    </.button>
+                  </div>
+                </.form>
+
+                <p :if={@totp_error} class="mt-2 text-sm text-red-600 dark:text-red-400">
+                  {@totp_error}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div :if={@totp_enabled} class="mt-4">
+            <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+              <div>
+                <p class="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  Two-factor authentication is enabled
+                </p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Your account is protected with TOTP.
+                </p>
+              </div>
+              <button
+                type="button"
+                phx-click="disable_totp"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+              >
+                <.icon name="hero-x-mark" class="size-3.5" /> Disable
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </Layouts.app>
     """
@@ -180,7 +306,6 @@ defmodule QuireWeb.UserLive.Settings do
     user = socket.assigns.current_scope.user
     email_changeset = Accounts.change_user_email(user, %{}, validate_unique: false)
     password_changeset = Accounts.change_user_password(user, %{}, hash_password: false)
-
     socket =
       socket
       |> assign(:current_email, user.email)
@@ -188,6 +313,25 @@ defmodule QuireWeb.UserLive.Settings do
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
       |> assign_tessdata_state()
+      |> assign_totp_state()
+      |> assign(:highlight_fields,
+        case Ecto.UUID.dump(user.id) do
+          {:ok, bin_id} ->
+            Quire.Repo.query!(
+              "SELECT highlight_fields FROM user_settings WHERE user_id = $1",
+              [bin_id]
+            )
+            |> (fn %{rows: rows} ->
+                  case rows do
+                    [] -> false
+                    [[val]] -> val
+                  end
+                end).()
+
+          :error ->
+            false
+        end
+      )
 
     {:ok, socket}
   end
@@ -272,6 +416,70 @@ defmodule QuireWeb.UserLive.Settings do
     {:noreply, socket}
   end
 
+  # ── TOTP events (T-163) ──────────────────────────────────────────────
+
+  def handle_event("generate_totp_secret", _params, socket) do
+    user = socket.assigns.current_scope.user
+
+    {:ok, _secret, updated_user} = Accounts.generate_totp_secret(user)
+
+    {:noreply,
+     socket
+     |> assign(:current_scope, %{socket.assigns.current_scope | user: updated_user})
+     |> assign_totp_state()}
+  end
+
+  def handle_event("enable_totp", %{"user" => %{"code" => code}}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Accounts.enable_totp(user, code) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_scope, %{socket.assigns.current_scope | user: user})
+         |> assign_totp_state()
+         |> put_flash(:info, "Two-factor authentication enabled.")}
+
+      {:error, :invalid_code} ->
+        {:noreply, assign(socket, :totp_error, "Invalid code. Please try again.")}
+    end
+  end
+
+  def handle_event("disable_totp", _params, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Accounts.disable_totp(user) do
+      {:ok, user} ->
+        {:noreply,
+         socket
+         |> assign(:current_scope, %{socket.assigns.current_scope | user: user})
+         |> assign_totp_state()
+         |> put_flash(:info, "Two-factor authentication disabled.")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to disable two-factor authentication.")}
+    end
+  end
+
+  # ── Form & Sign events (T-122) ──────────────────────────────────────
+
+  def handle_event("toggle_highlight_fields", _params, socket) do
+    user = socket.assigns.current_scope.user
+    current = socket.assigns.highlight_fields
+    new_value = !current
+
+    # insert_all bypasses the schema, so pre-existing column drift
+    # (schema-only :map fields without migration columns) won't break.
+    Quire.Repo.insert_all(
+      Quire.Accounts.UserSetting,
+      [%{user_id: user.id, highlight_fields: new_value}],
+      on_conflict: [set: [highlight_fields: new_value]],
+      conflict_target: :user_id
+    )
+
+    {:noreply, assign(socket, :highlight_fields, new_value)}
+  end
+
   # ── Tessdata helpers ─────────────────────────────────────────────────
 
   defp assign_tessdata_state(socket) do
@@ -279,6 +487,35 @@ defmodule QuireWeb.UserLive.Settings do
       cached_languages: Quire.Ocr.Tessdata.cached_languages(),
       disk_usage: Quire.Ocr.Tessdata.disk_usage()
     )
+  end
+
+  defp assign_totp_state(socket) do
+    user = socket.assigns.current_scope.user
+
+    if user.totp_enabled do
+      assign(socket,
+        totp_enabled: true,
+        totp_secret: nil,
+        totp_form: nil,
+        totp_error: nil
+      )
+    else
+      secret_display =
+        if user.totp_secret do
+          Base.encode32(user.totp_secret, padding: false)
+        else
+          nil
+        end
+
+      totp_form = to_form(%{"code" => ""}, as: :user)
+
+      assign(socket,
+        totp_enabled: false,
+        totp_secret: secret_display,
+        totp_form: totp_form,
+        totp_error: nil
+      )
+    end
   end
 
   defp language_label(lang) do

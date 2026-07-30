@@ -138,6 +138,7 @@ defmodule Quire.MixProject do
 
       # --- Security -----------------------------------------------------------
       {:cloak_ecto, "~> 1.3"},
+      {:nimble_totp, "~> 1.0"},
       # `uniq` is deliberately absent (pdf-qy6h): ecto 3.14.1 supplies UUID v7
       # generation, timestamp extraction and a monotonic precision mode that
       # uniq does not have at all.

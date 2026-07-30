@@ -94,9 +94,11 @@ defmodule QuireWeb.Router do
       live "/users/forgot-password", UserLive.ForgotPassword, :new
       live "/users/reset-password/:token", UserLive.ResetPassword, :edit
       live "/users/log-in", UserLive.Login, :new
+      live "/users/log-in/totp", UserLive.TotpChallenge, :new
       live "/users/log-in/:token", UserLive.Confirmation, :new
     end
 
+    get "/users/log-in/totp/complete", UserSessionController, :totp_complete
     post "/users/log-in", UserSessionController, :create
     delete "/users/log-out", UserSessionController, :delete
   end

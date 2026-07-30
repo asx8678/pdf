@@ -34,9 +34,16 @@ defmodule QuireWeb.UserSessionController do
     %{"email" => email, "password" => password} = user_params
 
     if user = Accounts.get_user_by_email_and_password(email, password) do
-      conn
-      |> put_flash(:info, info)
-      |> UserAuth.log_in_user(user, user_params)
+      if user.totp_enabled do
+        # Don't log in yet — redirect to TOTP challenge
+        conn
+        |> put_session(:totp_user_id, user.id)
+        |> redirect(to: ~p"/users/log-in/totp")
+      else
+        conn
+        |> put_flash(:info, info)
+        |> UserAuth.log_in_user(user, user_params)
+      end
     else
       # In order to prevent user enumeration attacks, don't disclose whether the email is registered.
       conn
@@ -57,6 +64,26 @@ defmodule QuireWeb.UserSessionController do
     conn
     |> put_session(:user_return_to, ~p"/users/settings")
     |> create(params, "Password updated successfully!")
+  end
+
+  @doc """
+  Called after TOTP challenge succeeds. Copies the tentative user ID from
+  the session into a real login session.
+  """
+  def totp_complete(conn, _params) do
+    user_id = get_session(conn, :totp_user_id)
+    user = user_id && Accounts.get_user!(user_id)
+
+    if user && user.totp_enabled do
+      conn
+      |> delete_session(:totp_user_id)
+      |> put_flash(:info, "Welcome back!")
+      |> UserAuth.log_in_user(user, %{})
+    else
+      conn
+      |> put_flash(:error, "Invalid session.")
+      |> redirect(to: ~p"/users/log-in")
+    end
   end
 
   def delete(conn, _params) do

@@ -474,4 +474,76 @@ defmodule Quire.AccountsTest do
       assert changeset.errors[:password_confirmation]
     end
   end
+
+  describe "TOTP 2FA" do
+    test "generate_totp_secret/1 returns secret and updates user" do
+      user = user_fixture()
+      assert user.totp_secret == nil
+      refute user.totp_enabled
+
+      assert {:ok, secret, updated_user} = Accounts.generate_totp_secret(user)
+      assert is_binary(secret)
+      assert byte_size(secret) == 20
+      assert updated_user.totp_secret != nil
+      refute updated_user.totp_enabled
+    end
+
+    test "enable_totp/2 returns error for invalid code" do
+      user = user_fixture()
+      {:ok, _secret, user} = Accounts.generate_totp_secret(user)
+
+      assert Accounts.enable_totp(user, "000000") == {:error, :invalid_code}
+      refute refresh(user).totp_enabled
+    end
+
+    test "enable_totp/2 succeeds with valid code" do
+      user = user_fixture()
+      {:ok, secret, user} = Accounts.generate_totp_secret(user)
+
+      valid_code = NimbleTOTP.verification_code(secret)
+      assert {:ok, enabled_user} = Accounts.enable_totp(user, valid_code)
+      assert enabled_user.totp_enabled
+      assert refresh(user).totp_enabled
+    end
+
+    test "verify_totp_code/2 returns false when totp not enabled" do
+      user = user_fixture()
+      {:ok, secret, user} = Accounts.generate_totp_secret(user)
+
+      code = NimbleTOTP.verification_code(secret)
+      refute Accounts.verify_totp_code(user, code)
+    end
+
+    test "verify_totp_code/2 returns true with valid code when enabled" do
+      user = user_fixture()
+      {:ok, secret, user} = Accounts.generate_totp_secret(user)
+      valid_code = NimbleTOTP.verification_code(secret)
+      {:ok, user} = Accounts.enable_totp(user, valid_code)
+
+      assert Accounts.verify_totp_code(user, valid_code)
+    end
+
+    test "verify_totp_code/2 returns false for invalid code" do
+      user = user_fixture()
+      {:ok, secret, user} = Accounts.generate_totp_secret(user)
+      valid_code = NimbleTOTP.verification_code(secret)
+      {:ok, user} = Accounts.enable_totp(user, valid_code)
+
+      refute Accounts.verify_totp_code(user, "000000")
+    end
+
+    test "disable_totp/1 clears secret and disables" do
+      user = user_fixture()
+      {:ok, secret, user} = Accounts.generate_totp_secret(user)
+      valid_code = NimbleTOTP.verification_code(secret)
+      {:ok, user} = Accounts.enable_totp(user, valid_code)
+
+      assert {:ok, updated_user} = Accounts.disable_totp(user)
+      refute updated_user.totp_enabled
+      assert updated_user.totp_secret == nil
+      assert refresh(user).totp_enabled == false
+    end
+
+    defp refresh(user), do: Quire.Repo.reload!(user)
+  end
 end

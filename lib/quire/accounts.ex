@@ -540,6 +540,57 @@ defmodule Quire.Accounts do
   end
 
   @doc """
+  Generates a TOTP secret for a user and stores it.
+
+  The secret is stored encrypted. Returns the base32-encoded plaintext
+  secret for QR code provisioning.
+  """
+  def generate_totp_secret(user) do
+    secret = NimbleTOTP.secret()
+    {:ok, user} =
+      user
+      |> Ecto.Changeset.change(%{totp_secret: secret})
+      |> Repo.update()
+
+    {:ok, secret, user}
+  end
+
+  @doc """
+  Enables TOTP 2FA for a user after verifying the code.
+
+  Returns `{:ok, user}` if the code is valid, `{:error, :invalid_code}`
+  otherwise.
+  """
+  def enable_totp(user, code_to_verify) do
+    if user.totp_secret && NimbleTOTP.valid?(user.totp_secret, code_to_verify) do
+      user
+      |> Ecto.Changeset.change(%{totp_enabled: true})
+      |> Repo.update()
+    else
+      {:error, :invalid_code}
+    end
+  end
+
+  @doc """
+  Disables TOTP 2FA for a user.
+  """
+  def disable_totp(user) do
+    user
+    |> Ecto.Changeset.change(%{totp_enabled: false, totp_secret: nil})
+    |> Repo.update()
+  end
+
+  @doc """
+  Verifies a TOTP code for a user during login.
+
+  Returns `true` if the code is valid, `false` otherwise.
+  Returns `false` if TOTP is not enabled for the user.
+  """
+  def verify_totp_code(user, code) do
+    user.totp_enabled && user.totp_secret && NimbleTOTP.valid?(user.totp_secret, code)
+  end
+
+  @doc """
   Resets the user's password using a valid reset token.
 
   The token is consumed (deleted) after a successful reset.
