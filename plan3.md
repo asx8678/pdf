@@ -2642,10 +2642,12 @@ conversions in `assets/js/pdf/geometry.js` and a matching Elixir module, and
 4. **CropBox ≠ MediaBox.** When CropBox has a non-zero origin, subtract it.
    Fixture `cropped_nonzero_origin.pdf` exists to catch exactly this.
 
-Write a property test: for random page sizes, rotations and crop boxes, a
-round-trip `css → pdf → css` is the identity within 0.01 pt.
-
----
+Write a **differential test**: generate random (page size, /Rotate, CropBox,
+scale, point) tuples, run them through pdf.js's `PageViewport` methods in
+headless Chromium (the Playwright harness) and through the Elixir twin, and
+assert agreement within 0.01 pt in PDF space. A round-trip `css → pdf → css`
+inside a single implementation cannot detect divergence between the two
+codebases — the differential test is the real mitigation.
 
 ## 15. Phased task list
 
@@ -3247,7 +3249,7 @@ The doctor table (all asserted at boot and by `mise run doctor`):
 | **R-06** | Redaction fails to actually remove content | **Critical** | Mandatory post-hoc verification (T-134); rasterise-and-replace fallback when object removal can't prove completeness; fail the job rather than ship a leak |
 | **R-07** | A NIF segfault takes down the whole BEAM | High | Corpus crash-fuzz (T-020, T-197); bounded inputs (§7.2); pinned versions; optional second BEAM node for `:ocr` (§3.3) |
 | **R-08** | Undo/redo across the hybrid boundary is subtly wrong | High | Property test in T-024; coalescing rules; revision-restore as the server inverse |
-| **R-09** | Coordinate bugs on rotated/cropped pages | High | §14.3 single-source geometry module + round-trip property test |
+| **R-09** | Coordinate bugs on rotated/cropped pages | High | §14.3 geometry module + JS–Elixir differential test over ≥1000 random tuples in Playwright; deliberately breaking one side makes the suite red |
 | **R-10** | Chromium absent or changed → URL/Office→PDF breaks | Medium | Explicit configured path (§3.6.6); clean feature degradation (§7.2); version captured in About |
 | **R-11** | webkit2gtk on Linux breaks the UI in the desktop build | Deferred | Post-1.0 (ADR 0011). ADR 0011 documents the Electron escape hatch |
 | **R-12** | Scope. This is 11 tabs and ~180 controls | **High** | Phase gates; ship Phases 0–4 as a usable product before continuing |

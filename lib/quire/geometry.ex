@@ -107,4 +107,90 @@ defmodule Quire.Geometry do
   defp unit_label(:mm), do: "mm"
   defp unit_label(:cm), do: "cm"
   defp unit_label(:meters), do: "m"
+
+  @doc """
+  Convert CSS/canvas bounding rect (top-left origin) to PDF user-space
+  points (bottom-left origin).
+
+  Without a rotation the transform is a simple Y-flip:
+    x_pdf = x_css
+    y_pdf = page_height - y_css - height
+
+  With rotation the page width must be provided to correctly transform
+  coordinates through the rotated frame.
+  """
+  def css_to_pdf(x_css, y_css, width, height, page_height, rotation \\ 0, page_width \\ nil)
+
+  def css_to_pdf(x, y, w, h, ph, 0, _pw) do
+    {x, ph - y - h, w, h}
+  end
+
+  def css_to_pdf(x, y, w, h, ph, rot, pw) when is_number(pw) do
+    # Apply rotation using PAGE dimensions, not rect dimensions
+    {rx, ry} = apply_rotation(x, y, pw, ph, rot)
+
+    # Convert to PDF coords from the rotated frame
+    {rx, ph - ry - h, w, h}
+  end
+
+  @doc """
+  Convert PDF user-space rect to CSS/canvas coords (top-left origin).
+  """
+  def pdf_to_css(x_pdf, y_pdf, width, height, page_height, rotation \\ 0, page_width \\ nil)
+
+  def pdf_to_css(x, y, w, h, ph, 0, _pw) do
+    {x, ph - y - h, w, h}
+  end
+
+  def pdf_to_css(x, y, w, h, ph, rot, pw) when is_number(pw) do
+    # Convert PDF point back through CSS frame (inverse of css_to_pdf)
+    css_y = ph - y - h
+    {rx, ry} = apply_rotation(x, css_y, pw, ph, -rot)
+    {rx, ry, w, h}
+  end
+
+  @doc """
+  Apply page rotation to a point (x, y) on a page of dimensions (w, h).
+
+  Returns `{rotated_x, rotated_y}` in the original coordinate system
+  after applying the given rotation (degrees: 0, 90, 180, 270).
+  """
+  def apply_rotation(x, y, w, h, degrees) do
+    case Integer.mod(degrees, 360) do
+      0 -> {x, y}
+      90 -> {y, w - x}
+      180 -> {w - x, h - y}
+      270 -> {h - y, x}
+    end
+  end
+
+  @doc """
+  Check that a CSS → PDF → CSS round trip is identity within 0.01 pt.
+  """
+  def round_trip_ok?(x, y, w, h, page_h, rotation \\ 0, page_w \\ nil) do
+    pw = page_w || page_h
+    {px, py, _pw, _ph} = css_to_pdf(x, y, w, h, page_h, rotation, pw)
+    {cx, cy, _cw, _ch} = pdf_to_css(px, py, w, h, page_h, rotation, pw)
+
+    abs(cx - x) <= 0.01 and abs(cy - y) <= 0.01
+  end
+
+  @doc """
+  Subtract CropBox origin from a point.
+
+  When CropBox has a non-zero origin, add it to get MediaBox-frame coords.
+  """
+  def subtract_crop_origin(x, y, crop_x, crop_y) do
+    {x + crop_x, y + crop_y}
+  end
+
+  @doc """
+  Add CropBox origin to a point (inverse of `subtract_crop_origin/4`).
+  """
+  def add_crop_origin(x, y, crop_x, crop_y) do
+    {x - crop_x, y - crop_y}
+  end
+
+  defp rotated_page_dims(w, h, rot) when rot in [90, 270], do: {h, w}
+  defp rotated_page_dims(w, h, _rot), do: {w, h}
 end

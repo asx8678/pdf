@@ -83,3 +83,178 @@ export function subtractCropOrigin(x, y, cropOrigin) {
 export function addCropOrigin(x, y, cropOrigin) {
   return { x: x - cropOrigin.x, y: y - cropOrigin.y };
 }
+
+/**
+ * Apply page rotation to a point (x, y) on a page of dimensions (w, h).
+ * Based on ISO 32000-2 /Rotate values: 0, 90, 180, 270.
+ * @param {number} x
+ * @param {number} y
+ * @param {number} w — page width
+ * @param {number} h — page height
+ * @param {number} degrees — rotation in degrees (0, 90, 180, 270)
+ * @returns {{x: number, y: number}}
+ */
+export function applyRotation(x, y, w, h, degrees) {
+  // Normalise to 0-359 (handles negative values for inverse transforms)
+  const d = ((degrees % 360) + 360) % 360;
+  switch (d) {
+    case 90:  return { x: y, y: w - x };
+    case 180: return { x: w - x, y: h - y };
+    case 270: return { x: h - y, y: x };
+    default:  return { x, y };
+  }
+}
+
+/**
+ * Euclidean distance between two points.
+ * @param {{x:number, y:number}} a
+ * @param {{x:number, y:number}} b
+ * @returns {number}
+ */
+export function distance(a, b) {
+  return Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
+}
+
+/**
+ * Perimeter of a closed polygon.
+ * @param {Array<{x:number, y:number}>} vertices
+ * @returns {number}
+ */
+export function perimeter(vertices) {
+  if (vertices.length < 2) return 0.0;
+  let total = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    total += distance(a, b);
+  }
+  return total;
+}
+
+/**
+ * Area of a polygon via the shoelace formula.
+ * @param {Array<{x:number, y:number}>} vertices
+ * @returns {number}
+ */
+export function area(vertices) {
+  if (vertices.length < 3) return 0.0;
+  let sum = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    sum += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(sum) / 2.0;
+}
+
+/**
+ * Convert a measurement from one unit to another.
+ * Supported units: 'points', 'inches', 'mm', 'cm', 'meters'.
+ * @param {number} value
+ * @param {string} fromUnit
+ * @param {string} toUnit
+ * @returns {number}
+ */
+export function scaleMeasurement(value, fromUnit, toUnit) {
+  if (fromUnit === toUnit) return value;
+  const points = toPoints(value, fromUnit);
+  return fromPoints(points, toUnit);
+}
+
+const POINTS_PER_INCH = 72.0;
+const MM_PER_INCH = 25.4;
+const CM_PER_INCH = 2.54;
+const METERS_PER_INCH = 0.0254;
+
+function toPoints(value, unit) {
+  switch (unit) {
+    case 'points': return value;
+    case 'inches': return value * POINTS_PER_INCH;
+    case 'mm': return value * POINTS_PER_INCH / MM_PER_INCH;
+    case 'cm': return value * POINTS_PER_INCH / CM_PER_INCH;
+    case 'meters': return value * POINTS_PER_INCH / METERS_PER_INCH;
+    default: return value;
+  }
+}
+
+function fromPoints(points, unit) {
+  switch (unit) {
+    case 'points': return points;
+    case 'inches': return points / POINTS_PER_INCH;
+    case 'mm': return points / POINTS_PER_INCH * MM_PER_INCH;
+    case 'cm': return points / POINTS_PER_INCH * CM_PER_INCH;
+    case 'meters': return points / POINTS_PER_INCH * METERS_PER_INCH;
+    default: return points;
+  }
+}
+
+/**
+ * CSS → PDF → CSS round-trip check within 0.01 pt tolerance.
+ * @param {number} x — CSS x
+ * @param {number} y — CSS y
+ * @param {number} w — width
+ * @param {number} h — height
+ * @param {number} pageHeight
+ * @param {number} [rotation=0]
+ * @returns {boolean}
+ */
+export function roundTripOk(x, y, w, h, pageHeight, rotation = 0, pageWidth = null) {
+  const pw = pageWidth || pageHeight;
+  const pdf = cssToPdfRotated(x, y, w, h, pageHeight, rotation, pw);
+  const css = pdfToCssRotated(pdf.x, pdf.y, pdf.width, pdf.height, pageHeight, rotation, pw);
+  return Math.abs(css.x - x) <= 0.01 && Math.abs(css.y - y) <= 0.01;
+}
+
+/**
+ * CSS → PDF conversion with a rotation number (no pdf.js viewport).
+ * @param {number} x_css
+ * @param {number} y_css
+ * @param {number} w
+ * @param {number} h
+ * @param {number} pageHeight
+ * @param {number} rotation — degrees 0, 90, 180, 270
+ * @returns {{x:number, y:number, width:number, height:number}}
+ */
+export function cssToPdfRotated(x_css, y_css, w, h, pageHeight, rotation, pageWidth) {
+  if (rotation && rotation !== 0) {
+    var pw = typeof pageWidth === 'number' ? pageWidth : pageHeight;
+    var r = applyRotation(x_css, y_css, pw, pageHeight, rotation);
+    return {
+      x: r.x,
+      y: pageHeight - r.y - h,
+      width: w,
+      height: h
+    };
+  }
+  return {
+    x: x_css,
+    y: pageHeight - y_css - h,
+    width: w,
+    height: h
+  };
+}
+
+/**
+ * PDF → CSS conversion with a rotation number (no pdf.js viewport).
+ * @param {number} x_pdf
+ * @param {number} y_pdf
+ * @param {number} w_pdf
+ * @param {number} h_pdf
+ * @param {number} pageHeight
+ * @param {number} rotation — degrees 0, 90, 180, 270
+ * @returns {{x:number, y:number, width:number, height:number}}
+ */
+export function pdfToCssRotated(x_pdf, y_pdf, w_pdf, h_pdf, pageHeight, rotation, pageWidth) {
+  if (rotation && rotation !== 0) {
+    var pw = typeof pageWidth === 'number' ? pageWidth : pageHeight;
+    var cssY = pageHeight - y_pdf - h_pdf;
+    var r = applyRotation(x_pdf, cssY, pw, pageHeight, -rotation);
+    return { x: r.x, y: r.y, width: w_pdf, height: h_pdf };
+  }
+  return {
+    x: x_pdf,
+    y: pageHeight - y_pdf - h_pdf,
+    width: w_pdf,
+    height: h_pdf
+  };
+}
