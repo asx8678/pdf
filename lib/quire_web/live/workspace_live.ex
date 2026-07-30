@@ -159,6 +159,9 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:scan_job_id, nil)
       |> assign(:scan_progress, nil)
       |> assign(:scan_error, nil)
+      |> assign(:convert_running, false)
+      |> assign(:convert_format, nil)
+      |> assign(:convert_error, nil)
       |> load_user_settings()
       |> load_saved_signatures()
       |> allow_upload(:image,
@@ -1177,6 +1180,38 @@ defmodule QuireWeb.WorkspaceLive do
      |> assign(:ocr_prompt_dismissed, true)}
   end
 
+  # ── Convert-to-Office handler (T-074 / pdf-wyh.1) ─────────────────────
+
+  @doc """
+  Enqueues PdfToOfficeWorker for the selected format.
+  """
+  def handle_event("convert_to_office", %{"format" => format}, socket) do
+    doc_id = socket.assigns.active_document_id
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      %{
+        "doc_id" => doc_id,
+        "revision_id" => rev.id,
+        "format" => format
+      }
+      |> Quire.Workers.PdfToOfficeWorker.new([])
+      |> Oban.insert!()
+
+      format_label = String.upcase(format)
+
+      {:noreply,
+       socket
+       |> assign(:convert_running, true)
+       |> assign(:convert_format, format)
+       |> assign(:convert_error, nil)
+       |> put_flash(:info, "#{format_label} conversion started for #{doc.title}")}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start conversion: #{reason}")}
+    end
+  end
+
   @doc """
   Checks whether the document has any extractable text and assigns
   `show_ocr_prompt` if all pages lack a text layer.
@@ -1690,12 +1725,62 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
-      <p
-        :if={@active_tab not in @view_toggle_tabs}
-        class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
-      >
-        Select a tool
-      </p>
+      <!-- Create & Convert tab ribbon (T-074 / pdf-wyh.1) -->
+      <div :if={@active_tab == "create-convert"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Export to…">
+          <.ribbon_button
+            icon="hero-document-text"
+            label="DOCX"
+            phx-click="convert_to_office"
+            phx-value-format="docx"
+            tooltip="Word document (.docx) — best for text-based PDFs"
+            disabled={@convert_running}
+          />
+          <.ribbon_button
+            icon="hero-table-cells"
+            label="XLSX"
+            phx-click="convert_to_office"
+            phx-value-format="xlsx"
+            tooltip="Excel workbook (.xlsx) — best for tabular data"
+            disabled={@convert_running}
+          />
+          <.ribbon_button
+            icon="hero-presentation-chart-bar"
+            label="PPTX"
+            phx-click="convert_to_office"
+            phx-value-format="pptx"
+            tooltip="PowerPoint presentation (.pptx) — best for text-based PDFs"
+            disabled={@convert_running}
+          />
+        </.ribbon_group>
+
+        <p class="text-[10px] text-gray-400 dark:text-gray-500 italic max-w-xs leading-tight">
+          Best-effort conversion; formatting fidelity depends on the source PDF.
+          Run OCR first if the document has no text layer.
+        </p>
+
+        <.ribbon_group :if={@convert_running} label="Converting">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-gray-500">
+            <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+            <span>{@convert_format |> String.upcase()} conversion…</span>
+          </div>
+        </.ribbon_group>
+
+        <.ribbon_group :if={@convert_error} label="Error">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-red-500">
+            <.icon name="hero-exclamation-circle" class="size-3.5" />
+            <span>{@convert_error}</span>
+          </div>
+        </.ribbon_group>
+      </div>
+
+      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert"}>
+        <p
+          class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
+        >
+          Select a tool
+        </p>
+      </div>
     </div>
     """
   end
@@ -1832,6 +1917,9 @@ defmodule QuireWeb.WorkspaceLive do
       socket
       |> assign(:ocr_running, false)
       |> assign(:ocr_progress, nil)
+      |> assign(:convert_running, false)
+      |> assign(:convert_format, nil)
+      |> assign(:convert_error, nil)
       |> push_event("revision_updated", %{revision_id: rev.id})
 
     # Fetch confidence data for this revision to show the confidence panel.
