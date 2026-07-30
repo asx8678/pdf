@@ -123,8 +123,23 @@ defmodule Quire.Editing.EditSession do
 
   @impl true
   def handle_call({:apply, op}, _from, state) when is_map(op) do
-    # Prepend to journal, clear redo stack, mark dirty
-    new_state = %{state | journal: [op | state.journal], redo_stack: [], dirty?: true}
+    op_with_ts = Map.put(op, :timestamp, System.monotonic_time())
+
+    {journal, redo_stack} =
+      case state.journal do
+        [last | rest] ->
+          if coalesce?(last, op_with_ts) do
+            # Coalesce: replace last entry with the new op (latest data wins)
+            {[op_with_ts | rest], state.redo_stack}
+          else
+            {[op_with_ts | state.journal], []}
+          end
+
+        _ ->
+          {[op_with_ts | state.journal], []}
+      end
+
+    new_state = %{state | journal: journal, redo_stack: redo_stack, dirty?: true}
     {reply_state, _timers} = schedule_timers(new_state)
     {:reply, {:ok, op}, reply_state}
   end
@@ -186,6 +201,27 @@ defmodule Quire.Editing.EditSession do
   def handle_info(:terminate, state) do
     # TODO: Persist journal to edit_operations before stopping
     {:stop, :normal, state}
+  end
+
+  # ── Coalescing ────────────────────────────────────────────────────────────
+
+  @doc false
+  def coalesce?(op1, op2) do
+    kind1 = Map.get(op1, :kind) || op1["kind"]
+    kind2 = Map.get(op2, :kind) || op2["kind"]
+    target1 = Map.get(op1, :target) || op1["target"]
+    target2 = Map.get(op2, :target) || op2["target"]
+
+    coalescable_kind?(kind1) && kind1 == kind2 && target1 == target2 &&
+      within_coalesce_window?(op1, op2)
+  end
+
+  defp coalescable_kind?(kind), do: kind in ~w(text.style annot.update)
+
+  defp within_coalesce_window?(op1, op2) do
+    ts1 = Map.get(op1, :timestamp, 0)
+    ts2 = Map.get(op2, :timestamp, 0)
+    abs(ts2 - ts1) < 800_000
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────

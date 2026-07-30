@@ -28,7 +28,7 @@ defmodule Quire.Editing.EditSessionTest do
   end
 
   describe "apply" do
-    test "prepends to journal", %{doc_id: doc_id, user_id: user_id} do
+    test "prepends to journal (with coalescing timestamp)", %{doc_id: doc_id, user_id: user_id} do
       pid =
         start_supervised!({Quire.Editing.EditSession, document_id: doc_id, user_id: user_id})
 
@@ -37,7 +37,11 @@ defmodule Quire.Editing.EditSessionTest do
 
       state = :sys.get_state(pid)
       assert length(state.journal) == 1
-      assert hd(state.journal) == op
+
+      journal_op = hd(state.journal)
+      assert journal_op[:kind] == "annot.add"
+      assert journal_op[:data] == %{}
+      assert is_integer(journal_op[:timestamp])
     end
 
     test "clears redo_stack", %{doc_id: doc_id, user_id: user_id} do
@@ -188,5 +192,60 @@ defmodule Quire.Editing.EditSessionTest do
       assert {:error, :not_found} =
                Quire.Editing.close_session(Ecto.UUID.autogenerate(), Ecto.UUID.autogenerate())
     end
+  end
+
+  # ── Coalescing tests ──────────────────────────────────────
+
+  test "consecutive text.style ops on same target coalesce", %{doc_id: doc_id, user_id: user_id} do
+    pid = start_supervised!({Quire.Editing.EditSession, document_id: doc_id, user_id: user_id})
+
+    op1 = %{kind: "text.style", target: "el1", data: %{font: "bold"}}
+    op2 = %{kind: "text.style", target: "el1", data: %{font: "italic"}}
+
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op1)
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op2)
+
+    state = :sys.get_state(pid)
+    assert length(state.journal) == 1
+    assert hd(state.journal)[:data][:font] == "italic"
+  end
+
+  test "consecutive annot.update ops on same target coalesce", %{doc_id: doc_id, user_id: user_id} do
+    pid = start_supervised!({Quire.Editing.EditSession, document_id: doc_id, user_id: user_id})
+
+    op1 = %{kind: "annot.update", target: "ann1", prior: %{color: "red"}}
+    op2 = %{kind: "annot.update", target: "ann1", prior: %{color: "blue"}}
+
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op1)
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op2)
+
+    state = :sys.get_state(pid)
+    assert length(state.journal) == 1
+  end
+
+  test "different targets do not coalesce", %{doc_id: doc_id, user_id: user_id} do
+    pid = start_supervised!({Quire.Editing.EditSession, document_id: doc_id, user_id: user_id})
+
+    op1 = %{kind: "text.style", target: "el1", data: %{font: "bold"}}
+    op2 = %{kind: "text.style", target: "el2", data: %{font: "italic"}}
+
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op1)
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op2)
+
+    state = :sys.get_state(pid)
+    assert length(state.journal) == 2
+  end
+
+  test "non-coalescable kinds do not coalesce", %{doc_id: doc_id, user_id: user_id} do
+    pid = start_supervised!({Quire.Editing.EditSession, document_id: doc_id, user_id: user_id})
+
+    op1 = %{kind: "annot.add", target: "el1"}
+    op2 = %{kind: "annot.add", target: "el1"}
+
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op1)
+    assert {:ok, _} = Quire.Editing.EditSession.apply(pid, op2)
+
+    state = :sys.get_state(pid)
+    assert length(state.journal) == 2
   end
 end
