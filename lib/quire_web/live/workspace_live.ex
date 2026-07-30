@@ -821,7 +821,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("toggle_scripting", %{"enabled" => enabled}, socket) do
     enabled? = enabled in [true, "true"]
 
-    Quire.Accounts.update_user_settings(socket.assigns.current_user.id, %{
+    Quire.Accounts.update_user_settings(socket.assigns.current_scope.user.id, %{
       scripting_enabled: enabled?
     })
 
@@ -1024,7 +1024,7 @@ defmodule QuireWeb.WorkspaceLive do
   # ── Custom stamp event handlers (T-107) ────────────────────────────────
 
   def handle_event("save_custom_stamp", params, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     params =
       if is_binary(params["data"]),
@@ -1041,7 +1041,7 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("delete_stamp", %{"id" => stamp_id}, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
     Quire.Accounts.delete_saved_stamp(user_id, stamp_id)
     {:noreply, socket}
   end
@@ -1054,7 +1054,7 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("select_custom_stamp", %{"stamp_id" => stamp_id}, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
     stamps = Quire.Accounts.list_saved_stamps(user_id)
     stamp = Enum.find(stamps, &(&1["id"] == stamp_id))
 
@@ -1125,7 +1125,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("document_saved", %{"bytes" => base64}, socket) do
     bytes = Base.decode64!(base64)
     document_id = socket.assigns.document_id
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     case Editing.open_session(document_id, user_id) do
       {:ok, session_pid} ->
@@ -1155,7 +1155,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("document_mutated", %{"kind" => kind, "data" => data}, socket) do
     op = %{kind: kind, data: data}
     document_id = socket.assigns.document_id
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     with {:ok, session_pid} <- Editing.open_session(document_id, user_id),
          {:ok, _} <- Editing.apply(session_pid, op) do
@@ -1458,7 +1458,7 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("whiteout_committed", %{"data" => data}, socket) do
     document_id = socket.assigns.active_document_id
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     annot = %{
       revision_id: document_id,
@@ -1469,7 +1469,7 @@ defmodule QuireWeb.WorkspaceLive do
       color: %{"r" => 255, "g" => 255, "b" => 255},
       opacity: 100,
       border_width: 0,
-      author: socket.assigns.current_user.name || user_id
+      author: socket.assigns.current_scope.user.name || user_id
     }
 
     socket = record_annotation(socket, document_id, user_id, annot)
@@ -1556,7 +1556,7 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("dismiss_whiteout_permanently", _params, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     Quire.Accounts.update_user_settings(user_id, %{whiteout_warning_dismissed: true})
 
@@ -1576,7 +1576,7 @@ defmodule QuireWeb.WorkspaceLive do
   # ── Signature capture event handlers (T-114) ────────────────────────────
 
   def handle_event("save_signature", params, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     params =
       if is_binary(params["data"]),
@@ -1593,13 +1593,13 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("delete_signature", %{"id" => sig_id}, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
     Quire.Accounts.delete_saved_signature(user_id, sig_id)
     {:noreply, load_saved_signatures(socket)}
   end
 
   def handle_event("signature_label_updated", %{"id" => sig_id, "label" => label}, socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
     Quire.Accounts.update_signature_label(user_id, sig_id, label)
     {:noreply, load_saved_signatures(socket)}
   end
@@ -1610,13 +1610,13 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   defp load_saved_signatures(socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
     signatures = Quire.Accounts.list_saved_signatures(user_id)
     assign(socket, :signatures, signatures)
   end
 
   defp load_user_settings(socket) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     settings = Quire.Accounts.get_user_settings(user_id)
     dismissed = settings.whiteout_warning_dismissed
@@ -1765,7 +1765,7 @@ defmodule QuireWeb.WorkspaceLive do
         <.live_component
           module={QuireWeb.OcrOptionsLive}
           id="ocr-options"
-          user_id={@current_user.id}
+          user_id={@current_scope.user.id}
           ocr_running={@ocr_running}
           ocr_progress={@ocr_progress}
         />
@@ -2382,7 +2382,7 @@ defmodule QuireWeb.WorkspaceLive do
             module={QuireWeb.Live.CommentsPanel}
             id="comments-panel"
             document_id={@active_document_id}
-            current_user_id={@current.user.id}
+            current_user_id={@current_scope.user.id}
           />
         <% true -> %>
           <div class="flex-1 overflow-y-auto p-4">
@@ -2999,7 +2999,7 @@ defmodule QuireWeb.WorkspaceLive do
   # ── Annotation commit helpers (T-107) ────────────────────────────────
 
   defp handle_annotation_commit(socket, document_id, type, data) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     # For measure types, embed the computed measurement alongside path data
     path_data =
@@ -3026,14 +3026,14 @@ defmodule QuireWeb.WorkspaceLive do
       opacity: data["opacity"] || Map.get(data, "opacity", 100),
       border_width: data["strokeWidth"] || data["borderWidth"] || data["border_width"],
       content: data["content"] || data["text"],
-      author: socket.assigns.current_user.name || user_id
+      author: socket.assigns.current_scope.user.name || user_id
     }
 
     record_annotation(socket, document_id, user_id, annot)
   end
 
   defp handle_stamp_commit(socket, document_id, data) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     annot = %{
       revision_id: document_id,
@@ -3044,14 +3044,14 @@ defmodule QuireWeb.WorkspaceLive do
       path_data: data["stampSvg"],
       color: nil,
       opacity: 100,
-      author: socket.assigns.current_user.name || user_id
+      author: socket.assigns.current_scope.user.name || user_id
     }
 
     record_annotation(socket, document_id, user_id, annot)
   end
 
   defp handle_callout_commit(socket, document_id, data) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     annot = %{
       revision_id: document_id,
@@ -3063,14 +3063,14 @@ defmodule QuireWeb.WorkspaceLive do
       color: data["color"],
       opacity: 100,
       border_width: 1,
-      author: socket.assigns.current_user.name || user_id
+      author: socket.assigns.current_scope.user.name || user_id
     }
 
     record_annotation(socket, document_id, user_id, annot)
   end
 
   defp handle_file_attachment_commit(socket, document_id, data) do
-    user_id = socket.assigns.current_user.id
+    user_id = socket.assigns.current_scope.user.id
 
     # File bytes come from the client as base64.
     # Store via Quire.Storage and reference by ref.
@@ -3108,7 +3108,7 @@ defmodule QuireWeb.WorkspaceLive do
       content: file_name,
       color: nil,
       opacity: 100,
-      author: socket.assigns.current_user.name || user_id
+      author: socket.assigns.current_scope.user.name || user_id
     }
 
     record_annotation(socket, document_id, user_id, annot)
