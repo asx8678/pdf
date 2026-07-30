@@ -1,0 +1,19 @@
+.beads/issues.jsonl
+  s_7f75edd4a03a69::t_7c5d595f39231f 73
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "81c98f40f50b11a2774db7a31f32cbb3975ecc7c",
+  "prompts": {},
+  "sessions": {
+    "s_7f75edd4a03a69": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "db1e299f-17ef-4834-b1ff-e4b4b08c5d49",
+        "model": "claude-opus-5"
+      },
+      "human_author": "asx8678 <114666958+asx8678@users.noreply.github.com>"
+    }
+  }
+}
