@@ -15,6 +15,7 @@ defmodule QuireWeb.WorkspaceLive do
   """
   use QuireWeb, :live_view
 
+  import QuireWeb.Chrome.AttachmentsPanel, only: [attachments_panel: 1]
   import QuireWeb.Chrome.Backstage, only: [backstage: 1]
   import QuireWeb.Chrome.BookmarksPanel, only: [bookmarks_panel: 1]
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
@@ -79,6 +80,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:thumbnails, [])
       |> assign(:bookmarks, [])
       |> assign(:layers, [])
+      |> assign(:attachments, [])
       |> assign(:search_query, "")
       |> assign(:search_results, [])
       |> assign(:search_total, 0)
@@ -436,10 +438,32 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :layers, layers)}
   end
 
+  # Attachments panel (T-049) — read-only stub; the real preview
+  # (open embedded file from the document's attachment store) lands
+  # after pdf-0g9 resolves.
+  def handle_event("preview_attachment", %{"name" => _name}, socket) do
+    {:noreply, socket}
+  end
+
   # Thumbnails panel (T-046) — clamp into range and push to the viewer
   # hook so pdf.js scrolls to the page.
   def handle_event("navigate_page", %{"page" => page}, socket) do
     case Integer.parse(to_string(page)) do
+      {page, _} ->
+        page = page |> max(1) |> min(socket.assigns.total_pages)
+
+        {:noreply,
+         socket
+         |> assign(:page, page)
+         |> push_event("navigate_page", %{page: page})}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("navigate_to_page", %{"page" => page_str}, socket) do
+    case Integer.parse(to_string(page_str)) do
       {page, _} ->
         page = page |> max(1) |> min(socket.assigns.total_pages)
 
@@ -563,14 +587,6 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("toggle_panel", _params, socket), do: {:noreply, socket}
-
-  def handle_event("prev_page", _params, socket) do
-    {:noreply, assign(socket, :page, max(socket.assigns.page - 1, 1))}
-  end
-
-  def handle_event("next_page", _params, socket) do
-    {:noreply, assign(socket, :page, min(socket.assigns.page + 1, socket.assigns.total_pages))}
-  end
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
@@ -752,6 +768,7 @@ defmodule QuireWeb.WorkspaceLive do
   attr :page, :integer, default: 1
   attr :bookmarks, :list, default: []
   attr :layers, :list, default: []
+  attr :attachments, :list, default: []
   attr :search_query, :string, default: ""
   attr :search_results, :list, default: []
   attr :search_total, :integer, default: 0
@@ -789,6 +806,8 @@ defmodule QuireWeb.WorkspaceLive do
           <.bookmarks_panel bookmarks={@bookmarks} current_page={@page} />
         <% @panel == :layers -> %>
           <.layers_panel layers={@layers} />
+        <% @panel == :attachments -> %>
+          <.attachments_panel attachments={@attachments} />
         <% @panel == :search -> %>
           <.search_panel
             query={@search_query}
@@ -801,7 +820,7 @@ defmodule QuireWeb.WorkspaceLive do
           />
         <% true -> %>
           <div class="flex-1 overflow-y-auto p-4">
-            <p class="text-sm text-gray-400 dark:text-gray-500">{panel_hint(@panel)}</p>
+            <p class="text-sm text-gray-400 dark:text-gray-500">Unknown panel</p>
           </div>
       <% end %>
     </aside>
@@ -813,8 +832,6 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:layers), do: "Layers"
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
-
-  defp panel_hint(:attachments), do: "Open a document to list its embedded attachments."
 
   defp no_document_placeholder(assigns) do
     ~H"""

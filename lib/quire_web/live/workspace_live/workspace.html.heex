@@ -34,6 +34,7 @@
         page={@page}
         bookmarks={@bookmarks}
         layers={@layers}
+        attachments={@attachments}
         search_query={@search_query}
         search_results={@search_results}
         search_total={@search_total}
@@ -72,6 +73,7 @@
         page={@page}
         bookmarks={@bookmarks}
         layers={@layers}
+        attachments={@attachments}
         search_query={@search_query}
         search_results={@search_results}
         search_total={@search_total}
@@ -88,8 +90,6 @@
       total_pages={@total_pages}
       zoom={@zoom}
       progress={@progress}
-      on_prev_page="prev_page"
-      on_next_page="next_page"
     />
 
     <.confirm_close_modal :if={@confirm_close_doc} confirm_close_doc={@confirm_close_doc} />

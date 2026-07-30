@@ -7,7 +7,7 @@ defmodule QuireWeb.Chrome.StatusBar do
   """
   use Phoenix.Component
 
-  import QuireWeb.CoreComponents, only: [icon: 1]
+  import QuireWeb.Chrome.PageNavPill, only: [page_nav_pill: 1]
   import QuireWeb.Chrome.ZoomControl, only: [zoom_control: 1]
 
   attr :page, :integer, default: 1
@@ -15,8 +15,6 @@ defmodule QuireWeb.Chrome.StatusBar do
   attr :zoom, :integer, default: 100
   attr :progress, :float, default: nil
   attr :progress_label, :string, default: nil
-  attr :on_prev_page, :any, default: nil
-  attr :on_next_page, :any, default: nil
   attr :class, :string, default: nil
 
   def status_bar(assigns) do
@@ -47,22 +45,8 @@ defmodule QuireWeb.Chrome.StatusBar do
       </div>
 
       <div class="flex items-center gap-4">
-        <div
-          class="flex items-center gap-1 pr-3 border-r border-chrome-border dark:border-gray-600"
-          role="navigation"
-          aria-label="Page navigation"
-        >
-          <.page_button
-            direction="prev"
-            disabled={@page <= 1}
-            on_click={@on_prev_page}
-          />
-          <span class="tabular-nums">{@page} / {@total_pages}</span>
-          <.page_button
-            direction="next"
-            disabled={@page >= @total_pages}
-            on_click={@on_next_page}
-          />
+        <div class="pr-3 border-r border-chrome-border dark:border-gray-600">
+          <.page_nav_pill page={@page} total_pages={@total_pages} />
         </div>
 
         <.zoom_control zoom={@zoom} />
@@ -71,30 +55,5 @@ defmodule QuireWeb.Chrome.StatusBar do
     """
   end
 
-  attr :direction, :string, values: ["prev", "next"], required: true
-  attr :disabled, :boolean, default: false
-  attr :on_click, :any, default: nil
 
-  defp page_button(assigns) do
-    ~H"""
-    <button
-      type="button"
-      phx-click={@on_click}
-      disabled={@disabled}
-      aria-label={if @direction == "prev", do: "Previous page", else: "Next page"}
-      class={[
-        "p-0.5 rounded transition-colors",
-        if(@disabled,
-          do: "opacity-38 cursor-not-allowed",
-          else: "hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
-        )
-      ]}
-    >
-      <.icon
-        name={if @direction == "prev", do: "hero-chevron-left", else: "hero-chevron-right"}
-        class="size-3.5"
-      />
-    </button>
-    """
-  end
 end
