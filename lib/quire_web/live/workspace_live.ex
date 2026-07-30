@@ -169,6 +169,11 @@ defmodule QuireWeb.WorkspaceLive do
         max_entries: 1,
         max_file_size: 50_000_000
       )
+      |> allow_upload(:insert_pdf,
+        accept: ~w(application/pdf),
+        max_entries: 1,
+        max_file_size: 100_000_000
+      )
 
     Phoenix.PubSub.subscribe(Quire.PubSub, "document:#{id}")
 
@@ -1725,6 +1730,31 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
+      <!-- Page tab ribbon (T-061 / pdf-dfdt) -->
+      <div :if={@active_tab == "page"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Insert">
+          <.ribbon_button
+            icon="hero-document-plus"
+            label="From File"
+            phx-click="insert_from_file"
+            tooltip="Insert pages from another PDF file"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Organize">
+          <.ribbon_button
+            icon="hero-arrows-right-left"
+            label="Reorder"
+            tooltip="Drag to reorder pages (in thumbnail panel)"
+          />
+          <.ribbon_button
+            icon="hero-trash"
+            label="Delete"
+            tooltip="Delete selected pages"
+          />
+        </.ribbon_group>
+      </div>
+
       <!-- Create & Convert tab ribbon (T-074 / pdf-wyh.1) -->
       <div :if={@active_tab == "create-convert"} class="flex items-center gap-1 flex-1">
         <.ribbon_group label="Export to…">
@@ -1774,7 +1804,7 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
-      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert"}>
+      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and @active_tab != "page"}>
         <p
           class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
         >
@@ -2016,6 +2046,84 @@ defmodule QuireWeb.WorkspaceLive do
   @impl true
   def handle_event("upload_image_ocr", _params, socket) do
     {:noreply, push_event(socket, "trigger_image_picker", %{})}
+  end
+
+  # ── Insert-from-file handlers (T-061 / pdf-dfdt) ──────────────────────
+
+  @impl true
+  def handle_event("insert_from_file", _params, socket) do
+    {:noreply, push_event(socket, "trigger_insert_pdf_picker", %{})}
+  end
+
+  @impl true
+  def handle_event("insert_pdf_submit", _params, socket) do
+    [%{meta: meta, bytes: insert_bytes}] =
+      consume_uploaded_entries(socket, :insert_pdf, fn meta, entry ->
+        %{meta: meta, bytes: File.read!(entry.path)}
+      end)
+
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    case insert_pages_into_document(doc_id, scope, insert_bytes, meta.name) do
+      {:ok, _rev} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Pages from #{meta.name} inserted")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Insert failed: #{reason}")}
+    end
+  end
+
+  defp insert_pages_into_document(doc_id, scope, insert_bytes, filename) do
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, doc_bytes} <- Quire.Storage.get(ref) do
+      # Merge the two PDFs via ExPdfium
+      with {:ok, src_doc} <- ExPdfium.open(insert_bytes),
+           {:ok, dest_doc} <- ExPdfium.open(doc_bytes) do
+        try do
+          with {:ok, merged} <- ExPdfium.append(dest_doc, src_doc),
+               {:ok, merged_bytes} <- ExPdfium.save_to_bytes(merged) do
+            ExPdfium.close(src_doc)
+            ExPdfium.close(dest_doc)
+
+            # Store as new revision
+            {:ok, new_ref} =
+              Quire.Storage.put(merged_bytes,
+                name: doc.title,
+                content_type: "application/pdf"
+              )
+
+            source_map = %{
+              "storage_ref" => %{
+                "adapter" => to_string(new_ref.adapter),
+                "key" => new_ref.key,
+                "name" => new_ref.name,
+                "content_type" => new_ref.content_type,
+                "byte_size" => new_ref.byte_size
+              },
+              "source_revision" => rev.id,
+              "inserted_file" => filename,
+              "note" => "Pages inserted from #{filename}"
+            }
+
+            {:ok, _new_rev} =
+              Quire.Documents.create_revision(doc,
+                label: "Inserted from #{filename}",
+                source: source_map
+              )
+
+            {:ok, _new_rev}
+          end
+        after
+          ExPdfium.close(src_doc)
+          ExPdfium.close(dest_doc)
+        end
+      end
+    end
   end
 
   @impl true

@@ -322,6 +322,19 @@
       />
     </form>
 
+    <form
+      id="insert-pdf-upload-form"
+      phx-submit="insert_pdf_submit"
+      class="hidden"
+      phx-hook=".InsertPdfFileTrigger"
+    >
+      <.live_file_input
+        upload={@uploads.insert_pdf}
+        id="insert-pdf-upload-input"
+        accept="application/pdf"
+      />
+    </form>
+
     <script :type={Phoenix.LiveView.ColocatedHook} name=".KeyboardShortcuts">
       export default {
         mounted() {
@@ -355,6 +368,16 @@
         mounted() {
           this.handleEvent("trigger_image_picker", () => {
             const input = document.getElementById("image-ocr-upload-input");
+            if (input) input.click();
+          });
+        }
+      }
+    </script>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".InsertPdfFileTrigger">
+      export default {
+        mounted() {
+          this.handleEvent("trigger_insert_pdf_picker", () => {
+            const input = document.getElementById("insert-pdf-upload-input");
             if (input) input.click();
           });
         }
