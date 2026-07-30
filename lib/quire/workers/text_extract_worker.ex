@@ -109,8 +109,8 @@ defmodule Quire.Workers.TextExtractWorker do
     pages_with_text =
       Repo.all(
         from pt in PageText,
-        where: pt.revision_id == ^revision_id and pt.content != "",
-        select: pt.page_index
+          where: pt.revision_id == ^revision_id and pt.content != "",
+          select: pt.page_index
       )
 
     if pages_with_text != [] do
