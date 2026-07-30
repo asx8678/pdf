@@ -1176,29 +1176,45 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, put_flash(socket, :error, "Mutation error: #{reason}")}
   end
 
-  def handle_event("set_scroll_mode", %{"mode" => mode}, socket)
-      when mode in ~w(vertical horizontal wrapped) do
+  def handle_event("set_scroll_mode", %{"scroll_mode" => current}, socket)
+      when current in ~w(vertical horizontal wrapped) do
+    mode = next_scroll_mode(String.to_existing_atom(current))
     {:noreply,
      socket
-     |> assign(:scroll_mode, String.to_existing_atom(mode))
+     |> assign(:scroll_mode, mode)
      |> push_event("set_scroll_mode", %{mode: mode})}
   end
 
-  def handle_event("set_spread_mode", %{"mode" => mode}, socket)
-      when mode in ~w(none single odd even) do
+  defp next_scroll_mode(:vertical), do: :horizontal
+  defp next_scroll_mode(:horizontal), do: :wrapped
+  defp next_scroll_mode(:wrapped), do: :vertical
+
+  def handle_event("set_spread_mode", %{"spread_mode" => current}, socket)
+      when current in ~w(none single odd even) do
+    mode = next_spread_mode(String.to_existing_atom(current))
     {:noreply,
      socket
-     |> assign(:spread_mode, String.to_existing_atom(mode))
+     |> assign(:spread_mode, mode)
      |> push_event("set_spread_mode", %{mode: mode})}
   end
 
-  def handle_event("set_fit_mode", %{"mode" => mode}, socket)
-      when mode in ~w(fit_page fit_width actual_size) do
+  defp next_spread_mode(:none), do: :single
+  defp next_spread_mode(:single), do: :odd
+  defp next_spread_mode(:odd), do: :even
+  defp next_spread_mode(:even), do: :none
+
+  def handle_event("set_fit_mode", %{"fit_mode" => current}, socket)
+      when current in ~w(fit_page fit_width actual_size) do
+    mode = next_fit_mode(String.to_existing_atom(current))
     {:noreply,
      socket
-     |> assign(:fit_mode, String.to_existing_atom(mode))
+     |> assign(:fit_mode, mode)
      |> push_event("set_fit_mode", %{mode: mode})}
   end
+
+  defp next_fit_mode(:fit_page), do: :fit_width
+  defp next_fit_mode(:fit_width), do: :actual_size
+  defp next_fit_mode(:actual_size), do: :fit_page
 
   def handle_event("document_error", %{"message" => msg}, socket) do
     {:noreply, put_flash(socket, :error, "Document error: #{msg}")}
@@ -1833,7 +1849,35 @@ defmodule QuireWeb.WorkspaceLive do
   @view_toggle_tabs ~w(edit comment secure forms esign ocr)
 
   defp ribbon_strip(assigns) do
-    assigns = assign(assigns, :view_toggle_tabs, @view_toggle_tabs)
+    assigns =
+      assigns
+      |> assign(:view_toggle_tabs, @view_toggle_tabs)
+      |> assign_new(:show_ocr_options, fn -> false end)
+      |> assign_new(:ocr_running, fn -> false end)
+      |> assign_new(:image_ocr_uploading, fn -> false end)
+      |> assign_new(:image_ocr_error, fn -> nil end)
+      |> assign_new(:show_camera_capture, fn -> false end)
+      |> assign_new(:scan_progress, fn -> nil end)
+      |> assign_new(:scan_error, fn -> nil end)
+      |> assign_new(:ocr_progress, fn -> nil end)
+      |> assign_new(:whiteout_mode_active, fn -> false end)
+      |> assign_new(:builtin_stamps, fn -> [] end)
+      |> assign_new(:selected_stamp_id, fn -> nil end)
+      |> assign_new(:attachment_mode_active, fn -> false end)
+      |> assign_new(:callout_mode_active, fn -> false end)
+      |> assign_new(:stamp_mode_active, fn -> false end)
+      |> assign_new(:measure_mode_active, fn -> false end)
+      |> assign_new(:active_measure_mode, fn -> nil end)
+      |> assign_new(:calibrating, fn -> false end)
+      |> assign_new(:convert_running, fn -> false end)
+      |> assign_new(:convert_format, fn -> nil end)
+      |> assign_new(:convert_error, fn -> nil end)
+      |> assign_new(:has_form_fields, fn -> false end)
+      |> assign_new(:translate_source, fn -> "detect" end)
+      |> assign_new(:translate_target, fn -> "en" end)
+      |> assign_new(:translate_mode, fn -> "overlay" end)
+      |> assign_new(:translate_provider_label, fn -> nil end)
+      |> assign_new(:translate_results, fn -> [] end)
 
     ~H"""
     <div

@@ -28,21 +28,6 @@ defmodule QuireWeb.Chrome.StatusBar do
   attr :progress_label, :string, default: nil
   attr :class, :string, default: nil
 
-  defp next_scroll_mode(:vertical), do: "horizontal"
-  defp next_scroll_mode(:horizontal), do: "wrapped"
-  defp next_scroll_mode(:wrapped), do: "vertical"
-  defp next_scroll_mode(_), do: "vertical"
-
-  defp next_spread_mode(:none), do: "odd"
-  defp next_spread_mode(:odd), do: "even"
-  defp next_spread_mode(:even), do: "none"
-  defp next_spread_mode(_), do: "none"
-
-  defp next_fit_mode(:fit_page), do: "fit_width"
-  defp next_fit_mode(:fit_width), do: "actual_size"
-  defp next_fit_mode(:actual_size), do: "fit_page"
-  defp next_fit_mode(_), do: "fit_page"
-
   def status_bar(assigns) do
     ~H"""
     <div class={[
@@ -80,7 +65,7 @@ defmodule QuireWeb.Chrome.StatusBar do
         <button
           type="button"
           phx-click="set_scroll_mode"
-          phx-value-mode={next_scroll_mode(@scroll_mode)}
+          phx-value-scroll_mode={@scroll_mode}
           class={[
             "p-1 rounded text-xs transition-colors",
             @scroll_mode != :vertical && "bg-accent/10 text-accent"
@@ -93,7 +78,7 @@ defmodule QuireWeb.Chrome.StatusBar do
         <button
           type="button"
           phx-click="set_spread_mode"
-          phx-value-mode={next_spread_mode(@spread_mode)}
+          phx-value-spread_mode={@spread_mode}
           class={[
             "p-1 rounded text-xs transition-colors",
             @spread_mode != :none && "bg-accent/10 text-accent"
@@ -106,7 +91,7 @@ defmodule QuireWeb.Chrome.StatusBar do
         <button
           type="button"
           phx-click="set_fit_mode"
-          phx-value-mode={next_fit_mode(@fit_mode)}
+          phx-value-fit_mode={@fit_mode}
           class={[
             "p-1 rounded text-xs transition-colors",
             @fit_mode != :fit_page && "bg-accent/10 text-accent"
