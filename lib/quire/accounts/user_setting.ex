@@ -32,6 +32,7 @@ defmodule Quire.Accounts.UserSetting do
     field :autosave_enabled, :boolean, default: true
     field :whiteout_warning_dismissed, :boolean, default: false
     field :highlight_fields, :boolean, default: false
+    field :scripting_enabled, :boolean, default: false
 
     timestamps()
   end
@@ -57,7 +58,8 @@ defmodule Quire.Accounts.UserSetting do
       :measurement_unit,
       :autosave_enabled,
       :whiteout_warning_dismissed,
-      :highlight_fields
+      :highlight_fields,
+      :scripting_enabled
     ])
     |> validate_inclusion(:theme, ["system", "light", "dark"])
     |> validate_number(:default_zoom, greater_than: 0.1, less_than: 5.0)

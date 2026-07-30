@@ -232,6 +232,14 @@ defmodule QuireWeb.WorkspaceLiveTest do
     end
   end
 
+  describe "scripting sandbox (pdf-fkm)" do
+    test "scripting_enabled defaults to false in user_settings", %{conn: _conn} do
+      user = Quire.AccountsFixtures.user_fixture()
+      settings = Quire.Accounts.get_user_settings(user.id)
+      refute settings.scripting_enabled, "scripting must default to off (§9.5)"
+    end
+  end
+
   describe "layers panel (T-050)" do
     @rail_button ~s{button[phx-click="toggle_panel"][phx-value-side="left"][phx-value-item="layers"][aria-label="Layers"]}
 

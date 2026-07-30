@@ -22,32 +22,19 @@ const PdfViewerHook = {
     this._activeEditor = null;
     this._formatBar = null;
     this._formatBarAutoHideHandler = null;
+    this._scriptingEnabled = false;
+    this._scriptingManager = null;
 
     // Initialise pdf.js (idempotent)
     init().then(() => {
       const container = this.el.querySelector("#pdf-viewer-container");
       if (!container) return;
-      const { viewer, eventBus, linkService, findController } =
-        createViewer(container);
 
-      this._viewer = viewer;
-      this._eventBus = eventBus;
-      this._linkService = linkService;
-      this._findController = findController;
-
-      this._wireEvents();
-
-      // Expose viewer and eventBus on the element so sibling hooks
-      // (e.g. AnnotEditHook T-102) can access them.
-      this.el._pdfViewer = this._viewer;
-      this.el._eventBus = this._eventBus;
-
-      // Initialise the floating format bar (T-090)
-      this._initFormatBar();
+      this._createViewerInstance(container);
 
       // If server pre-set a document URL, open it
       const docUrl = this.el.dataset.documentUrl;
-      if (docUrl && container) {
+      if (docUrl) {
         this._openDocument(docUrl);
       }
     });
@@ -97,6 +84,27 @@ const PdfViewerHook = {
 
     this.handleEvent("close_document", () => {
       this._closeDocument();
+    });
+
+    // Toggle scripting sandbox (pdf-fkm)
+    this.handleEvent("set_scripting", ({ enabled }) => {
+      const was = this._scriptingEnabled;
+      this._scriptingEnabled = !!enabled;
+      if (was !== this._scriptingEnabled && this._pdfDocument) {
+        // Document is open — close and reopen so scripting manager is
+        // created or destroyed and page views re-bind JS actions.
+        this._closeDocument();
+        const docUrl = this.el.dataset.documentUrl;
+        if (docUrl) {
+          // Re-create the viewer with the new scripting setting
+          const container = this.el.querySelector("#pdf-viewer-container");
+          if (container) {
+            this._destroyViewer();
+            this._createViewerInstance(container);
+            this._openDocument(docUrl);
+          }
+        }
+      }
     });
 
     // Enter/esgin field placement mode (T-147)
@@ -314,7 +322,7 @@ const PdfViewerHook = {
     if (!this._viewer) return;
     this._closeDocument();
 
-    const opts = {};
+    const opts = { scriptingEnabled: this._scriptingEnabled };
     if (password) opts.password = password;
 
     openDocument(url, opts)
@@ -335,6 +343,51 @@ const PdfViewerHook = {
     if (this._viewer) this._viewer.setDocument(null);
     if (this._findController) this._findController.setDocument(null);
     this._pdfDocument = null;
+  },
+
+  /**
+   * Clean up and null out the current viewer and its dependencies
+   * (called before re-creating with different options).
+   */
+  _destroyViewer() {
+    if (this._formatBarAutoHideHandler) {
+      document.removeEventListener("pointerdown", this._formatBarAutoHideHandler, true);
+      this._formatBarAutoHideHandler = null;
+    }
+    this._hideFormatBar();
+    this._viewer = null;
+    this._eventBus = null;
+    this._linkService = null;
+    this._findController = null;
+    this._scriptingManager = null;
+    this._formatBar = null;
+    this._uiManager = null;
+    this._activeEditor = null;
+  },
+
+  /**
+   * Create a fresh viewer instance inside an already-cleaned container.
+   * Called by set_scripting toggle to re-create the viewer with a
+   * different scripting mode.
+   */
+  _createViewerInstance(container) {
+    const { viewer, eventBus, linkService, findController, scriptingManager } =
+      createViewer(container, { scriptingEnabled: this._scriptingEnabled });
+
+    this._viewer = viewer;
+    this._eventBus = eventBus;
+    this._linkService = linkService;
+    this._findController = findController;
+    this._scriptingManager = scriptingManager;
+
+    this._wireEvents();
+
+    // Re-expose on the element for sibling hooks
+    this.el._pdfViewer = this._viewer;
+    this.el._eventBus = this._eventBus;
+
+    // Re-init the format bar
+    this._initFormatBar();
   },
 
   // --- Floating format bar (T-090) ---

@@ -815,6 +815,22 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :layers, layers)}
   end
 
+  # ── Scripting toggle handler (pdf-fkm) ──────────────────────────────────
+
+  @impl true
+  def handle_event("toggle_scripting", %{"enabled" => enabled}, socket) do
+    enabled? = enabled in [true, "true"]
+
+    Quire.Accounts.update_user_settings(socket.assigns.current_user.id, %{
+      scripting_enabled: enabled?
+    })
+
+    {:noreply,
+     socket
+     |> assign(:scripting_enabled, enabled?)
+     |> push_event("set_scripting", %{enabled: enabled?})}
+  end
+
   # ── Annotation event handlers (T-107) ──────────────────────────────────
 
   @doc """
@@ -1605,7 +1621,12 @@ defmodule QuireWeb.WorkspaceLive do
     settings = Quire.Accounts.get_user_settings(user_id)
     dismissed = settings.whiteout_warning_dismissed
 
-    assign(socket, :whiteout_warning_dismissed, dismissed || false)
+    socket =
+      socket
+      |> assign(:whiteout_warning_dismissed, dismissed || false)
+      |> assign(:scripting_enabled, settings.scripting_enabled || false)
+
+    push_event(socket, "set_scripting", %{enabled: settings.scripting_enabled || false})
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────

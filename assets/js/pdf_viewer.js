@@ -75,6 +75,7 @@ export async function init() {
  * @param {string} url - URL to the PDF bytes
  * @param {object} [opts]
  * @param {string} [opts.password] - Document password for encrypted PDFs
+ * @param {boolean} [opts.scriptingEnabled=false] - Enable pdf.js scripting sandbox
  * @returns {Promise<object>} pdfjsLib.PDFDocumentProxy
  */
 export function openDocument(url, opts = {}) {
@@ -95,6 +96,11 @@ export function openDocument(url, opts = {}) {
     getDocumentParams.password = opts.password;
   }
 
+  // Enable form-field JS actions when the scripting sandbox is active (§9.5)
+  if (opts.scriptingEnabled) {
+    getDocumentParams.enableScripting = true;
+  }
+
   return _pdfjsLib.getDocument(getDocumentParams).promise;
 }
 
@@ -102,9 +108,11 @@ export function openDocument(url, opts = {}) {
  * Create a pdf.js PDFViewer inside a container element.
  *
  * @param {HTMLElement} container - The viewer container element
- * @returns {{ viewer: PDFViewer, eventBus: EventBus, linkService: PDFLinkService, findController: PDFFindController, scriptingManager: PDFScriptingManager }}
+ * @param {object} [options]
+ * @param {boolean} [options.scriptingEnabled=false] - Enable pdf.js scripting sandbox
+ * @returns {{ viewer: PDFViewer, eventBus: EventBus, linkService: PDFLinkService, findController: PDFFindController, scriptingManager: (PDFScriptingManager|null) }}
  */
-export function createViewer(container) {
+export function createViewer(container, { scriptingEnabled = false } = {}) {
   if (!_pdfjsLib) throw new Error("pdf.js not initialised — call init() first");
 
   const eventBus = new _EventBus();
@@ -117,13 +125,7 @@ export function createViewer(container) {
     linkService,
   });
 
-  const scriptingManager = new _PDFScriptingManager({
-    eventBus,
-    sandboxBundleSrc: SANDBOX_SRC,
-    wasmUrl: WASM_URL,
-  });
-
-  const viewer = new _PDFViewer({
+  const viewerOptions = {
     container,
     eventBus,
     linkService,
@@ -135,10 +137,25 @@ export function createViewer(container) {
     enableSignatureEditor: true,
     useOnlyCssZoom: false,
     maxCanvasPixels: 4096 * 4096, // §14.1 budget
-  });
+  };
+
+  // Scripting manager and the viewer's enableScripting flag (default off per §9.5)
+  let scriptingManager = null;
+  if (scriptingEnabled) {
+    viewerOptions.enableScripting = true;
+    scriptingManager = new _PDFScriptingManager({
+      eventBus,
+      sandboxBundleSrc: SANDBOX_SRC,
+      wasmUrl: WASM_URL,
+    });
+  }
+
+  const viewer = new _PDFViewer(viewerOptions);
 
   linkService.setViewer(viewer);
-  scriptingManager.setViewer(viewer);
+  if (scriptingManager) {
+    scriptingManager.setViewer(viewer);
+  }
   findController.setDocument(null);
 
   return { viewer, eventBus, linkService, findController, scriptingManager };  
