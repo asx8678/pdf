@@ -80,7 +80,7 @@ defmodule QuireWeb.WorkspaceLiveTest do
       assert has_element?(lv, @reset_btn)
       assert has_element?(lv, ~s{#{@reset_btn}[disabled]})
       assert has_element?(lv, ~s{#{@reset_btn}[aria-disabled="true"]})
-      refute has_element?(lv, @reset_btn, "Reset Form")
+      assert has_element?(lv, @reset_btn, "Reset Form")
     end
   end
 
