@@ -13,6 +13,10 @@ defmodule QuireWeb.Chrome.TitleBar do
   attr :document_title, :string, default: nil
   attr :notifications_pending, :boolean, default: false
   attr :current_user, :map, default: nil
+  attr :dirty, :boolean, default: false
+  attr :on_save, :any, default: nil
+  attr :on_save_as, :any, default: nil
+  attr :on_email, :any, default: nil
 
   def title_bar(assigns) do
     ~H"""
@@ -24,29 +28,64 @@ defmodule QuireWeb.Chrome.TitleBar do
           <span class="text-accent-fg font-bold text-lg">Q</span>
         </div>
         <!-- 24px icon row -->
-        <button aria-label="Undo" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" disabled>
+        <button
+          aria-label="Undo"
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          disabled
+        >
           <.icon name="hero-arrow-uturn-left" class="size-6 text-gray-500" />
         </button>
-        <button aria-label="Redo" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" disabled>
+        <button
+          aria-label="Redo"
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          disabled
+        >
           <.icon name="hero-arrow-uturn-right" class="size-6 text-gray-500" />
         </button>
-        <button aria-label="Open" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="Open"
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-folder-open" class="size-6 text-gray-600 dark:text-gray-300" />
         </button>
-        <button aria-label="Save" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" disabled>
-          <.icon name="hero-cloud-arrow-down" class="size-6 text-gray-500" />
+        <button
+          aria-label="Save"
+          phx-click={if @dirty, do: @on_save}
+          disabled={!@dirty}
+          class={[
+            "p-1.5 rounded transition-colors",
+            if(@dirty,
+              do: "hover:bg-gray-100 dark:hover:bg-gray-700",
+              else: "opacity-50"
+            )
+          ]}
+        >
+          <.icon name="hero-cloud-arrow-down" class="size-6 text-gray-600 dark:text-gray-300" />
         </button>
-        <button aria-label="Print" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="Print"
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-printer" class="size-6 text-gray-600 dark:text-gray-300" />
         </button>
-        <button aria-label="Email" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="Email"
+          phx-click={@on_email}
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-envelope" class="size-6 text-gray-600 dark:text-gray-300" />
         </button>
         <div class="w-px h-6 bg-chrome-border mx-1" />
-        <button aria-label="New document" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="New document"
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-plus" class="size-6 text-gray-600 dark:text-gray-300" />
         </button>
-        <button aria-label="Customise QAT" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="Customise QAT"
+          class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-chevron-down" class="size-4 text-gray-500" />
         </button>
       </div>
@@ -62,7 +101,10 @@ defmodule QuireWeb.Chrome.TitleBar do
       <div class="flex items-center gap-1">
         <!-- Account avatar -->
         <div class="relative">
-          <button aria-label="Account" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <button
+            aria-label="Account"
+            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
             <.icon name="hero-user-circle" class="size-6 text-gray-600 dark:text-gray-300" />
           </button>
           <div
@@ -72,13 +114,22 @@ defmodule QuireWeb.Chrome.TitleBar do
         </div>
         <!-- Window controls (web: hidden, desktop: shown) -->
         <div class="hidden xl:flex items-center">
-          <button aria-label="Minimise" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <button
+            aria-label="Minimise"
+            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
             <.icon name="hero-minus" class="size-4 text-gray-500" />
           </button>
-          <button aria-label="Maximise" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+          <button
+            aria-label="Maximise"
+            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
             <.icon name="hero-stop" class="size-4 text-gray-500" />
           </button>
-          <button aria-label="Close" class="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900 transition-colors group">
+          <button
+            aria-label="Close"
+            class="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900 transition-colors group"
+          >
             <.icon name="hero-x-mark" class="size-4 text-gray-500 group-hover:text-red-600" />
           </button>
         </div>

@@ -46,7 +46,8 @@ defmodule QuireWeb.Shared.ColorPicker do
             else: "border-chrome-border dark:border-gray-600 hover:scale-110"
           ),
           if(color == "transparent",
-            do: "bg-white bg-[linear-gradient(45deg,#ccc_25%,transparent_25%,transparent_75%,#ccc_75%)] bg-[length:4px_4px]"
+            do:
+              "bg-white bg-[linear-gradient(45deg,#ccc_25%,transparent_25%,transparent_75%,#ccc_75%)] bg-[length:4px_4px]"
           )
         ]}
       />

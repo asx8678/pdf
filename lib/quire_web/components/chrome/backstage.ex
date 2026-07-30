@@ -56,6 +56,7 @@ defmodule QuireWeb.Chrome.Backstage do
     ~H"""
     <div
       :if={@open}
+      id="backstage-overlay"
       class="fixed inset-0 z-[100] bg-chrome-white dark:bg-gray-900 flex select-none"
       role="dialog"
       aria-modal="true"
@@ -80,7 +81,7 @@ defmodule QuireWeb.Chrome.Backstage do
             :for={item <- @rail_items}
             item={item}
             active={@active_view == item.id}
-            disabled={item.id == "save" && !@dirty}
+            disabled={item.id in ~w(save save-as save-optimized) && !@dirty}
             on_click={@on_select}
           />
         </nav>
@@ -209,18 +210,23 @@ defmodule QuireWeb.Chrome.Backstage do
     <div class="flex-1 flex items-center justify-center">
       <div class="text-center max-w-sm">
         <.icon
-          name={case @view do
-            "recent" -> "hero-clock"
-            "add-account" -> "hero-plus-circle"
-            _ -> "hero-folder-open"
-          end}
+          name={
+            case @view do
+              "recent" -> "hero-clock"
+              "add-account" -> "hero-plus-circle"
+              _ -> "hero-folder-open"
+            end
+          }
           class="size-16 text-gray-200 dark:text-gray-700 mx-auto mb-4"
         />
         <p class="text-sm text-gray-400 dark:text-gray-500">
           <%= case @view do %>
-            <% "recent" -> %>Recent documents will appear here
-            <% "add-account" -> %>Connect a cloud account to browse files
-            <% _ -> %>Select a source or browse your computer
+            <% "recent" -> %>
+              Recent documents will appear here
+            <% "add-account" -> %>
+              Connect a cloud account to browse files
+            <% _ -> %>
+              Select a source or browse your computer
           <% end %>
         </p>
       </div>

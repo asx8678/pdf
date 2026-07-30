@@ -5,10 +5,22 @@
     phx-keydown="keydown"
     phx-keyup="keyup"
     tabindex="-1"
-    class="flex flex-col flex-1 min-h-0"
+    aria-label="Workspace"
+    aria-hidden={@backstage_open}
   >
-    <.title_bar document_title={@document_title} />
-    <.menu_bar active_tab={@active_tab} on_tab_click="select_tab" />
+    <.title_bar
+      document_title={@document_title}
+      dirty={Enum.any?(@documents, & &1.dirty)}
+      on_save="save_document"
+      on_save_as="save_document_as"
+      on_email="open_email_compose"
+    />
+    <.menu_bar
+      active_tab={@active_tab}
+      on_tab_click="select_tab"
+      on_hamburger_click="open_backstage"
+      backstage_open={@backstage_open}
+    />
     <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
     <.document_tabs documents={@documents} active_id={@active_document_id} />
 
@@ -45,6 +57,13 @@
       dirty={Enum.any?(@documents, & &1.dirty)}
       on_select="backstage_select"
       on_close="close_backstage"
+    />
+
+    <.email_compose
+      open={@show_email_compose}
+      document_title={@document_title}
+      on_close="close_email_compose"
+      on_send="send_email"
     />
 
     <.shortcuts_modal :if={@show_shortcuts} on_close="close_shortcuts" />

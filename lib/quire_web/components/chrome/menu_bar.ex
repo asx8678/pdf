@@ -28,6 +28,8 @@ defmodule QuireWeb.Chrome.MenuBar do
 
   attr :active_tab, :string, default: "view"
   attr :on_tab_click, :any, default: nil
+  attr :on_hamburger_click, :any, default: nil
+  attr :backstage_open, :boolean, default: false
 
   def menu_bar(assigns) do
     assigns = assign(assigns, :tabs, @tabs)
@@ -35,10 +37,19 @@ defmodule QuireWeb.Chrome.MenuBar do
     ~H"""
     <div class="chrome-menubar flex items-center px-2 bg-chrome-white border-b border-chrome-border select-none">
       <!-- Left: hamburger + home -->
-      <button aria-label="Backstage" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+      <button
+        aria-label="Backstage"
+        aria-expanded={@backstage_open}
+        aria-controls="backstage-overlay"
+        phx-click={@on_hamburger_click}
+        class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+      >
         <.icon name="hero-bars-3" class="size-5 text-gray-600 dark:text-gray-300" />
       </button>
-      <button aria-label="Home" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+      <button
+        aria-label="Home"
+        class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+      >
         <.icon name="hero-home" class="size-5 text-gray-600 dark:text-gray-300" />
       </button>
 
@@ -54,7 +65,8 @@ defmodule QuireWeb.Chrome.MenuBar do
               "relative flex items-center gap-1.5 h-full px-4 text-sm transition-colors",
               if(tab.id == @active_tab,
                 do: "text-accent font-medium",
-                else: "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
+                else:
+                  "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 rounded"
               )
             ]}
           >
@@ -72,10 +84,16 @@ defmodule QuireWeb.Chrome.MenuBar do
         <button class="bg-gray-900 text-white text-xs font-medium px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors whitespace-nowrap">
           Activate now
         </button>
-        <button aria-label="Help" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="Help"
+          class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-question-mark-circle" class="size-5 text-gray-500 dark:text-gray-400" />
         </button>
-        <button aria-label="Settings" class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <button
+          aria-label="Settings"
+          class="p-2 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
           <.icon name="hero-cog-6-tooth" class="size-5 text-gray-500 dark:text-gray-400" />
         </button>
       </div>

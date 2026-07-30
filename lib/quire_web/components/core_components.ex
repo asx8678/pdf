@@ -236,7 +236,10 @@ defmodule QuireWeb.CoreComponents do
           name={@name}
           value="true"
           checked={@checked}
-          class={@class || "size-4 shrink-0 rounded border-chrome-border accent-accent dark:border-gray-600"}
+          class={
+            @class ||
+              "size-4 shrink-0 rounded border-chrome-border accent-accent dark:border-gray-600"
+          }
           {@rest}
         />{@label}
       </label>

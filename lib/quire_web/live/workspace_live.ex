@@ -17,6 +17,7 @@ defmodule QuireWeb.WorkspaceLive do
 
   import QuireWeb.Chrome.Backstage, only: [backstage: 1]
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
+  import QuireWeb.Chrome.EmailCompose, only: [email_compose: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
   import QuireWeb.Chrome.ShortcutsModal, only: [shortcuts_modal: 1]
@@ -63,6 +64,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:show_shortcuts, false)
       |> assign(:backstage_open, false)
       |> assign(:backstage_view, nil)
+      |> assign(:show_email_compose, false)
 
     {:ok, socket}
   end
@@ -236,6 +238,8 @@ defmodule QuireWeb.WorkspaceLive do
       socket
       |> assign(:show_shortcuts, false)
       |> assign(:confirm_close_doc, nil)
+      |> assign(:backstage_open, false)
+      |> assign(:backstage_view, nil)
 
     {:noreply, socket}
   end
@@ -256,7 +260,23 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  # The rest of the §8.5 map — open/save/print, undo/redo, find,
+  # Ctrl/⌘S — save document
+  def handle_event("keydown", %{"key" => "s"} = params, socket) do
+    if params["ctrlKey"] || params["metaKey"] do
+      if params["shiftKey"] do
+        # ⌘⇧S — save as
+        {:noreply, assign(socket, :backstage_open, true) |> assign(:backstage_view, "save-as")}
+      else
+        # ⌘S — save
+        docs = Enum.map(socket.assigns.documents, &%{&1 | dirty: false})
+        {:noreply, assign(socket, :documents, docs)}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # The rest of the §8.5 map — open/print, undo/redo, find,
   # select-all, Delete, F11 and Alt+letter access keys — depends on a
   # loaded document, the undo stack or the ribbon (§9); those keypresses
   # fall through here until the features land.
@@ -270,6 +290,96 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("close_shortcuts", _params, socket) do
     {:noreply, assign(socket, :show_shortcuts, false)}
+  end
+
+  # ── Backstage event handlers (T-036) ─────────────────────────────────────
+
+  def handle_event("open_backstage", _params, socket) do
+    {:noreply, assign(socket, :backstage_open, true)}
+  end
+
+  def handle_event("close_backstage", _params, socket) do
+    {:noreply, socket |> assign(:backstage_open, false) |> assign(:backstage_view, nil)}
+  end
+
+  def handle_event("backstage_select", %{"view" => view}, socket) do
+    socket =
+      case view do
+        "exit" ->
+          socket
+          |> assign(:backstage_open, false)
+          |> assign(:backstage_view, nil)
+          |> push_navigate(to: ~p"/")
+
+        "save" ->
+          docs = Enum.map(socket.assigns.documents, &%{&1 | dirty: false})
+          assign(socket, :documents, docs)
+
+        "save-as" ->
+          assign(socket, :backstage_view, view)
+
+        "save-optimized" ->
+          docs = Enum.map(socket.assigns.documents, &%{&1 | dirty: false})
+          assign(socket, :documents, docs)
+
+        _ ->
+          assign(socket, :backstage_view, view)
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("backstage_upload", %{"file" => _file}, socket) do
+    # File upload from backstage Browse — T-044 document open pipeline lands here
+    {:noreply, socket}
+  end
+
+  # ── Save / Save as event handlers (T-037) ────────────────────────────────
+
+  def handle_event("save_document", _params, socket) do
+    # T-044: Materialise the journal into a new revision
+    # For now: mark all docs clean as a stub
+    docs = Enum.map(socket.assigns.documents, &%{&1 | dirty: false})
+    {:noreply, assign(socket, :documents, docs)}
+  end
+
+  def handle_event("save_document_as", _params, socket) do
+    # T-044: New documents row; web offers download + library copy
+    {:noreply, socket}
+  end
+
+  def handle_event("save_optimized", _params, socket) do
+    # T-044: Save then compress job; show size delta
+    {:noreply, socket}
+  end
+
+  def handle_event("save_and_close", _params, socket) do
+    # Save then close
+    docs = Enum.map(socket.assigns.documents, &%{&1 | dirty: false})
+    {id, _title} = socket.assigns.confirm_close_doc
+
+    socket =
+      socket
+      |> assign(:documents, docs)
+      |> assign(:confirm_close_doc, nil)
+      |> remove_doc(id)
+
+    {:noreply, socket}
+  end
+
+  # ── Email compose event handlers (T-198) ─────────────────────────────────
+
+  def handle_event("open_email_compose", _params, socket) do
+    {:noreply, assign(socket, :show_email_compose, true)}
+  end
+
+  def handle_event("close_email_compose", _params, socket) do
+    {:noreply, assign(socket, :show_email_compose, false)}
+  end
+
+  def handle_event("send_email", _params, socket) do
+    # T-198: Send via Swoosh; for Phase 1, just close the modal
+    {:noreply, assign(socket, :show_email_compose, false)}
   end
 
   # ── Pre-existing event handlers ──────────────────────────────────────────
@@ -376,13 +486,18 @@ defmodule QuireWeb.WorkspaceLive do
     ~H"""
     <.modal title="Unsaved changes" on_close="cancel_close" open={true}>
       <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-        "{@doc_title}" has unsaved changes. Close without saving?
+        "{@doc_title}" has unsaved changes.
       </p>
       <div class="flex justify-end gap-2">
-        <.button phx-click="cancel_close" variant="outline">Cancel</.button>
-        <.button phx-click="confirm_close" variant="primary" class="bg-red-500 hover:bg-red-600">
-          Close anyway
+        <.button phx-click="save_and_close" variant="primary">Save</.button>
+        <.button
+          phx-click="confirm_close"
+          variant="outline"
+          class="text-red-600 border-red-200 hover:bg-red-50"
+        >
+          Don't Save
         </.button>
+        <.button phx-click="cancel_close" variant="outline">Cancel</.button>
       </div>
     </.modal>
     """
@@ -407,6 +522,7 @@ defmodule QuireWeb.WorkspaceLive do
       class="chrome-ribbon flex items-center px-4 bg-chrome-white dark:bg-gray-800 border-b border-chrome-border dark:border-gray-600"
       role="toolbar"
       aria-label="Ribbon"
+      aria-orientation="horizontal"
     >
       <div
         :if={@active_tab in @view_toggle_tabs}

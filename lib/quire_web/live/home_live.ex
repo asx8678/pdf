@@ -18,15 +18,55 @@ defmodule QuireWeb.HomeLive do
 
   @tiles [
     %{id: "open", icon: "hero-folder-open", title: "Open PDF", desc: "Open a PDF file"},
-    %{id: "clipboard", icon: "hero-clipboard", title: "Clipboard to PDF", desc: "From clipboard content"},
-    %{id: "merge", icon: "hero-document-plus", title: "Merge files", desc: "Combine multiple PDFs"},
-    %{id: "convert", icon: "hero-arrow-right-on-rectangle", title: "Convert to PDF", desc: "From Word, Excel, images"},
-    %{id: "toword", icon: "hero-document-text", title: "PDF to Word", desc: "Convert PDF to Word format"},
-    %{id: "toexcel", icon: "hero-table-cells", title: "PDF to Excel", desc: "Convert PDF to Excel format"},
-    %{id: "comment", icon: "hero-chat-bubble-left-right", title: "Add comment", desc: "Annotate a PDF"},
-    %{id: "protect", icon: "hero-lock-closed", title: "Protect your PDF", desc: "Password & permissions"},
+    %{
+      id: "clipboard",
+      icon: "hero-clipboard",
+      title: "Clipboard to PDF",
+      desc: "From clipboard content"
+    },
+    %{
+      id: "merge",
+      icon: "hero-document-plus",
+      title: "Merge files",
+      desc: "Combine multiple PDFs"
+    },
+    %{
+      id: "convert",
+      icon: "hero-arrow-right-on-rectangle",
+      title: "Convert to PDF",
+      desc: "From Word, Excel, images"
+    },
+    %{
+      id: "toword",
+      icon: "hero-document-text",
+      title: "PDF to Word",
+      desc: "Convert PDF to Word format"
+    },
+    %{
+      id: "toexcel",
+      icon: "hero-table-cells",
+      title: "PDF to Excel",
+      desc: "Convert PDF to Excel format"
+    },
+    %{
+      id: "comment",
+      icon: "hero-chat-bubble-left-right",
+      title: "Add comment",
+      desc: "Annotate a PDF"
+    },
+    %{
+      id: "protect",
+      icon: "hero-lock-closed",
+      title: "Protect your PDF",
+      desc: "Password & permissions"
+    },
     %{id: "batch", icon: "hero-cog-6-tooth", title: "Batch", desc: "Chain operations on files"},
-    %{id: "customize", icon: "hero-adjustments-horizontal", title: "Customize", desc: "Reorder and hide tiles"}
+    %{
+      id: "customize",
+      icon: "hero-adjustments-horizontal",
+      title: "Customize",
+      desc: "Reorder and hide tiles"
+    }
   ]
 
   @fab_items [
@@ -210,7 +250,7 @@ defmodule QuireWeb.HomeLive do
       </div>
 
       <div class="flex items-center gap-2 mb-4">
-        <form phx-change="sort_changed">
+        <form id="sort-form" phx-change="sort_changed">
           <select
             name="sort_by"
             aria-label="Sort by"
@@ -282,7 +322,11 @@ defmodule QuireWeb.HomeLive do
             type="button"
             phx-click="toggle_tile"
             phx-value-id={tile.id}
-            aria-label={if MapSet.member?(@hidden_tiles, tile.id), do: "Show #{tile.title}", else: "Hide #{tile.title}"}
+            aria-label={
+              if MapSet.member?(@hidden_tiles, tile.id),
+                do: "Show #{tile.title}",
+                else: "Hide #{tile.title}"
+            }
             class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600"
           >
             <.icon
