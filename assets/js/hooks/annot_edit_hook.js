@@ -55,12 +55,23 @@ const FREE_TEXT_CALLOUT_MODES = new Set([
   "free_text_callout",
 ]);
 
+// Measure modes (T-108) — distance, perimeter, area. These reuse the
+// shape drawing infrastructure but render measurement labels and commit
+// computed values. Measurements are computed in PDF points per §14.3 then
+// scaled via calibration factor (stored in _calFactor / _calUnit).
+const MEASURE_MODES = new Set([
+  "measure_distance",
+  "measure_perimeter",
+  "measure_area",
+]);
+
 // All custom (non-native) modes combined for dispatch
 const CUSTOM_MODES = new Set([
   ...SHAPE_MODES,
   ...STAMP_MODES,
   ...FILE_ATTACHMENT_MODES,
   ...FREE_TEXT_CALLOUT_MODES,
+  ...MEASURE_MODES,
 ]);
 
 // AnnotationEditorType constants used for comparison
@@ -196,6 +207,12 @@ const AnnotEditHook = {
     this._calloutColor = "#000000";
     this._calloutFontSize = 12;
 
+    // Calibration state (T-108)
+    this._calFactor = 1.0;       // scale factor: real-world units per PDF point
+    this._calUnit = "pt";         // display unit label
+    this._calibrating = false;    // true when in calibration reference-line drawing mode
+    this._calRefLine = null;      // {x1,y1,x2,y2} in CSS pixels during calibration draw
+
     // Common SVG overlay reference shared by stamp/attachment/callout
     this._customSvg = null;
 
@@ -279,6 +296,37 @@ const AnnotEditHook = {
     this.handleEvent("set_callout_font_size", ({ size }) => {
       this._calloutFontSize = size;
     });
+
+    // Server-driven calibration data push (T-108)
+    this.handleEvent("set_calibration", ({ factor, unit }) => {
+      this._calFactor = factor;
+      this._calUnit = unit;
+    });
+
+    // Enter calibration reference-line drawing mode
+    this.handleEvent("begin_calibration_draw", () => {
+      this._calibrating = true;
+      this._calRefLine = null;
+      // Exit any pdf.js editor mode so canvases are interactive
+      try {
+        this._viewer.annotationEditorMode = { mode: TYPE_NONE };
+      } catch (_) { /* ignore */ }
+      this._ensureCustomSvg();
+      this._bindCalibrationEvents();
+    });
+
+    // Cancel calibration mode
+    this.handleEvent("cancel_calibration_draw", () => {
+      this._calibrating = false;
+      this._calRefLine = null;
+      this._clearCustomSvg();
+      this._unbindCalibrationEvents();
+    });
+
+    // Server-driven measure unit update (without recalibrating)
+    this.handleEvent("set_measure_unit", ({ unit }) => {
+      this._calUnit = unit;
+    });
   },
 
   destroyed() {
@@ -287,6 +335,7 @@ const AnnotEditHook = {
     this._teardownStamp();
     this._teardownAttachment();
     this._teardownCallout();
+    this._unbindCalibrationEvents();
     this._cleanupCustomSvg();
     if (this._eventBus && this._onModeChanged) {
       try {
@@ -373,7 +422,7 @@ const AnnotEditHook = {
     this._deactivateAttachmentMode();
     this._deactivateCalloutMode();
 
-    // Handle custom (non-native) modes: shapes, stamps, attachment, callout.
+    // Handle custom (non-native) modes: shapes, stamps, attachment, callout, measures.
     if (CUSTOM_MODES.has(modeStr)) {
       if (SHAPE_MODES.has(modeStr)) {
         this._activateShapeMode(modeStr);
@@ -383,6 +432,8 @@ const AnnotEditHook = {
         this._activateAttachmentMode();
       } else if (FREE_TEXT_CALLOUT_MODES.has(modeStr)) {
         this._activateCalloutMode();
+      } else if (MEASURE_MODES.has(modeStr)) {
+        this._activateMeasureMode(modeStr);
       }
       return;
     }
@@ -462,6 +513,226 @@ const AnnotEditHook = {
     this._shapeCurrent = null;
     this._shapeVertices = [];
     this._shapePageIndex = null;
+  },
+
+  /* ── measure modes (T-108) ───────────────────────────────────────── */
+
+  /**
+   * Activate a measurement mode. Reuses the shape drawing infrastructure
+   * but renders measurement labels and commits computed values.
+   * @param {string} mode - "measure_distance", "measure_perimeter", "measure_area"
+   */
+  _activateMeasureMode(mode) {
+    // Toggle off if already in this measure mode.
+    if (this._shapeMode === mode) {
+      this._deactivateMeasureMode();
+      return;
+    }
+
+    // Cancel any previous shape/measure.
+    this._cancelShape();
+
+    this._shapeMode = mode;
+    this._shapeState = "idle";
+    this._shapeVertices = [];
+
+    // Exit pdf.js annotation editor mode.
+    try {
+      this._viewer.annotationEditorMode = { mode: TYPE_NONE };
+    } catch (_) { /* ignore */ }
+
+    // Build SVG overlay (shared with shape drawing).
+    this._ensureShapeSvg();
+
+    // Bind mouse/touch handlers (reuses shape events).
+    this._bindShapeEvents();
+
+    this.pushEvent("annot_mode_changed", { mode: 0 });
+  },
+
+  /** Deactivate measure mode without committing. */
+  _deactivateMeasureMode() {
+    this._cancelShape();
+    this._cleanupShapeSvg();
+    this._shapeMode = null;
+  },
+
+  /* ── calibration drawing (T-108) ──────────────────────────────────── */
+
+  /** Bind calibration reference-line drawing events. */
+  _bindCalibrationEvents() {
+    this._unbindCalibrationEvents();
+
+    const container = this.el.querySelector("#pdf-viewer-container") ||
+                      this.el;
+
+    const handlers = {
+      mousedown: (e) => this._onCalPointerDown(e),
+      mousemove: (e) => this._onCalPointerMove(e),
+      mouseup: (e) => this._onCalPointerUp(e),
+    };
+
+    for (const [event, handler] of Object.entries(handlers)) {
+      container.addEventListener(event, handler, { passive: false });
+    }
+
+    this._calBind = { container, handlers };
+  },
+
+  _unbindCalibrationEvents() {
+    if (!this._calBind) return;
+    const { container, handlers } = this._calBind;
+    for (const [event, handler] of Object.entries(handlers)) {
+      container.removeEventListener(event, handler);
+    }
+    this._calBind = null;
+  },
+
+  _onCalPointerDown(e) {
+    if (!this._calibrating) return;
+    e.preventDefault();
+    const pos = this._shapePointerPos(e);
+    this._calRefLine = { x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y, pageIndex: pos.pageIndex };
+  },
+
+  _onCalPointerMove(e) {
+    if (!this._calibrating || !this._calRefLine) return;
+    e.preventDefault();
+    const pos = this._shapePointerPos(e);
+    this._calRefLine.x2 = pos.x;
+    this._calRefLine.y2 = pos.y;
+    this._renderCalibrationLine();
+  },
+
+  _onCalPointerUp(e) {
+    if (!this._calibrating || !this._calRefLine) return;
+    e.preventDefault();
+
+    // Draw final line
+    const pos = this._shapePointerPos(e);
+    this._calRefLine.x2 = pos.x;
+    this._calRefLine.y2 = pos.y;
+    this._renderCalibrationLine();
+
+    // Compute line length in PDF points
+    const rl = this._calRefLine;
+    const pdfDist = this._measurePdfDistance(
+      { x: rl.x1, y: rl.y1 },
+      { x: rl.x2, y: rl.y2 },
+      rl.pageIndex
+    );
+
+    // Notify server that a reference line was drawn
+    this.pushEvent("calibration_line_drawn", {
+      pdfLength: pdfDist,
+      pageIndex: rl.pageIndex,
+    });
+  },
+
+  /** Render the calibration reference line preview. */
+  _renderCalibrationLine() {
+    this._clearCustomSvg();
+    if (!this._customSvg || !this._calRefLine) return;
+
+    const svg = this._customSvg;
+    const ns = "http://www.w3.org/2000/svg";
+    const rl = this._calRefLine;
+
+    // Reference line
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", rl.x1);
+    line.setAttribute("y1", rl.y1);
+    line.setAttribute("x2", rl.x2);
+    line.setAttribute("y2", rl.y2);
+    line.setAttribute("stroke", "#dc2626");
+    line.setAttribute("stroke-width", "2");
+    line.setAttribute("stroke-dasharray", "6,3");
+    svg.appendChild(line);
+
+    // Endpoint dots
+    for (const [cx, cy] of [[rl.x1, rl.y1], [rl.x2, rl.y2]]) {
+      const dot = document.createElementNS(ns, "circle");
+      dot.setAttribute("cx", cx);
+      dot.setAttribute("cy", cy);
+      dot.setAttribute("r", "4");
+      dot.setAttribute("fill", "#dc2626");
+      svg.appendChild(dot);
+    }
+
+    // Length label at midpoint
+    const mx = (rl.x1 + rl.x2) / 2;
+    const my = (rl.y1 + rl.y2) / 2;
+
+    const dx = rl.x2 - rl.x1;
+    const dy = rl.y2 - rl.y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const label = `${Math.round(len)} pt`;
+
+    const text = document.createElementNS(ns, "text");
+    text.setAttribute("x", mx);
+    text.setAttribute("y", my - 10);
+    text.setAttribute("fill", "#dc2626");
+    text.setAttribute("font-size", "12px");
+    text.setAttribute("font-family", "sans-serif");
+    text.setAttribute("text-anchor", "middle");
+    text.setAttribute("font-weight", "bold");
+    text.textContent = label;
+    svg.appendChild(text);
+  },
+
+  /**
+   * Format a measurement value for the display label.
+   * Uses the current calibration factor and display unit.
+   */
+  _formatMeas(valuePdfPoints) {
+    if (this._calUnit === "pt") {
+      const v = Math.round(valuePdfPoints * 10) / 10;
+      return `${v} pt`;
+    }
+    const scaled = valuePdfPoints * this._calFactor;
+    // Format based on unit magnitude
+    let decimals;
+    if (this._calUnit === "mm") decimals = 1;
+    else if (this._calUnit === "cm") decimals = 2;
+    else if (this._calUnit === "inches" || this._calUnit === "in") decimals = 2;
+    else if (this._calUnit === "m") decimals = 3;
+    else decimals = 1;
+    const v = scaled.toFixed(decimals);
+    return `${v} ${this._calUnit}`;
+  },
+
+  /**
+   * Get the current page viewport for coordinate conversion.
+   * Falls back to null if unavailable.
+   */
+  _getViewport(pageIndex) {
+    if (!this._viewer) return null;
+    const pages = this._viewer._pages;
+    if (!pages || !pages[pageIndex]) return null;
+    const pv = pages[pageIndex];
+    return pv.viewport || null;
+  },
+
+  /**
+   * Convert a CSS pixel position to PDF points using the page viewport.
+   */
+  _cssToPdfPoint(x, y, pageIndex) {
+    const vp = this._getViewport(pageIndex);
+    if (!vp) return [x, y];
+    const pt = vp.convertToPdfPoint(x, y);
+    return pt; // [pdfX, pdfY]
+  },
+
+  /**
+   * Compute the distance between two CSS pixel points in PDF points
+   * (scaled to the measurement unit via calibration).
+   */
+  _measurePdfDistance(p1, p2, pageIndex) {
+    const [px1, py1] = this._cssToPdfPoint(p1.x, p1.y, pageIndex);
+    const [px2, py2] = this._cssToPdfPoint(p2.x, p2.y, pageIndex);
+    const dx = px2 - px1;
+    const dy = py2 - py1;
+    return Math.sqrt(dx * dx + dy * dy);
   },
 
   /**
@@ -704,7 +975,8 @@ const AnnotEditHook = {
       case "line":
       case "arrow":
       case "double_arrow":
-      case "dimension": {
+      case "dimension":
+      case "measure_distance": {
         this._renderLineShape(svg, ns);
         break;
       }
@@ -718,14 +990,16 @@ const AnnotEditHook = {
       }
       case "polygon":
       case "cloud":
-      case "polyline": {
+      case "polyline":
+      case "measure_perimeter":
+      case "measure_area": {
         this._renderVertexShape(svg, ns);
         break;
       }
     }
   },
 
-  /** Render a line/arrow based shape (line, arrow, double_arrow, dimension). */
+  /** Render a line/arrow based shape (line, arrow, double_arrow, dimension, measure_distance). */
   _renderLineShape(svg, ns) {
     const s = this._shapeStart;
     const c = this._shapeCurrent || s;
@@ -733,6 +1007,7 @@ const AnnotEditHook = {
     const strokeW = this._strokeWidth;
     const color = this._strokeColor;
     const opacity = this._shapeOpacity;
+    const isMeasureDist = this._shapeMode === "measure_distance";
 
     // Main line
     const line = document.createElementNS(ns, "line");
@@ -759,6 +1034,47 @@ const AnnotEditHook = {
         // Arrowhead at start
         this._addArrowhead(svg, ns, s.x, s.y, angle + Math.PI, headLen, color, opacity);
       }
+    }
+
+    if (isMeasureDist) {
+      // Measurement label at line midpoint
+      const midX = (s.x + c.x) / 2;
+      const midY = (s.y + c.y) / 2;
+      const perpAngle = angle + Math.PI / 2;
+      const extOffset = 14;
+
+      // Compute distance in PDF points and format
+      const pdfDist = this._measurePdfDistance(s, c, this._shapePageIndex);
+      const label = this._formatMeas(pdfDist);
+
+      // Label background pill
+      const labelW = label.length * 6 + 10;
+      const labelH = 18;
+      const lx = midX + Math.cos(perpAngle) * extOffset - labelW / 2;
+      const ly = midY + Math.sin(perpAngle) * extOffset - labelH / 2;
+
+      const bg = document.createElementNS(ns, "rect");
+      bg.setAttribute("x", lx);
+      bg.setAttribute("y", ly);
+      bg.setAttribute("width", labelW);
+      bg.setAttribute("height", labelH);
+      bg.setAttribute("rx", "4");
+      bg.setAttribute("fill", "rgba(255,255,255,0.9)");
+      bg.setAttribute("stroke", color);
+      bg.setAttribute("stroke-width", "1");
+      bg.setAttribute("opacity", opacity);
+      svg.appendChild(bg);
+
+      const text = document.createElementNS(ns, "text");
+      text.setAttribute("x", midX + Math.cos(perpAngle) * extOffset);
+      text.setAttribute("y", midY + Math.sin(perpAngle) * extOffset + 4);
+      text.setAttribute("fill", color);
+      text.setAttribute("font-size", "11px");
+      text.setAttribute("opacity", opacity);
+      text.setAttribute("font-family", "sans-serif");
+      text.setAttribute("text-anchor", "middle");
+      text.textContent = label;
+      svg.appendChild(text);
     }
 
     if (this._shapeMode === "dimension") {
@@ -888,8 +1204,12 @@ const AnnotEditHook = {
     const verts = this._shapeVertices;
     if (verts.length === 0) return;
 
-    const isClosed = this._shapeMode === "polygon" || this._shapeMode === "cloud";
+    const isClosed = this._shapeMode === "polygon" || this._shapeMode === "cloud" ||
+                     this._shapeMode === "measure_perimeter" || this._shapeMode === "measure_area";
     const isPolyline = this._shapeMode === "polyline";
+    const isMeasurePerimeter = this._shapeMode === "measure_perimeter";
+    const isMeasureArea = this._shapeMode === "measure_area";
+    const isMeasureVerts = isMeasurePerimeter || isMeasureArea;
 
     // Draw connecting lines
     if (verts.length >= 2) {
@@ -901,7 +1221,7 @@ const AnnotEditHook = {
         const poly = document.createElementNS(ns, "polygon");
         poly.setAttribute("points", pointsStr);
         poly.setAttribute("fill", this._fillColor);
-        poly.setAttribute("fill-opacity", this._shapeOpacity * 0.3);
+        poly.setAttribute("fill-opacity", isMeasureVerts ? 0.08 : this._shapeOpacity * 0.3);
         poly.setAttribute("stroke", this._strokeColor);
         poly.setAttribute("stroke-width", this._strokeWidth);
         poly.setAttribute("stroke-opacity", this._shapeOpacity);
@@ -914,6 +1234,120 @@ const AnnotEditHook = {
             const v1 = verts[i];
             const v2 = verts[(i + 1) % verts.length];
             this._addCloudScallops(svg, ns, v1, v2);
+          }
+        }
+
+        // Edge measurement labels for measure_perimeter and measure_area
+        if (isMeasureVerts) {
+          let totalPdfDist = 0;
+          for (let i = 0; i < verts.length; i++) {
+            const v1 = verts[i];
+            const v2 = verts[(i + 1) % verts.length];
+            const pdfDist = this._measurePdfDistance(v1, v2, this._shapePageIndex);
+            totalPdfDist += pdfDist;
+
+            // Label at edge midpoint, offset perpendicular
+            const mx = (v1.x + v2.x) / 2;
+            const my = (v1.y + v2.y) / 2;
+            const dx = v2.x - v1.x;
+            const dy = v2.y - v1.y;
+            const eAngle = Math.atan2(dy, dx);
+            const perpAngle = eAngle + Math.PI / 2;
+            const off = 12;
+
+            const edgeLabel = this._formatMeas(pdfDist);
+            const et = document.createElementNS(ns, "text");
+            et.setAttribute("x", mx + Math.cos(perpAngle) * off);
+            et.setAttribute("y", my + Math.sin(perpAngle) * off);
+            et.setAttribute("fill", this._strokeColor);
+            et.setAttribute("font-size", "9px");
+            et.setAttribute("opacity", this._shapeOpacity);
+            et.setAttribute("font-family", "sans-serif");
+            et.setAttribute("text-anchor", "middle");
+            et.textContent = edgeLabel;
+            svg.appendChild(et);
+          }
+
+          // Total label for perimeter, or area + perimeter for area
+          const centerX = verts.reduce((s, v) => s + v.x, 0) / verts.length;
+          const centerY = verts.reduce((s, v) => s + v.y, 0) / verts.length;
+
+          if (isMeasurePerimeter) {
+            // Show total perimeter at centroid
+            const totalLabel = "P: " + this._formatMeas(totalPdfDist);
+            const tb = document.createElementNS(ns, "rect");
+            const tw = totalLabel.length * 6 + 12;
+            const th = 20;
+            tb.setAttribute("x", centerX - tw / 2);
+            tb.setAttribute("y", centerY - th / 2);
+            tb.setAttribute("width", tw);
+            tb.setAttribute("height", th);
+            tb.setAttribute("rx", "4");
+            tb.setAttribute("fill", "rgba(255,255,255,0.92)");
+            tb.setAttribute("stroke", this._strokeColor);
+            tb.setAttribute("stroke-width", "1");
+            tb.setAttribute("opacity", this._shapeOpacity);
+            svg.appendChild(tb);
+
+            const tt = document.createElementNS(ns, "text");
+            tt.setAttribute("x", centerX);
+            tt.setAttribute("y", centerY + 4);
+            tt.setAttribute("fill", this._strokeColor);
+            tt.setAttribute("font-size", "11px");
+            tt.setAttribute("opacity", this._shapeOpacity);
+            tt.setAttribute("font-family", "sans-serif");
+            tt.setAttribute("font-weight", "bold");
+            tt.setAttribute("text-anchor", "middle");
+            tt.textContent = totalLabel;
+            svg.appendChild(tt);
+          }
+
+          if (isMeasureArea) {
+            // Compute area in PDF points via shoelace
+            const pts = verts.map(v => this._cssToPdfPoint(v.x, v.y, this._shapePageIndex));
+            let areaSum = 0;
+            for (let i = 0; i < pts.length; i++) {
+              const [x1, y1] = pts[i];
+              const [x2, y2] = pts[(i + 1) % pts.length];
+              areaSum += x1 * y2 - x2 * y1;
+            }
+            const areaPdf = Math.abs(areaSum) / 2;
+            const totalPdf = totalPdfDist;
+
+            const areaLabel = "A: " + this._formatMeas(areaPdf) + (this._calUnit === "pt" ? "²" : "²");
+            const periLabel = "P: " + this._formatMeas(totalPdf);
+
+            // Two-line label at centroid
+            const lines = [areaLabel, periLabel];
+            const maxW = Math.max(...lines.map(l => l.length)) * 6.5 + 12;
+            const lineH = 18;
+            const boxH = lines.length * lineH + 6;
+
+            const ab = document.createElementNS(ns, "rect");
+            ab.setAttribute("x", centerX - maxW / 2);
+            ab.setAttribute("y", centerY - boxH / 2);
+            ab.setAttribute("width", maxW);
+            ab.setAttribute("height", boxH);
+            ab.setAttribute("rx", "4");
+            ab.setAttribute("fill", "rgba(255,255,255,0.92)");
+            ab.setAttribute("stroke", this._strokeColor);
+            ab.setAttribute("stroke-width", "1");
+            ab.setAttribute("opacity", this._shapeOpacity);
+            svg.appendChild(ab);
+
+            for (let i = 0; i < lines.length; i++) {
+              const t = document.createElementNS(ns, "text");
+              t.setAttribute("x", centerX);
+              t.setAttribute("y", centerY - boxH / 2 + 14 + i * lineH);
+              t.setAttribute("fill", this._strokeColor);
+              t.setAttribute("font-size", "11px");
+              t.setAttribute("opacity", this._shapeOpacity);
+              t.setAttribute("font-family", "sans-serif");
+              t.setAttribute("font-weight", i === 0 ? "bold" : "normal");
+              t.setAttribute("text-anchor", "middle");
+              t.textContent = lines[i];
+              svg.appendChild(t);
+            }
           }
         }
       } else {
@@ -1030,6 +1464,13 @@ const AnnotEditHook = {
       opacity: Math.round(this._shapeOpacity * 100),
     };
 
+    // Measure modes: include computed measurement values in PDF points.
+    if (this._isMeasureMode(mode)) {
+      data.measurement = this._computeMeasurement(mode);
+      data.calFactor = this._calFactor;
+      data.calUnit = this._calUnit;
+    }
+
     // Convert rect to PDF points if possible.
     const converted = this._convertCoordinates(data.id, data, pageViews);
     data.rectPdf = converted.rectPdf;
@@ -1042,6 +1483,59 @@ const AnnotEditHook = {
 
     // Keep shape mode active so the user can draw another shape.
     this._shapeState = "idle";
+  },
+
+  /** Check if a mode is a measurement mode. */
+  _isMeasureMode(mode) {
+    return mode === "measure_distance" || mode === "measure_perimeter" || mode === "measure_area";
+  },
+
+  /** Compute measurement values in PDF points for the current shape. */
+  _computeMeasurement(mode) {
+    const pageIndex = this._shapePageIndex || 0;
+
+    if (mode === "measure_distance") {
+      const s = this._shapeStart;
+      const c = this._shapeCurrent || s;
+      const dist = this._measurePdfDistance(s, c, pageIndex);
+      return { distancePdf: dist, perimeterPdf: dist, type: "distance" };
+    }
+
+    // Perimeter or area — compute from vertices
+    const verts = this._shapeVertices;
+    if (verts.length < 2) return null;
+
+    // Convert all vertices to PDF points
+    const pts = verts.map(v => this._cssToPdfPoint(v.x, v.y, pageIndex));
+
+    // Compute edge distances
+    let totalDist = 0;
+    const edges = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [x1, y1] = pts[i];
+      const [x2, y2] = pts[(i + 1) % pts.length];
+      const d = Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+      edges.push(d);
+      totalDist += d;
+    }
+
+    if (mode === "measure_perimeter") {
+      return { edges, perimeterPdf: totalDist, type: "perimeter" };
+    }
+
+    if (mode === "measure_area") {
+      // Shoelace
+      let area = 0;
+      for (let i = 0; i < pts.length; i++) {
+        const [x1, y1] = pts[i];
+        const [x2, y2] = pts[(i + 1) % pts.length];
+        area += x1 * y2 - x2 * y1;
+      }
+      area = Math.abs(area) / 2;
+      return { edges, perimeterPdf: totalDist, areaPdf: area, type: "area" };
+    }
+
+    return null;
   },
 
   /**
@@ -1058,6 +1552,7 @@ const AnnotEditHook = {
       case "arrow":
       case "double_arrow":
       case "dimension":
+      case "measure_distance":
         // [x1, y1, x2, y2] start/end points
         return [s.x, s.y, c.x, c.y];
 
@@ -1073,7 +1568,9 @@ const AnnotEditHook = {
 
       case "polygon":
       case "cloud":
-      case "polyline": {
+      case "polyline":
+      case "measure_perimeter":
+      case "measure_area": {
         // [[x1,y1], [x2,y2], ...] vertex array
         const verts = this._shapeVertices.map(v => [v.x, v.y]);
         if (mode === "cloud") {
@@ -1097,7 +1594,7 @@ const AnnotEditHook = {
     const s = this._shapeStart;
     const c = this._shapeCurrent || s;
 
-    if (mode === "line" || mode === "arrow" || mode === "double_arrow" || mode === "dimension") {
+    if (mode === "line" || mode === "arrow" || mode === "double_arrow" || mode === "dimension" || mode === "measure_distance") {
       return [
         Math.min(s.x, c.x),
         Math.min(s.y, c.y),
@@ -1115,7 +1612,7 @@ const AnnotEditHook = {
       ];
     }
 
-    if (mode === "polygon" || mode === "cloud" || mode === "polyline") {
+    if (mode === "polygon" || mode === "cloud" || mode === "polyline" || mode === "measure_perimeter" || mode === "measure_area") {
       if (this._shapeVertices.length === 0) return null;
       const xs = this._shapeVertices.map(v => v.x);
       const ys = this._shapeVertices.map(v => v.y);

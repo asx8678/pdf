@@ -122,6 +122,17 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:stamps, [])
       |> assign(:ocr_running, false)
       |> assign(:ocr_progress, nil)
+      |> assign(:show_ocr_options, false)
+      |> assign(:measure_mode_active, false)
+      |> assign(:active_measure_mode, nil)
+      |> assign(:calibrating, false)
+      |> assign(:calibration_scale, 1.0)
+      |> assign(:calibration_unit, "mm")
+      |> assign(:measure_modal_open, false)
+      |> assign(:cal_known_length, "")
+      |> assign(:cal_known_unit, "mm")
+      |> assign(:cal_drawn_points, nil)
+      |> assign(:cal_page_index, nil)
       |> load_saved_signatures()
 
     Phoenix.PubSub.subscribe(Quire.PubSub, "document:#{id}")
@@ -526,6 +537,14 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:stamp_mode_active, mode == "stamp")
       |> assign(:attachment_mode_active, mode == "file_attachment")
       |> assign(:callout_mode_active, mode == "free_text_callout")
+      |> assign(
+        :measure_mode_active,
+        mode in ~w(measure_distance measure_perimeter measure_area)
+      )
+      |> assign(
+        :active_measure_mode,
+        if(mode in ~w(measure_distance measure_perimeter measure_area), do: mode, else: nil)
+      )
       |> push_event("toggle_annot_mode", %{mode: mode})
 
     {:noreply, socket}
@@ -539,15 +558,39 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
+  # Toggle the OCR options panel.
+  def handle_event("toggle_ocr_options", _params, socket) do
+    {:noreply, assign(socket, :show_ocr_options, !socket.assigns.show_ocr_options)}
+  end
+
   # Enqueue OcrWorker for the current document revision.
+  def handle_event("run_ocr", %{"options" => options}, socket) do
+    enqueue_ocr(socket, options)
+  end
+
+  # Legacy run_ocr without options (direct button click, not through panel).
   def handle_event("run_ocr", _params, socket) do
+    default_opts = %{
+      "languages" => "eng",
+      "mode" => "skip",
+      "deskew" => true,
+      "rotate" => true,
+      "clean" => true,
+      "optimise" => 1
+    }
+
+    enqueue_ocr(socket, default_opts)
+  end
+
+  defp enqueue_ocr(socket, options) do
     doc_id = socket.assigns.active_document_id
 
     with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
          {:ok, rev} <- Quire.Documents.current_revision(doc) do
       %{
         "doc_id" => doc_id,
-        "revision_id" => rev.id
+        "revision_id" => rev.id,
+        "options" => options
       }
       |> Quire.Workers.OcrWorker.new([])
       |> Oban.insert!()
@@ -556,6 +599,7 @@ defmodule QuireWeb.WorkspaceLive do
        socket
        |> assign(:ocr_running, true)
        |> assign(:ocr_progress, %{pct: 0})
+       |> assign(:show_ocr_options, false)
        |> put_flash(:info, "OCR started on #{doc.title}")}
     else
       {:error, reason} ->
@@ -818,7 +862,95 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, step_search(socket, -1)}
   end
 
-  # ── Snapshot (T-055) event handlers ──────────────────────────────────────
+  # ── Measurement / Calibration event handlers (T-108) ────────────────────
+
+  def handle_event("calibrate_scale", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:measure_modal_open, true)
+     |> assign(:cal_known_length, "")
+     |> assign(:cal_known_unit, socket.assigns.calibration_unit)
+     |> assign(:cal_drawn_points, nil)
+     |> assign(:cal_page_index, nil)
+     |> push_event("cancel_calibration_draw", %{})}
+  end
+
+  def handle_event("close_calibration_modal", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:measure_modal_open, false)
+     |> push_event("cancel_calibration_draw", %{})}
+  end
+
+  def handle_event("update_cal_length", %{"_target" => _target} = params, socket) do
+    value = Map.get(params, "value", "")
+    {:noreply, assign(socket, :cal_known_length, value)}
+  end
+
+  def handle_event("update_cal_unit", %{"unit" => unit}, socket) do
+    {:noreply, assign(socket, :cal_known_unit, unit)}
+  end
+
+  def handle_event("begin_calibration_draw", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:calibrating, true)
+     |> push_event("begin_calibration_draw", %{})}
+  end
+
+  def handle_event("calibration_line_drawn", %{"pdfLength" => pdf_len, "pageIndex" => pi}, socket) do
+    {:noreply,
+     socket
+     |> assign(:cal_drawn_points, pdf_len)
+     |> assign(:cal_page_index, pi)}
+  end
+
+  def handle_event("apply_calibration", params, socket) do
+    known_len_str = Map.get(params, "known_length", socket.assigns.cal_known_length)
+    known_unit = Map.get(params, "known_unit", socket.assigns.cal_known_unit)
+    cal_drawn = socket.assigns.cal_drawn_points
+
+    {known_len, _} = Float.parse(to_string(known_len_str))
+
+    socket =
+      if cal_drawn && known_len > 0 do
+        # Scale factor = real-world length (in the given unit) / drawn length in PDF points
+        # Measurement display: scaled_value = value_in_points * cal_factor
+        factor = known_len / cal_drawn
+
+        socket
+        |> assign(:calibration_scale, factor)
+        |> assign(:calibration_unit, known_unit)
+        |> assign(:measure_modal_open, false)
+        |> assign(:calibrating, false)
+        |> push_event("set_calibration", %{factor: factor, unit: known_unit})
+        |> push_event("cancel_calibration_draw", %{})
+        |> put_flash(:info, "Scale calibrated: 1 pt = #{Float.round(factor, 6)} #{known_unit}")
+      else
+        socket
+        |> put_flash(:error, "Draw a reference line and enter a known length")
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("set_measure_unit", %{"unit" => unit}, socket) do
+    {:noreply,
+     socket
+     |> assign(:calibration_unit, unit)
+     |> push_event("set_measure_unit", %{unit: unit})}
+  end
+
+  def handle_event("toggle_measure_mode", %{"mode" => mode}, socket) do
+    {:noreply,
+     socket
+     |> assign(:measure_mode_active, socket.assigns.measure_mode_active != true)
+     |> assign(
+       :active_measure_mode,
+       if(socket.assigns.measure_mode_active, do: nil, else: mode)
+     )
+     |> push_event("toggle_annot_mode", %{mode: mode})}
+  end
 
   def handle_event("toggle_snapshot_mode", _params, socket) do
     active = !socket.assigns.snapshot_active
@@ -1049,6 +1181,29 @@ defmodule QuireWeb.WorkspaceLive do
   defp coerce_id(id) when is_binary(id), do: id
   defp coerce_id(id) when is_integer(id), do: Integer.to_string(id)
 
+  attr :ocr_running, :boolean, default: false
+  attr :ocr_progress, :map, default: nil
+
+  defp ocr_options_panel(assigns) do
+    ~H"""
+    <div
+      class="border-b border-chrome-border dark:border-gray-600 bg-chrome-white dark:bg-gray-800 shadow-sm"
+      role="region"
+      aria-label="OCR options panel"
+    >
+      <div class="max-w-md mx-auto">
+        <.live_component
+          module={QuireWeb.OcrOptionsLive}
+          id="ocr-options"
+          user_id={@current_user.id}
+          ocr_running={@ocr_running}
+          ocr_progress={@ocr_progress}
+        />
+      </div>
+    </div>
+    """
+  end
+
   defp confirm_close_modal(assigns) do
     {doc_id, doc_title} = assigns.confirm_close_doc
 
@@ -1124,10 +1279,11 @@ defmodule QuireWeb.WorkspaceLive do
         <.ribbon_group label="Tools">
           <.ribbon_button
             icon="hero-document-magnifying-glass"
-            label="Run OCR"
-            active={@ocr_running}
-            phx-click="run_ocr"
-            tooltip="Recognise text in the document"
+            label="OCR Options"
+            active={@show_ocr_options}
+            phx-click="toggle_ocr_options"
+            has_dropdown={true}
+            tooltip="Configure OCR languages and options"
             disabled={@ocr_running}
           />
         </.ribbon_group>
@@ -1193,6 +1349,40 @@ defmodule QuireWeb.WorkspaceLive do
             phx-click="toggle_annot_mode"
             phx-value-mode="stamp"
             tooltip="Place a stamp"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Measure">
+          <.ribbon_button
+            icon="hero-ruler"
+            label="Distance"
+            active={@measure_mode_active && @active_measure_mode == "measure_distance"}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="measure_distance"
+            tooltip="Measure distance between two points"
+          />
+          <.ribbon_button
+            icon="hero-arrows-right-left"
+            label="Perimeter"
+            active={@measure_mode_active && @active_measure_mode == "measure_perimeter"}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="measure_perimeter"
+            tooltip="Measure perimeter of a polygon"
+          />
+          <.ribbon_button
+            icon="hero-square-2-stack"
+            label="Area"
+            active={@measure_mode_active && @active_measure_mode == "measure_area"}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="measure_area"
+            tooltip="Measure area of a polygon"
+          />
+          <.ribbon_button
+            icon="hero-scale"
+            label="Calibrate"
+            active={@calibrating}
+            phx-click="calibrate_scale"
+            tooltip="Calibrate measurement scale"
           />
         </.ribbon_group>
       </div>
@@ -1311,17 +1501,47 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :ocr_progress, %{pct: pct})}
   end
 
+  @impl true
+  def handle_info({:run_ocr, options}, socket) do
+    # Options from the LiveComponent have atom keys; convert to string keys
+    # for Oban job args (JSON serialisation).
+    options =
+      options
+      |> Enum.map(fn
+        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+        {k, v} -> {k, v}
+      end)
+      |> Map.new()
+
+    enqueue_ocr(socket, options)
+  end
+
   # ── Annotation commit helpers (T-107) ────────────────────────────────
 
   defp handle_annotation_commit(socket, document_id, type, data) do
     user_id = socket.assigns.current_user.id
+
+    # For measure types, embed the computed measurement alongside path data
+    path_data =
+      case type do
+        kind when kind in ~w(measure_distance measure_perimeter measure_area) ->
+          %{
+            geometry: data["pathData"] || data["path_data"],
+            measurement: data["measurement"],
+            cal_factor: data["calFactor"],
+            cal_unit: data["calUnit"]
+          }
+
+        _ ->
+          data["pathData"] || data["path_data"]
+      end
 
     annot = %{
       revision_id: document_id,
       page_index: data["pageIndex"] || 0,
       kind: type,
       rect: data["rectPdf"] || data["rect"],
-      path_data: data["pathData"] || data["path_data"],
+      path_data: path_data,
       color: data["color"] || data["strokeColor"] || data["fillColor"],
       opacity: data["opacity"] || Map.get(data, "opacity", 100),
       border_width: data["strokeWidth"] || data["borderWidth"] || data["border_width"],
@@ -1434,6 +1654,97 @@ defmodule QuireWeb.WorkspaceLive do
       <.icon name="hero-document" class="size-12 text-gray-300 dark:text-gray-600" />
       <p class="text-sm text-gray-400 dark:text-gray-500">No document open</p>
     </div>
+    """
+  end
+
+  attr :measure_modal_open, :boolean, required: true
+  attr :calibrating, :boolean, required: true
+  attr :cal_known_length, :string, required: true
+  attr :cal_known_unit, :string, required: true
+  attr :cal_drawn_points, :any, default: nil
+
+  defp calibration_modal(assigns) do
+    ~H"""
+    <.modal title="Scale Calibration" open={@measure_modal_open} on_close="close_calibration_modal">
+      <div class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">
+          Calibrate the measurement scale by drawing a reference line on the document
+          and entering its known real-world length.
+        </p>
+
+        <div class="flex items-center gap-3">
+          <button
+            type="button"
+            phx-click="begin_calibration_draw"
+            disabled={@calibrating}
+            class={[
+              "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+              if(@calibrating,
+                do: "bg-green-100 text-green-700 border border-green-300 cursor-default",
+                else: "bg-accent text-white hover:bg-accent/90 cursor-pointer"
+              )
+            ]}
+          >
+            {if @calibrating, do: "Drawing… Click & drag on document", else: "Draw Reference Line"}
+          </button>
+
+          <span :if={@cal_drawn_points} class="text-sm text-gray-500">
+            Drawn: <strong>{Float.round(@cal_drawn_points, 1)} pt</strong>
+          </span>
+        </div>
+
+        <div class="border-t border-chrome-border dark:border-gray-600 pt-4">
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            Known real-world length
+          </label>
+          <div class="flex items-center gap-2">
+            <input
+              type="number"
+              step="any"
+              min="0"
+              value={@cal_known_length}
+              phx-change="update_cal_length"
+              placeholder="e.g. 5"
+              class="w-24 px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            />
+            <select
+              phx-change="update_cal_unit"
+              class="px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            >
+              <option value="mm" selected={@cal_known_unit == "mm"}>mm</option>
+              <option value="cm" selected={@cal_known_unit == "cm"}>cm</option>
+              <option value="inches" selected={@cal_known_unit == "inches"}>inches</option>
+              <option value="meters" selected={@cal_known_unit == "meters"}>meters</option>
+              <option value="points" selected={@cal_known_unit == "points"}>points</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_calibration_modal"
+            class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            phx-click="apply_calibration"
+            disabled={!@cal_drawn_points}
+            class={[
+              "px-4 py-2 text-sm font-medium rounded-lg transition-colors",
+              if(@cal_drawn_points,
+                do: "bg-accent text-white hover:bg-accent/90 cursor-pointer",
+                else: "bg-gray-200 text-gray-400 cursor-not-allowed dark:bg-gray-700"
+              )
+            ]}
+          >
+            Apply
+          </button>
+        </div>
+      </div>
+    </.modal>
     """
   end
 end

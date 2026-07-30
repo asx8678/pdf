@@ -24,6 +24,10 @@ defmodule Quire.Accounts.UserSetting do
 
     field :recent_limit, :integer, default: 20
     field :ocr_default_lang, :string, default: "eng"
+    field :ocr_auto_deskew, :boolean, default: true
+    field :ocr_auto_rotate, :boolean, default: true
+    field :ocr_clean, :boolean, default: true
+    field :ocr_optimise_level, :integer, default: 1
     field :measurement_unit, :string, default: "mm"
     field :autosave_enabled, :boolean, default: true
 
@@ -44,6 +48,10 @@ defmodule Quire.Accounts.UserSetting do
       :stamps,
       :recent_limit,
       :ocr_default_lang,
+      :ocr_auto_deskew,
+      :ocr_auto_rotate,
+      :ocr_clean,
+      :ocr_optimise_level,
       :measurement_unit,
       :autosave_enabled
     ])

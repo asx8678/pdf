@@ -42,6 +42,7 @@ defmodule Quire.Workers.OcrWorker do
 
   alias Quire.Repo
   alias Quire.Documents.{Document, Revision}
+  alias Quire.Documents.Page
 
   @dpi 300
 
@@ -53,6 +54,7 @@ defmodule Quire.Workers.OcrWorker do
     doc_id = args["doc_id"]
     revision_id = args["revision_id"]
     operation_id = args["operation_id"]
+    options = args["options"] || %{}
 
     with {:ok, doc} <- fetch_document(doc_id),
          {:ok, rev} <- fetch_revision(revision_id),
@@ -61,7 +63,7 @@ defmodule Quire.Workers.OcrWorker do
       emit_telemetry(:start, %{doc_id: doc_id, revision_id: revision_id})
       report_progress(operation_id, doc_id, 5)
 
-      result = run_pipeline(source_bytes, doc, rev, operation_id)
+      result = run_pipeline(source_bytes, doc, rev, operation_id, options)
 
       case result do
         {:ok, %{new_revision: _new_rev, page_count: pc}} ->
@@ -81,7 +83,7 @@ defmodule Quire.Workers.OcrWorker do
 
   # ── Pipeline ────────────────────────────────────────────────────────────
 
-  defp run_pipeline(source_bytes, doc, rev, operation_id) do
+  defp run_pipeline(source_bytes, doc, rev, operation_id, options) do
     page_range = resolve_page_range(rev, doc)
     total = length(page_range)
 
@@ -89,7 +91,7 @@ defmodule Quire.Workers.OcrWorker do
     with {:ok, src_doc} <- ExPdfium.open_blob(source_bytes),
          {:ok, _src_count} <- ExPdfium.page_count(src_doc) do
       try do
-        result = build_sandwich(src_doc, page_range, doc, operation_id, total)
+        result = build_sandwich(src_doc, page_range, doc, rev, operation_id, total, options)
 
         case result do
           {:ok, %ExPdfium.Document{} = result_doc} ->
@@ -109,8 +111,10 @@ defmodule Quire.Workers.OcrWorker do
 
   # ── Sandwich builder ──────────────────────────────────────────────────
 
-  defp build_sandwich(src_doc, page_range, doc, operation_id, total) do
+  defp build_sandwich(src_doc, page_range, doc, rev, operation_id, total, options) do
     {:ok, result_doc} = ExPdfium.new()
+    mode = Map.get(options, "mode", "skip")
+    has_text_map = if mode == "skip", do: load_has_text(rev.id), else: %{}
 
     # Emissions are fire-and-forget; if the operation_id is nil the
     # progress helper is a no-op.  Track elapsed time for telemetry.
@@ -130,26 +134,32 @@ defmodule Quire.Workers.OcrWorker do
           report_progress(operation_id, doc.id, pct)
         end
 
-        {elapsed, page_result} =
-          :timer.tc(fn ->
-            process_one_page(src_doc, acc_doc, page_idx)
-          end)
+        # ── Skip mode check ───────────────────────────────────────────
+        if mode == "skip" and Map.get(has_text_map, page_idx, false) do
+          # Page already has text — skip it
+          {:cont, {:ok, acc_doc, acc_timings, pct}}
+        else
+          {elapsed, page_result} =
+            :timer.tc(fn ->
+              process_one_page(src_doc, acc_doc, page_idx, options)
+            end)
 
-        page_info = %{page: page_idx, elapsed_us: elapsed}
+          page_info = %{page: page_idx, elapsed_us: elapsed}
 
-        case page_result do
-          {:ok, updated_doc, spans} ->
-            avg_conf =
-              if spans != [],
-                do: avg_confidence(spans),
-                else: nil
+          case page_result do
+            {:ok, updated_doc, spans} ->
+              avg_conf =
+                if spans != [],
+                  do: avg_confidence(spans),
+                  else: nil
 
-            emit_telemetry(:page_done, page_info |> Map.put(:avg_confidence, avg_conf))
+              emit_telemetry(:page_done, page_info |> Map.put(:avg_confidence, avg_conf))
 
-            {:cont, {:ok, updated_doc, acc_timings, pct}}
+              {:cont, {:ok, updated_doc, acc_timings, pct}}
 
-          {:error, reason} ->
-            {:halt, {:error, {:page_failed, page_idx, reason}}}
+            {:error, reason} ->
+              {:halt, {:error, {:page_failed, page_idx, reason}}}
+          end
         end
       end)
 
@@ -161,7 +171,7 @@ defmodule Quire.Workers.OcrWorker do
 
   # ── Single page ────────────────────────────────────────────────────────
 
-  defp process_one_page(src_doc, dest_doc, page_idx) do
+  defp process_one_page(src_doc, dest_doc, page_idx, options) do
     with {:ok, info} <- ExPdfium.page_info(src_doc, page_idx) do
       # Determine page dimensions (crop-aware)
       dims = page_dimensions(info)
@@ -175,10 +185,21 @@ defmodule Quire.Workers.OcrWorker do
       png_bytes = bitmap_to_png!(bitmap)
 
       # ── Step 3: Preprocess ─────────────────────────────────────────
-      {:ok, processed_png} = Quire.Ocr.Preprocess.preprocess(png_bytes)
+      preprocess_opts = [
+        deskew: Map.get(options, "deskew", true),
+        rotate: Map.get(options, "rotate", true),
+        clean: Map.get(options, "clean", true),
+        optimise: Map.get(options, "optimise", 1)
+      ]
+
+      {:ok, processed_png} = Quire.Ocr.Preprocess.preprocess(png_bytes, preprocess_opts)
 
       # ── Step 4: OCR ────────────────────────────────────────────────
-      {:ok, spans} = Quire.Ocr.Tesseract.run(processed_png, [])
+      ocr_opts = [
+        language: Map.get(options, "languages", "eng")
+      ]
+
+      {:ok, spans} = Quire.Ocr.Tesseract.run(processed_png, ocr_opts)
 
       # ── Step 5: Build the sandwich page in a temp document ─────────
       {:ok, temp_doc} = ExPdfium.new()
@@ -303,6 +324,22 @@ defmodule Quire.Workers.OcrWorker do
   # Defaults to all pages when no range is given.
   defp resolve_page_range(%Revision{}, %Document{page_count: pc}) do
     0..(pc - 1)//1 |> Enum.to_list()
+  end
+
+  # ── Has-text lookup (skip mode) ─────────────────────────────────────
+
+  # Preloads has_text for all pages in this revision so the skip-mode
+  # check is a map lookup rather than N+1 queries.
+  defp load_has_text(revision_id) do
+    import Ecto.Query
+
+    query =
+      from(p in Page,
+        where: p.revision_id == ^revision_id,
+        select: {p.page_index, p.has_text}
+      )
+
+    Repo.all(query) |> Map.new()
   end
 
   # ── Dimensions ────────────────────────────────────────────────────────

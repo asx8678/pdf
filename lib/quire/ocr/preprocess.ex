@@ -28,7 +28,13 @@ defmodule Quire.Ocr.Preprocess do
   @typedoc """
   Options for `preprocess/2`.
   """
-  @type option :: {:page_width, pos_integer()} | {:page_height, pos_integer()}
+  @type option ::
+          {:page_width, pos_integer()}
+          | {:page_height, pos_integer()}
+          | {:deskew, boolean()}
+          | {:rotate, boolean()}
+          | {:clean, boolean()}
+          | {:optimise, non_neg_integer()}
   @type options :: [option()]
 
   @doc ~S"""
@@ -47,6 +53,14 @@ defmodule Quire.Ocr.Preprocess do
 
   #{@type options}
 
+  The following pipeline options are accepted but their corresponding
+  Vips operations will be implemented in a future phase:
+
+    * `:deskew` — boolean, correct page skew (not yet implemented)
+    * `:rotate` — boolean, auto-detect orientation (not yet implemented)
+    * `:clean` — boolean, denoise / remove speckles (not yet implemented)
+    * `:optimise` — integer 0–3, image compression level (not yet implemented)
+
   ## Returns
 
     * `{:ok, png_binary}` — preprocessed image ready for OCR
@@ -60,6 +74,10 @@ defmodule Quire.Ocr.Preprocess do
   @spec preprocess(binary(), options()) :: {:ok, binary()} | {:error, Quire.Engine.Error.t()}
   def preprocess(image_bytes, opts \\ []) when is_binary(image_bytes) do
     threshold = Keyword.get(opts, :threshold, 128)
+    _deskew = Keyword.get(opts, :deskew, true)
+    _rotate = Keyword.get(opts, :rotate, true)
+    _clean = Keyword.get(opts, :clean, true)
+    _optimise = Keyword.get(opts, :optimise, 1)
 
     Engine.trace(__MODULE__, :preprocess, [byte_size(image_bytes), threshold], fn ->
       # 1. Size validation

@@ -23,6 +23,13 @@
       backstage_open={@backstage_open}
     />
     <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
+
+    <.ocr_options_panel
+      :if={@show_ocr_options}
+      ocr_running={@ocr_running}
+      ocr_progress={@ocr_progress}
+    />
+
     <.document_tabs documents={@documents} active_id={@active_document_id} />
 
     <div class={[
@@ -157,6 +164,15 @@
     />
 
     <.confirm_close_modal :if={@confirm_close_doc} confirm_close_doc={@confirm_close_doc} />
+
+    <.calibration_modal
+      :if={@measure_modal_open}
+      measure_modal_open={@measure_modal_open}
+      calibrating={@calibrating}
+      cal_known_length={@cal_known_length}
+      cal_known_unit={@cal_known_unit}
+      cal_drawn_points={@cal_drawn_points}
+    />
 
     <.backstage
       open={@backstage_open}
