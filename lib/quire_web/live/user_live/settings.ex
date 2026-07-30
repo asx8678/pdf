@@ -284,6 +284,110 @@ defmodule QuireWeb.UserLive.Settings do
           </div>
         </div>
       </div>
+
+      <hr class="my-8 border-chrome-border dark:border-gray-700" />
+
+      <!-- About — Engine version table -->
+      <div>
+        <.header>
+          About
+          <:subtitle>Component versions, engine status, and system information</:subtitle>
+        </.header>
+
+        <div :if={is_nil(@engine_check)} class="mt-4 text-sm text-gray-500 italic">
+          Loading engine information…
+        </div>
+
+        <div :if={!is_nil(@engine_check)} class="mt-6 space-y-8">
+          <!-- Engine status table -->
+          <div>
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Engines</h3>
+            <div class="overflow-hidden rounded-lg border border-chrome-border dark:border-gray-700">
+              <table class="min-w-full divide-y divide-chrome-border dark:divide-gray-700">
+                <thead class="bg-gray-50 dark:bg-gray-800/50">
+                  <tr>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Engine</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Version</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Detail</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white dark:bg-gray-800/30 divide-y divide-chrome-border dark:divide-gray-700">
+                  <tr :for={{mod, info} <- @engine_check.engines}>
+                    <td class="px-4 py-2.5 text-sm text-gray-900 dark:text-gray-100 font-mono">
+                      {engine_label(mod)}
+                    </td>
+                    <td class="px-4 py-2.5">
+                      <%= case engine_state(info) do %>
+                        <% :ok -> %>
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
+                            ok
+                          </span>
+                        <% :degraded -> %>
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-yellow-500 inline-block"></span>
+                            degraded
+                          </span>
+                        <% :unavailable -> %>
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
+                            <span class="w-1.5 h-1.5 rounded-full bg-red-500 inline-block"></span>
+                            unavailable
+                          </span>
+                        <% _ -> %>
+                          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
+                            {engine_state(info)}
+                          </span>
+                      <% end %>
+                    </td>
+                    <td class="px-4 py-2.5 text-sm text-gray-600 dark:text-gray-400 font-mono">
+                      {info[:version] || "—"}
+                    </td>
+                    <td class="px-4 py-2.5 text-sm text-gray-500 dark:text-gray-400">
+                      {info[:detail] || ""}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- System versions -->
+          <div>
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">System</h3>
+            <div class="grid grid-cols-2 gap-3">
+              <div :for={{name, ver} <- @engine_check.system} class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+                <span class="text-sm text-gray-600 dark:text-gray-400 capitalize">{Atom.to_string(name)}</span>
+                <span class="text-sm font-mono text-gray-900 dark:text-gray-100">{ver || "—"}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Smoke tests -->
+          <div>
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Smoke Tests</h3>
+            <div class="space-y-2">
+              <div :for={{name, result} <- @engine_check.smoke_tests} class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
+                <span class="text-sm text-gray-600 dark:text-gray-400 capitalize">{Atom.to_string(name) |> String.replace("_", " ")}</span>
+                <span class={[
+                  "text-sm font-medium",
+                  if(result == :ok, do: "text-green-600 dark:text-green-400", else: "text-red-600 dark:text-red-400")
+                ]}>
+                  {if(result == :ok, do: "Pass", else: "Fail")}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- LGPL notice (libvips) -->
+          <div class="px-4 py-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/40 rounded-lg">
+            <p class="text-xs text-yellow-800 dark:text-yellow-200">
+              This application uses libvips, which is licensed under the
+              <a href="https://www.gnu.org/licenses/lgpl-3.0.html" target="_blank" rel="noopener" class="underline hover:no-underline">GNU Lesser General Public License v3.0 or later</a>.
+            </p>
+          </div>
+        </div>
+      </div>
     </Layouts.app>
     """
   end
@@ -320,8 +424,20 @@ defmodule QuireWeb.UserLive.Settings do
           setting -> setting.highlight_fields
         end
       )
+      |> assign(:engine_check, nil)
+
+    self = self()
+    Task.start(fn ->
+      result = Quire.Engine.check()
+      send(self, {:engine_check, result})
+    end)
 
     {:ok, socket}
+  end
+
+  @impl true
+  def handle_info({:engine_check, result}, socket) do
+    {:noreply, assign(socket, :engine_check, result)}
   end
 
   @impl true
@@ -510,7 +626,32 @@ defmodule QuireWeb.UserLive.Settings do
     Map.get(@known_languages, lang, lang)
   end
 
-  defp format_bytes(n) when n >= 1_048_576, do: "#{Float.round(n / 1_048_576, 2)} MB"
-  defp format_bytes(n) when n >= 1024, do: "#{Float.round(n / 1024, 1)} KB"
-  defp format_bytes(n), do: "#{n} B"
+  defp format_bytes(n) when n >= 1_048_576, do: "\#{Float.round(n / 1_048_576, 2)} MB"
+  defp format_bytes(n) when n >= 1024, do: "\#{Float.round(n / 1024, 1)} KB"
+  defp format_bytes(n), do: "\#{n} B"
+
+  # ── Engine version table helpers (T-166) ──────────────────────────────
+
+  @engine_labels %{
+    Quire.Render => "Rasterisation & Text Extraction",
+    Quire.Ocr.Engine => "OCR / Image-to-Text",
+    Quire.Office.Writer => "Office Document Writing",
+    Quire.Pades => "PAdES Signing / Validation",
+    Quire.SecurityHandler => "Document Encryption",
+    Quire.PdfA => "PDF/A Conversion",
+    Quire.Compose => "Content-Stream Composition",
+    ChromicPDF => "HTML/URL to PDF (ChromicPDF)",
+    Quire.Pdf => "PDF Object Model (lopdf NIF)",
+    Quire.Render.Pdfium => "Rendering Engine (PDFium)",
+    Quire.Ocr.Tesseract => "OCR Engine (Tesseract)",
+    Quire.Ocr.Preprocess => "OCR Preprocessing (vips)"
+  }
+
+  defp engine_label(mod) do
+    Map.get(@engine_labels, mod, mod |> Atom.to_string() |> String.replace_prefix("Elixir.", ""))
+  end
+
+  defp engine_state(info) do
+    info[:state] || :unavailable
+  end
 end
