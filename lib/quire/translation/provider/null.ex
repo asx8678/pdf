@@ -18,4 +18,7 @@ defmodule Quire.Translation.Provider.Null do
       banner: "Translation disabled — configure a provider in config.exs"
     }}
   end
+
+  @impl true
+  def estimate_cost(_text, _source_lang, _target_lang), do: :unknown
 end
