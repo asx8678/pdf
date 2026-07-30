@@ -152,6 +152,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:whiteout_warning_dismissed, false)
       |> assign(:image_ocr_uploading, false)
       |> assign(:image_ocr_error, nil)
+      |> assign(:show_camera_capture, false)
+      |> assign(:scan_job_id, nil)
+      |> assign(:scan_progress, nil)
+      |> assign(:scan_error, nil)
       |> load_user_settings()
       |> load_saved_signatures()
       |> allow_upload(:image,
@@ -1479,6 +1483,13 @@ defmodule QuireWeb.WorkspaceLive do
             tooltip="Upload an image (PNG/JPEG/WebP) and create a searchable PDF via OCR"
             disabled={@image_ocr_uploading}
           />
+          <.ribbon_button
+            icon="hero-camera"
+            label="Scan"
+            phx-click="open_camera_capture"
+            tooltip="Scan a document with your device camera and OCR it to a searchable PDF"
+            disabled={@show_camera_capture || @scan_progress != nil}
+          />
         </.ribbon_group>
 
         <.ribbon_group :if={@ocr_progress} label="Progress">
@@ -1499,6 +1510,32 @@ defmodule QuireWeb.WorkspaceLive do
           <div class="flex items-center gap-2 px-2 py-1 text-xs text-red-500">
             <.icon name="hero-exclamation-circle" class="size-3.5" />
             <span>{error_message(@image_ocr_error)}</span>
+          </div>
+        </.ribbon_group>
+
+        <.ribbon_group :if={@scan_progress} label="Scan">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs">
+            <.icon name="hero-arrow-path" class="size-3.5 animate-spin text-accent" />
+            <span class="text-gray-500 dark:text-gray-400">{@scan_progress.pct}%</span>
+            <span :if={@scan_progress.message} class="text-gray-400 dark:text-gray-500">
+              {@scan_progress.message}
+            </span>
+          </div>
+          <button
+            type="button"
+            phx-click="cancel_scan"
+            aria-label="Cancel scanning"
+            class="ml-1 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-chrome-border dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          >
+            <.icon name="hero-x-mark" class="size-3" />
+            <span>Cancel</span>
+          </button>
+        </.ribbon_group>
+
+        <.ribbon_group :if={@scan_error} label="Scan">
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-red-500">
+            <.icon name="hero-exclamation-circle" class="size-3.5" />
+            <span>{error_message(@scan_error)}</span>
           </div>
         </.ribbon_group>
       </div>
@@ -1715,6 +1752,25 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── Helpers (T-143) ──────────────────────────────────────────────────
 
+  defp decode_data_url("data:" <> rest) do
+    # Format: data:image/jpeg;base64,/9j...
+    case String.split(rest, ",", parts: 2) do
+      [_, base64_data] ->
+        Base.decode64!(base64_data)
+
+      _ ->
+        raise "Invalid data URL format"
+    end
+  end
+
+  defp decode_data_url(binary) when is_binary(binary), do: binary
+
+  defp cancel_scan_job(socket) do
+    socket
+    |> assign(:scan_progress, nil)
+    |> assign(:scan_job_id, nil)
+  end
+
   defp error_message({:invalid_image, msg}), do: msg
   defp error_message({:pipeline_error, _}), do: "OCR processing failed"
   defp error_message(nil), do: ""
@@ -1859,6 +1915,125 @@ defmodule QuireWeb.WorkspaceLive do
       end
 
     {:noreply, socket}
+  end
+
+  # ── Scan (camera capture) handlers (T-144) ──────────────────────────────
+
+  @impl true
+  def handle_event("open_camera_capture", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_camera_capture, true)
+     |> assign(:scan_job_id, nil)
+     |> assign(:scan_progress, nil)
+     |> assign(:scan_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_camera_capture", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_camera_capture, false)}
+  end
+
+  @impl true
+  def handle_event("cancel_scan", _params, socket) do
+    socket = cancel_scan_job(socket)
+
+    {:noreply,
+     socket
+     |> assign(:scan_job_id, nil)
+     |> assign(:scan_progress, nil)
+     |> assign(:scan_error, nil)
+     |> put_flash(:info, "Scan cancelled.")}
+  end
+
+  # ── Camera capture event handlers (forwarded from hook → parent LV) ───
+
+  @impl true
+  def handle_event("camera_captured", %{"dataUrl" => data_url}, socket) do
+    send_update(QuireWeb.CameraCaptureComponent,
+      id: "camera-capture",
+      phase: :captured,
+      captured_data_url: data_url
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("camera_ready_event", _params, socket) do
+    send_update(QuireWeb.CameraCaptureComponent,
+      id: "camera-capture",
+      phase: :capturing
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("camera_error_event", %{"message" => msg}, socket) do
+    send_update(QuireWeb.CameraCaptureComponent,
+      id: "camera-capture",
+      phase: :error,
+      error_message: msg
+    )
+
+    {:noreply, socket}
+  end
+
+  # ── Async scan processing (handles the {:scan_image, ...} message from
+  # CameraCaptureComponent) ──────────────────────────────────────────────
+
+  @impl true
+  def handle_info({:scan_image, data_url, title}, socket) do
+    # Decode the data URL: "data:image/jpeg;base64,/9j..."
+    image_bytes = decode_data_url(data_url)
+
+    socket =
+      socket
+      |> assign(:show_camera_capture, false)
+      |> assign(:scan_job_id, nil)
+      |> assign(:scan_error, nil)
+      |> assign(:scan_progress, %{pct: 0, message: "Starting OCR…"})
+
+    # Run ImageOcrWorker directly (single image, synchronous-style) so
+    # progress and cancellation are straightforward.
+    socket =
+      case Quire.Workers.ImageOcrWorker.process(
+             image_bytes,
+             title || "Scan",
+             socket.assigns.current_scope
+           ) do
+        {:ok, %{document: doc}} ->
+          socket
+          |> assign(:scan_progress, %{pct: 100, message: "Complete!"})
+          |> push_navigate(to: ~p"/workspace/#{doc.id}")
+
+        {:error, {:invalid_image, msg}} ->
+          socket
+          |> assign(:scan_progress, nil)
+          |> assign(:scan_error, {:invalid_image, msg})
+          |> put_flash(:error, msg)
+
+        {:error, reason} ->
+          socket
+          |> assign(:scan_progress, nil)
+          |> assign(:scan_error, {:pipeline_error, inspect(reason)})
+          |> put_flash(:error, "Scan OCR failed: #{inspect(reason)}")
+      end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:close_camera_modal}, socket) do
+    {:noreply, assign(socket, :show_camera_capture, false)}
+  end
+
+  @impl true
+  def handle_info({:request_camera}, socket) do
+    {:noreply, push_event(socket, "start_camera", %{})}
   end
 
   # ── Annotation commit helpers (T-107) ────────────────────────────────

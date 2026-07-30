@@ -237,6 +237,19 @@
 
     <.shortcuts_modal :if={@show_shortcuts} on_close="close_shortcuts" />
 
+    <.modal
+      :if={@show_camera_capture}
+      title="Scan Document with Camera"
+      on_close="close_camera_capture"
+      open={@show_camera_capture}
+    >
+      <.live_component
+        module={QuireWeb.CameraCaptureComponent}
+        id="camera-capture"
+        title="Scan"
+      />
+    </.modal>
+
     <%!-- Hidden upload form triggered by the Image OCR ribbon button --%>
     <form
       id="image-ocr-upload-form"
@@ -290,23 +303,132 @@
       }
     </script>
     <script :type={Phoenix.LiveView.ColocatedHook} name=".DownloadFile">
+            export default {
+              mounted() {
+                this.handleEvent("download", ({ content, filename, content_type }) => {
+                  const byteString = atob(content);
+                  const ab = new ArrayBuffer(byteString.length);
+                  const ia = new Uint8Array(ab);
+                  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                  const blob = new Blob([ab], { type: content_type || "application/octet-stream" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = filename;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                });
+              }
+            }
+      >
+    </script>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".CameraCapture">
       export default {
         mounted() {
-          this.handleEvent("download", ({ content, filename, content_type }) => {
-            const byteString = atob(content);
-            const ab = new ArrayBuffer(byteString.length);
-            const ia = new Uint8Array(ab);
-            for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-            const blob = new Blob([ab], { type: content_type || "application/octet-stream" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-          });
+          this._stream = null;
+          this._video = null;
+          this._canvas = document.createElement("canvas");
+          this._ctx = this._canvas.getContext("2d");
+          this._clickHandler = null;
+        },
+
+        destroyed() {
+          this.stopCamera();
+          this._removeClickHandler();
+          this._canvas = null;
+          this._ctx = null;
+        },
+
+        updated() {
+          // Check for video element → camera should start
+          const video = this.el.querySelector("video[id^=camera-preview-");
+          if (video && !this._stream) {
+            this._video = video;
+            this.startCamera();
+          }
+
+          // Bind click handler to the capture button when in capturing phase
+          const captureBtn = this.el.querySelector("button[id^=capture-btn-");
+          if (captureBtn && !this._clickHandler) {
+            this._clickHandler = (e) => {
+              e.preventDefault();
+              this.capture();
+            };
+            captureBtn.addEventListener("click", this._clickHandler);
+          } else if (!captureBtn && this._clickHandler) {
+            this._removeClickHandler();
+          }
+
+          // No video but stream active → clean up
+          if (!video && this._stream) {
+            this.stopCamera();
+          }
+        },
+
+        async startCamera() {
+          if (this._stream) return;
+
+          try {
+            const width = parseInt(this.el.dataset.cameraWidth) || 1280;
+            const height = parseInt(this.el.dataset.cameraHeight) || 720;
+
+            this._stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                width: { ideal: width },
+                height: { ideal: height },
+                facingMode: "environment"
+              }
+            });
+
+            if (this._video) {
+              this._video.srcObject = this._stream;
+              await this._video.play();
+            }
+
+            this.pushEvent("camera_ready_event", {});
+          } catch (err) {
+            this.pushEvent("camera_error_event", {
+              message: err.name || err.message || "Unknown error"
+            });
+          }
+        },
+
+        stopCamera() {
+          if (this._stream) {
+            this._stream.getTracks().forEach(track => track.stop());
+            this._stream = null;
+          }
+          if (this._video) {
+            this._video.srcObject = null;
+            this._video = null;
+          }
+          this._removeClickHandler();
+        },
+
+        capture() {
+          if (!this._stream || !this._video) return;
+
+          const width = this._video.videoWidth || 1280;
+          const height = this._video.videoHeight || 720;
+
+          this._canvas.width = width;
+          this._canvas.height = height;
+          this._ctx.drawImage(this._video, 0, 0, width, height);
+
+          // Encode as JPEG at 90% quality
+          const dataUrl = this._canvas.toDataURL("image/jpeg", 0.90);
+          this.pushEvent("camera_captured", { dataUrl });
+        },
+
+        _removeClickHandler() {
+          if (this._clickHandler) {
+            const btn = this.el.querySelector("button[id^=capture-btn-");
+            if (btn) btn.removeEventListener("click", this._clickHandler);
+            this._clickHandler = null;
+          }
         }
       }
     </script>
