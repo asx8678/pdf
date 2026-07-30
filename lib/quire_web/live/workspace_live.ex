@@ -93,6 +93,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:active_document_id, id)
       |> assign(:confirm_close_doc, nil)
       |> assign(:active_tab, "view")
+      |> assign(:has_form_fields, false)
       |> assign(:view_mode, :edit)
       |> assign(:left_panel, nil)
       |> assign(:right_panel, nil)
@@ -1350,6 +1351,13 @@ defmodule QuireWeb.WorkspaceLive do
 
   @impl true
   def handle_event("select_tab", %{"tab" => tab}, socket) do
+    socket =
+      if tab == "forms" do
+        assign(socket, :has_form_fields, check_form_fields(socket))
+      else
+        socket
+      end
+
     {:noreply, assign(socket, :active_tab, tab)}
   end
 
@@ -2055,6 +2063,19 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
+      <!-- Forms tab ribbon (T-124) -->
+      <div :if={@active_tab == "forms"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Form Actions">
+          <.ribbon_button
+            icon="hero-arrow-uturn-left"
+            label="Reset Form"
+            phx-click="reset_form"
+            tooltip="Reset all form fields to their default values"
+            disabled={!@has_form_fields}
+          />
+        </.ribbon_group>
+      </div>
+
       <!-- E-Sign tab ribbon (T-147) -->
       <div :if={@active_tab == "esign"} class="flex items-center gap-1 flex-1">
         <.ribbon_group label="Request">
@@ -2336,6 +2357,76 @@ defmodule QuireWeb.WorkspaceLive do
 
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Insert failed: #{reason}")}
+    end
+  end
+
+  defp check_form_fields(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, doc_bytes} <- Quire.Storage.get(ref) do
+      case Quire.FormData.read_defaults(doc_bytes) do
+        {:ok, defaults} when map_size(defaults) > 0 -> true
+        _ -> false
+      end
+    else
+      _ -> false
+    end
+  end
+
+  @impl true
+  def handle_event("reset_form", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, doc_bytes} <- Quire.Storage.get(ref) do
+      case Quire.FormData.reset(doc_bytes) do
+        {:ok, reset_bytes} when is_binary(reset_bytes) ->
+          {:ok, new_ref} =
+            Quire.Storage.put(reset_bytes,
+              name: doc.title,
+              content_type: "application/pdf"
+            )
+
+          source_map = %{
+            "storage_ref" => %{
+              "adapter" => to_string(new_ref.adapter),
+              "key" => new_ref.key,
+              "name" => new_ref.name,
+              "content_type" => new_ref.content_type,
+              "byte_size" => new_ref.byte_size
+            },
+            "source_revision" => rev.id,
+            "note" => "Form reset to defaults"
+          }
+
+          {:ok, _new_rev} =
+            Quire.Documents.create_revision(doc,
+              label: "Form reset",
+              source: source_map
+            )
+
+          {:noreply,
+           socket
+           |> assign(:has_form_fields, false)
+           |> push_event("open_document", %{
+             url: socket.assigns.document_url,
+             password: nil
+           })
+           |> put_flash(:info, "Form fields reset to defaults")}
+
+        _ ->
+          {:noreply, put_flash(socket, :error, "No form fields found to reset")}
+      end
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not load document for reset")}
     end
   end
 

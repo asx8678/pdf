@@ -70,6 +70,20 @@ defmodule QuireWeb.WorkspaceLiveTest do
     end
   end
 
+  describe "reset form (T-124)" do
+    @reset_btn ~s{button[phx-click="reset_form"]}
+
+    test "reset button is visible in the Forms tab and disabled when no form fields", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "forms")
+
+      assert has_element?(lv, @reset_btn)
+      assert has_element?(lv, ~s{#{@reset_btn}[disabled]})
+      assert has_element?(lv, ~s{#{@reset_btn}[aria-disabled="true"]})
+      refute has_element?(lv, @reset_btn, "Reset Form")
+    end
+  end
+
   describe "keyboard shortcuts (§8.5, T-033)" do
     test "the shell carries the keyboard hook and key bindings", %{conn: conn} do
       {:ok, lv, _html} = open_workspace(conn)
