@@ -90,7 +90,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:searching, false)
       |> assign(:zoom, 100)
       |> assign(:scroll_mode, :vertical)
-      |> assign(:spread_mode, :single)
+      |> assign(:spread_mode, :none)
       |> assign(:fit_mode, :fit_page)
       |> assign(:fullscreen, false)
       |> assign(:rotation, 0)
