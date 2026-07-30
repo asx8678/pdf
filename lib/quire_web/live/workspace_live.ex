@@ -46,7 +46,8 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :bookmarks, icon: "hero-bookmark", label: "Bookmarks"},
     %{id: :layers, icon: "hero-rectangle-stack", label: "Layers"},
     %{id: :signatures, icon: "hero-pencil", label: "Signatures"},
-    %{id: :comments, icon: "hero-chat-bubble-left-right", label: "Comments"}
+    %{id: :comments, icon: "hero-chat-bubble-left-right", label: "Comments"},
+    %{id: :confidence, icon: "hero-chart-bar", label: "OCR Confidence"}
   ]
 
   @right_rail_items [
@@ -54,7 +55,16 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :attachments, icon: "hero-paper-clip", label: "Attachments"}
   ]
 
-  @panels [:thumbnails, :bookmarks, :layers, :search, :attachments, :signatures, :comments]
+  @panels [
+    :thumbnails,
+    :bookmarks,
+    :layers,
+    :search,
+    :attachments,
+    :signatures,
+    :comments,
+    :confidence
+  ]
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -1628,6 +1638,8 @@ defmodule QuireWeb.WorkspaceLive do
           <.attachments_panel attachments={@attachments} />
         <% @panel == :signatures -> %>
           <.signatures_panel signatures={@signatures} />
+        <% @panel == :confidence -> %>
+          <.ocr_confidence_panel />
         <% @panel == :search -> %>
           <.search_panel
             query={@search_query}
