@@ -215,7 +215,7 @@ defmodule Quire.Workers.ConvertWorker do
 
   defp resolve_paper_size(_), do: {8.5, 11.0}
 
-  defp maybe_put_margin(map, key, nil), do: map
+  defp maybe_put_margin(map, _key, nil), do: map
   defp maybe_put_margin(map, key, value) when is_number(value), do: Map.put(map, key, value)
 
   defp decode_pdf(base64_str) when is_binary(base64_str) do
