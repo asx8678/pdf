@@ -1132,7 +1132,7 @@ defmodule QuireWeb.WorkspaceLive do
           />
         </.ribbon_group>
 
-        <.ribbon_group label="Progress" :if={@ocr_progress}>
+        <.ribbon_group :if={@ocr_progress} label="Progress">
           <div class="flex items-center gap-2 px-2 py-1 text-xs text-gray-500">
             <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
             <span>{"#{@ocr_progress.pct}%"}</span>
@@ -1397,12 +1397,14 @@ defmodule QuireWeb.WorkspaceLive do
       page_index: data["pageIndex"] || 0,
       kind: "file_attachment",
       rect: data["rectPdf"] || data["rect"],
-      attachment_ref: attachment_ref && %{
-        key: attachment_ref.key,
-        name: attachment_ref.name,
-        content_type: attachment_ref.content_type,
-        byte_size: attachment_ref.byte_size
-      },
+      attachment_ref:
+        attachment_ref &&
+          %{
+            key: attachment_ref.key,
+            name: attachment_ref.name,
+            content_type: attachment_ref.content_type,
+            byte_size: attachment_ref.byte_size
+          },
       content: file_name,
       color: nil,
       opacity: 100,
@@ -1414,10 +1416,11 @@ defmodule QuireWeb.WorkspaceLive do
 
   defp record_annotation(socket, document_id, user_id, annot) do
     with {:ok, session_pid} <- Quire.Editing.open_session(document_id, user_id),
-         {:ok, _} <- Quire.Editing.apply(session_pid, %{
-           kind: "annot.add",
-           data: annot
-         }) do
+         {:ok, _} <-
+           Quire.Editing.apply(session_pid, %{
+             kind: "annot.add",
+             data: annot
+           }) do
       assign(socket, :mutations_pending, true)
     else
       _ ->

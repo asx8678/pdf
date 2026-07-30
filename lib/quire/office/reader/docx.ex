@@ -80,7 +80,7 @@ defmodule Quire.Office.Reader.Docx do
           notes: []
         }
 
-        case Saxy.parse_string(doc_xml, DocumentHandler, state) do
+        case Saxy.parse_string(doc_xml, __MODULE__.DocumentHandler, state) do
           {:ok, state} ->
             state = do_finalize_paragraph(state)
             blocks = state.blocks |> Enum.reverse() |> group_lists()
@@ -186,7 +186,9 @@ defmodule Quire.Office.Reader.Docx do
   defp parse_numbering(entry_map) do
     case Map.fetch(entry_map, "word/numbering.xml") do
       {:ok, xml} ->
-        {:ok, result} = Saxy.parse_string(xml, NumberingHandler, %{num_map: %{}, abstract_levels: %{}})
+        {:ok, result} =
+          Saxy.parse_string(xml, NumberingHandler, %{num_map: %{}, abstract_levels: %{}})
+
         result
 
       _ ->
@@ -283,12 +285,20 @@ defmodule Quire.Office.Reader.Docx do
 
         match_ns(name, "pStyle") ->
           am = Map.new(attrs)
-          sid = Map.get(am, "w:val") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
+          sid =
+            Map.get(am, "w:val") ||
+              Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
           {:ok, %{state | current_style_id: sid}}
 
         match_ns(name, "numId") ->
           am = Map.new(attrs)
-          ns = Map.get(am, "w:val") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
+          ns =
+            Map.get(am, "w:val") ||
+              Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
           nid = if ns, do: String.to_integer(ns), else: nil
           {:ok, %{state | current_num_id: nid}}
 
@@ -364,9 +374,16 @@ defmodule Quire.Office.Reader.Docx do
             # Inside a table cell — accumulate text into cell_texts
             text = state.text_parts |> Enum.reverse() |> Enum.join("") |> String.trim()
             cell_texts = if text != "", do: [text | state.cell_texts], else: state.cell_texts
-            {:ok, %{state | text_parts: [], current_style_id: nil, current_num_id: nil,
-                            in_paragraph: max(0, state.in_paragraph - 1),
-                            cell_texts: cell_texts}}
+
+            {:ok,
+             %{
+               state
+               | text_parts: [],
+                 current_style_id: nil,
+                 current_num_id: nil,
+                 in_paragraph: max(0, state.in_paragraph - 1),
+                 cell_texts: cell_texts
+             }}
           else
             state = finalize_p(state)
             {:ok, %{state | in_paragraph: max(0, state.in_paragraph - 1)}}
@@ -386,23 +403,45 @@ defmodule Quire.Office.Reader.Docx do
 
         match_ns(name, "tbl") ->
           rows = Enum.reverse(state.rows_accum)
-          tb = case rows do
-                 [] -> nil
-                 [first | rest] -> {:table, first, rest}
-               end
+
+          tb =
+            case rows do
+              [] -> nil
+              [first | rest] -> {:table, first, rest}
+            end
+
           blocks = if tb, do: [tb | state.blocks], else: state.blocks
-          {:ok, %{state | in_table: max(0, state.in_table - 1),
-                          rows_accum: [], row_cells: [], blocks: blocks}}
+
+          {:ok,
+           %{
+             state
+             | in_table: max(0, state.in_table - 1),
+               rows_accum: [],
+               row_cells: [],
+               blocks: blocks
+           }}
 
         match_ns(name, "tr") ->
           cells = Enum.reverse(state.row_cells)
-          {:ok, %{state | in_row: max(0, state.in_row - 1),
-                          rows_accum: [cells | state.rows_accum], row_cells: []}}
+
+          {:ok,
+           %{
+             state
+             | in_row: max(0, state.in_row - 1),
+               rows_accum: [cells | state.rows_accum],
+               row_cells: []
+           }}
 
         match_ns(name, "tc") ->
           ct = state.cell_texts |> Enum.reverse() |> Enum.join(" ") |> String.trim()
-          {:ok, %{state | in_cell: max(0, state.in_cell - 1),
-                          cell_texts: [], row_cells: [ct | state.row_cells]}}
+
+          {:ok,
+           %{
+             state
+             | in_cell: max(0, state.in_cell - 1),
+               cell_texts: [],
+               row_cells: [ct | state.row_cells]
+           }}
 
         match_ns(name, "tblGrid") ->
           {:ok, %{state | in_table_grid: max(0, state.in_table_grid - 1)}}
@@ -468,16 +507,29 @@ defmodule Quire.Office.Reader.Docx do
     @moduledoc false
     @behaviour Saxy.Handler
 
-    def handle_event(:start_element, {name, attrs}, acc) when
-        name in ["w:style", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style"] do
+    def handle_event(:start_element, {name, attrs}, acc)
+        when name in [
+               "w:style",
+               "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style"
+             ] do
       am = Map.new(attrs)
-      id = Map.get(am, "w:styleId") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId")
-      type = Map.get(am, "w:type") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type")
+
+      id =
+        Map.get(am, "w:styleId") ||
+          Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}styleId")
+
+      type =
+        Map.get(am, "w:type") ||
+          Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type")
+
       {:ok, {:style, id, type, nil, acc}}
     end
 
-    def handle_event(:start_element, {name, _}, {:style, id, type, _, acc}) when
-        name in ["w:name", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name"] do
+    def handle_event(:start_element, {name, _}, {:style, id, type, _, acc})
+        when name in [
+               "w:name",
+               "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name"
+             ] do
       {:ok, {:style_name, id, type, "", acc}}
     end
 
@@ -497,14 +549,22 @@ defmodule Quire.Office.Reader.Docx do
     def handle_event(:end_element, "w:name", {:style_name, id, type, n, acc}),
       do: {:ok, {:style, id, type, n, acc}}
 
-    def handle_event(:end_element, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name", {:style_name, id, type, n, acc}),
-      do: {:ok, {:style, id, type, n, acc}}
+    def handle_event(
+          :end_element,
+          "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}name",
+          {:style_name, id, type, n, acc}
+        ),
+        do: {:ok, {:style, id, type, n, acc}}
 
     def handle_event(:end_element, "w:style", {:style, id, _, n, acc}),
       do: {:ok, store_style(acc, id, n)}
 
-    def handle_event(:end_element, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style", {:style, id, _, n, acc}),
-      do: {:ok, store_style(acc, id, n)}
+    def handle_event(
+          :end_element,
+          "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}style",
+          {:style, id, _, n, acc}
+        ),
+        do: {:ok, store_style(acc, id, n)}
 
     def handle_event(_, _, acc), do: {:ok, acc}
 
@@ -526,27 +586,63 @@ defmodule Quire.Office.Reader.Docx do
       cond do
         name in ["w:num", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}num"] ->
           am = Map.new(attrs)
-          nid = Map.get(am, "w:numId") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numId")
+
+          nid =
+            Map.get(am, "w:numId") ||
+              Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numId")
+
           {:ok, %{state | current_num: nid && String.to_integer(nid)}}
 
-        name in ["w:abstractNumId", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId"] ->
+        name in [
+          "w:abstractNumId",
+          "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId"
+        ] ->
           am = Map.new(attrs)
-          val = Map.get(am, "w:val") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
+          val =
+            Map.get(am, "w:val") ||
+              Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
           {:ok, %{state | current_abs_id: val && String.to_integer(val)}}
 
-        name in ["w:abstractNum", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum"] ->
+        name in [
+          "w:abstractNum",
+          "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum"
+        ] ->
           am = Map.new(attrs)
-          aid = Map.get(am, "w:abstractNumId") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId")
+
+          aid =
+            Map.get(am, "w:abstractNumId") ||
+              Map.get(
+                am,
+                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNumId"
+              )
+
           {:ok, %{state | cur_abs_def: aid && String.to_integer(aid), in_abs: true}}
 
         name in ["w:lvl", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lvl"] ->
           am = Map.new(attrs)
-          il = Map.get(am, "w:ilvl") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ilvl", "0")
+
+          il =
+            Map.get(am, "w:ilvl") ||
+              Map.get(
+                am,
+                "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ilvl",
+                "0"
+              )
+
           {:ok, %{state | current_ilvl: String.to_integer(il), in_lvl: true, current_fmt: nil}}
 
-        name in ["w:numFmt", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numFmt"] ->
+        name in [
+          "w:numFmt",
+          "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numFmt"
+        ] ->
           am = Map.new(attrs)
-          v = Map.get(am, "w:val") || Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
+          v =
+            Map.get(am, "w:val") ||
+              Map.get(am, "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val")
+
           {:ok, %{state | current_fmt: v}}
 
         true ->
@@ -559,22 +655,33 @@ defmodule Quire.Office.Reader.Docx do
     def handle_event(:end_element, name, state) do
       cond do
         name in ["w:num", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}num"] ->
-          nm = if state.current_num && state.current_abs_id,
-                 do: Map.put(state.num_map, state.current_num, state.current_abs_id),
-                 else: state.num_map
+          nm =
+            if state.current_num && state.current_abs_id,
+              do: Map.put(state.num_map, state.current_num, state.current_abs_id),
+              else: state.num_map
+
           {:ok, %{state | num_map: nm, current_num: nil, current_abs_id: nil}}
 
-        name in ["w:abstractNum", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum"] ->
+        name in [
+          "w:abstractNum",
+          "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}abstractNum"
+        ] ->
           {:ok, %{state | cur_abs_def: nil, in_abs: false}}
 
         name in ["w:lvl", "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lvl"] ->
           levels =
             if state.cur_abs_def && state.current_fmt do
-              Map.put(state.abstract_levels, {state.cur_abs_def, state.current_ilvl}, state.current_fmt)
+              Map.put(
+                state.abstract_levels,
+                {state.cur_abs_def, state.current_ilvl},
+                state.current_fmt
+              )
             else
               state.abstract_levels
             end
-          {:ok, %{state | abstract_levels: levels, in_lvl: false, current_ilvl: nil, current_fmt: nil}}
+
+          {:ok,
+           %{state | abstract_levels: levels, in_lvl: false, current_ilvl: nil, current_fmt: nil}}
 
         true ->
           {:ok, state}
@@ -592,11 +699,21 @@ defmodule Quire.Office.Reader.Docx do
     @moduledoc false
     @behaviour Saxy.Handler
 
-    def handle_event(:start_element, {name, attrs}, acc) when
-        name in ["Relationship", "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"] do
+    def handle_event(:start_element, {name, attrs}, acc)
+        when name in [
+               "Relationship",
+               "{http://schemas.openxmlformats.org/package/2006/relationships}Relationship"
+             ] do
       am = Map.new(attrs)
-      id = Map.get(am, "Id") || Map.get(am, "{http://schemas.openxmlformats.org/package/2006/relationships}Id")
-      tgt = Map.get(am, "Target") || Map.get(am, "{http://schemas.openxmlformats.org/package/2006/relationships}Target")
+
+      id =
+        Map.get(am, "Id") ||
+          Map.get(am, "{http://schemas.openxmlformats.org/package/2006/relationships}Id")
+
+      tgt =
+        Map.get(am, "Target") ||
+          Map.get(am, "{http://schemas.openxmlformats.org/package/2006/relationships}Target")
+
       {:ok, Map.put(acc, id, tgt)}
     end
 
@@ -611,8 +728,8 @@ defmodule Quire.Office.Reader.Docx do
     @moduledoc false
     @behaviour Saxy.Handler
 
-    def handle_event(:start_element, {name, _}, _) when
-        name in ["title", "{http://purl.org/dc/elements/1.1/}title", "dc:title"],
+    def handle_event(:start_element, {name, _}, _)
+        when name in ["title", "{http://purl.org/dc/elements/1.1/}title", "dc:title"],
         do: {:ok, {:title, ""}}
 
     def handle_event(:start_element, _, st), do: {:ok, st}
@@ -620,8 +737,8 @@ defmodule Quire.Office.Reader.Docx do
     def handle_event(:characters, chars, {:title, _}), do: {:ok, {:title, chars}}
     def handle_event(:characters, _, st), do: {:ok, st}
 
-    def handle_event(:end_element, name, {:title, val}) when
-        name in ["title", "dc:title", "{http://purl.org/dc/elements/1.1/}title"],
+    def handle_event(:end_element, name, {:title, val})
+        when name in ["title", "dc:title", "{http://purl.org/dc/elements/1.1/}title"],
         do: {:ok, val}
 
     def handle_event(:end_element, _, st), do: {:ok, st}

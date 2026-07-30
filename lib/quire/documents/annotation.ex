@@ -18,10 +18,10 @@ defmodule Quire.Documents.Annotation do
     field :path_data, :map
     field :color, :map
     field :opacity, :float
-  field :border_width, :float
-  field :content, :string
-  field :author, :string
-  field :attachment_ref, :map
+    field :border_width, :float
+    field :content, :string
+    field :author, :string
+    field :attachment_ref, :map
 
     timestamps(type: :utc_datetime)
   end

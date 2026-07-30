@@ -117,38 +117,41 @@ defmodule Quire.Workers.OcrWorker do
     timings = %{}
 
     result =
-      Enum.reduce_while(Enum.with_index(page_range), {:ok, result_doc, timings, 0},
-        fn {page_idx, i}, {:ok, acc_doc, acc_timings, last_pct} ->
-          # Progress 10–90 % spread across pages
-          pct = min(10 + div((i + 1) * 80, total), 90)
+      Enum.reduce_while(Enum.with_index(page_range), {:ok, result_doc, timings, 0}, fn {page_idx,
+                                                                                        i},
+                                                                                       {:ok,
+                                                                                        acc_doc,
+                                                                                        acc_timings,
+                                                                                        last_pct} ->
+        # Progress 10–90 % spread across pages
+        pct = min(10 + div((i + 1) * 80, total), 90)
 
-          if pct != last_pct do
-            report_progress(operation_id, doc.id, pct)
-          end
-
-          {elapsed, page_result} =
-            :timer.tc(fn ->
-              process_one_page(src_doc, acc_doc, page_idx)
-            end)
-
-          page_info = %{page: page_idx, elapsed_us: elapsed}
-
-          case page_result do
-            {:ok, updated_doc, spans} ->
-              avg_conf =
-                if spans != [],
-                  do: avg_confidence(spans),
-                  else: nil
-
-              emit_telemetry(:page_done, page_info |> Map.put(:avg_confidence, avg_conf))
-
-              {:cont, {:ok, updated_doc, acc_timings, pct}}
-
-            {:error, reason} ->
-              {:halt, {:error, {:page_failed, page_idx, reason}}}
-          end
+        if pct != last_pct do
+          report_progress(operation_id, doc.id, pct)
         end
-      )
+
+        {elapsed, page_result} =
+          :timer.tc(fn ->
+            process_one_page(src_doc, acc_doc, page_idx)
+          end)
+
+        page_info = %{page: page_idx, elapsed_us: elapsed}
+
+        case page_result do
+          {:ok, updated_doc, spans} ->
+            avg_conf =
+              if spans != [],
+                do: avg_confidence(spans),
+                else: nil
+
+            emit_telemetry(:page_done, page_info |> Map.put(:avg_confidence, avg_conf))
+
+            {:cont, {:ok, updated_doc, acc_timings, pct}}
+
+          {:error, reason} ->
+            {:halt, {:error, {:page_failed, page_idx, reason}}}
+        end
+      end)
 
     case result do
       {:ok, final_doc, _timings, _pct} -> {:ok, final_doc}
