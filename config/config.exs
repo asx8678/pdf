@@ -44,7 +44,11 @@ config :quire, Oban,
   plugins: [
     {Oban.Plugins.Pruner, max_age: 604_800},
     {Oban.Plugins.Lifeline, rescue_after: :timer.minutes(30)},
-    {Oban.Plugins.Reindexer, schedule: "@weekly"}
+    {Oban.Plugins.Reindexer, schedule: "@weekly"},
+    {Oban.Plugins.Cron,
+     crontab: [
+       {"@daily", Quire.Workers.TrialExpiryWorker, description: "Downgrade expired trial licenses to standard"}
+     ]}
   ]
 
 # Configure the endpoint
