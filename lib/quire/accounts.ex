@@ -507,4 +507,46 @@ defmodule Quire.Accounts do
       end
     end)
   end
+
+  @doc """
+  Delivers reset password email instructions.
+
+  If the email exists, a reset token is generated and emailed.
+  Returns `:ok` regardless of whether the email exists (to avoid leaking
+  user existence).
+  """
+  def deliver_user_reset_password_instructions(email, url_fun) when is_binary(email) do
+    if user = get_user_by_email(email) do
+      {encoded_token, user_token} = UserToken.build_email_token(user, "reset_password")
+      Repo.insert!(user_token)
+      UserNotifier.deliver_reset_password_instructions(user, url_fun.(encoded_token))
+    end
+
+    :ok
+  end
+
+  @doc """
+  Gets a user by a valid reset password token.
+
+  If the token is invalid or expired, returns `nil`.
+  """
+  def get_user_by_reset_password_token(token) when is_binary(token) do
+    with {:ok, query} <- UserToken.verify_reset_password_token_query(token),
+         [{user, _token}] <- Repo.all(query) do
+      user
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Resets the user's password using a valid reset token.
+
+  The token is consumed (deleted) after a successful reset.
+  Returns `{:ok, user}` or `{:error, changeset}`.
+  """
+  def reset_user_password(user, attrs) do
+    changeset = User.password_changeset(user, attrs)
+    update_user_and_delete_all_tokens(changeset)
+  end
 end

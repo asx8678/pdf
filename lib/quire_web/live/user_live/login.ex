@@ -90,6 +90,14 @@ defmodule QuireWeb.UserLive.Login do
             autocomplete="current-password"
             spellcheck="false"
           />
+          <div class="text-right">
+            <.link
+              navigate={~p"/users/forgot-password"}
+              class="text-xs text-gray-500 hover:text-accent underline"
+            >
+              Forgot password?
+            </.link>
+          </div>
           <.button class="w-full" name={@form[:remember_me].name} value="true">
             Log in and stay logged in <span aria-hidden="true">→</span>
           </.button>

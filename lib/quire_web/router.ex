@@ -91,6 +91,8 @@ defmodule QuireWeb.Router do
       on_mount: [{QuireWeb.UserAuth, :mount_current_scope}] do
       live "/", HomeLive, :index
       live "/users/register", UserLive.Registration, :new
+      live "/users/forgot-password", UserLive.ForgotPassword, :new
+      live "/users/reset-password/:token", UserLive.ResetPassword, :edit
       live "/users/log-in", UserLive.Login, :new
       live "/users/log-in/:token", UserLive.Confirmation, :new
     end

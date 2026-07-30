@@ -394,4 +394,84 @@ defmodule Quire.AccountsTest do
       refute inspect(%User{password: "123456"}) =~ "password: \"123456\""
     end
   end
+
+  describe "deliver_user_reset_password_instructions/2" do
+    test "returns :ok for existing user" do
+      user = user_fixture()
+
+      assert :ok =
+               Accounts.deliver_user_reset_password_instructions(user.email, fn token ->
+                 "https://example.com/reset/#{token}"
+               end)
+    end
+
+    test "returns :ok for non-existent email (no leaking)" do
+      assert :ok =
+               Accounts.deliver_user_reset_password_instructions(
+                 "nonexistent@example.com",
+                 fn _token -> "https://example.com/reset/token" end
+               )
+    end
+  end
+
+  describe "get_user_by_reset_password_token/1" do
+    test "returns user for valid token" do
+      user = user_fixture()
+
+      # Generate a reset token directly
+      {encoded_token, user_token} = UserToken.build_email_token(user, "reset_password")
+      Quire.Repo.insert!(user_token)
+
+      found = Accounts.get_user_by_reset_password_token(encoded_token)
+      assert found
+      assert found.id == user.id
+    end
+
+    test "returns nil for invalid token" do
+      assert Accounts.get_user_by_reset_password_token("invalid-token") == nil
+    end
+
+    test "returns nil for expired token" do
+      user = user_fixture()
+
+      {encoded_token, user_token} = UserToken.build_email_token(user, "reset_password")
+      %{id: id} = Quire.Repo.insert!(user_token)
+
+      # Offset the token's inserted_at to be expired (past 60 min validity)
+      Quire.Repo.update_all(
+        from(t in UserToken, where: t.id == ^id),
+        set: [inserted_at: DateTime.add(DateTime.utc_now(:second), -3600 * 2, :second)]
+      )
+
+      assert Accounts.get_user_by_reset_password_token(encoded_token) == nil
+    end
+  end
+
+  describe "reset_user_password/2" do
+    test "updates the password" do
+      user = user_fixture()
+      user = set_password(user)
+      assert User.valid_password?(user, valid_user_password())
+
+      {:ok, {user, _}} = Accounts.reset_user_password(user, %{
+        password: "new-valid-password-123",
+        password_confirmation: "new-valid-password-123"
+      })
+
+      refute User.valid_password?(user, valid_user_password())
+      assert User.valid_password?(user, "new-valid-password-123")
+    end
+
+    test "returns error for mismatched confirmation" do
+      user = user_fixture()
+      user = set_password(user)
+
+      assert {:error, changeset} = Accounts.reset_user_password(user, %{
+        password: "new-valid-password-123",
+        password_confirmation: "different-password"
+      })
+
+      assert changeset.errors[:password_confirmation]
+    end
+  end
 end

@@ -11,6 +11,7 @@ defmodule Quire.Accounts.UserToken do
   @magic_link_validity_in_minutes 15
   @change_email_validity_in_days 7
   @session_validity_in_days 14
+  @reset_password_validity_in_minutes 60
   schema "users_tokens" do
     field :token, :binary
     field :context, :string
@@ -141,6 +142,31 @@ defmodule Quire.Accounts.UserToken do
         query =
           from token in by_token_and_context_query(hashed_token, context),
             where: token.inserted_at > ago(@change_email_validity_in_days, "day")
+
+        {:ok, query}
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc """
+  Verifies a reset password token.
+
+  Returns `{:ok, query}` where the query returns `{user, token}` if the token
+  is valid and has not expired (within @reset_password_validity_in_minutes).
+  """
+  def verify_reset_password_token_query(token) do
+    case Base.url_decode64(token, padding: false) do
+      {:ok, decoded_token} ->
+        hashed_token = :crypto.hash(@hash_algorithm, decoded_token)
+
+        query =
+          from token in by_token_and_context_query(hashed_token, "reset_password"),
+            join: user in assoc(token, :user),
+            where: token.inserted_at > ago(@reset_password_validity_in_minutes, "minute"),
+            where: token.sent_to == user.email,
+            select: {user, token}
 
         {:ok, query}
 
