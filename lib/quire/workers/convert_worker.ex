@@ -20,9 +20,13 @@ defmodule Quire.Workers.ConvertWorker do
         "revision_id"    => revision_id,                # required (base revision)
         "operation_id"   => op_id,                      # optional, for progress
         "filename"       => "converted.pdf",            # optional
-        "page_size"      => "A4",                       # optional
+        "page_size"      => "A4",                       # optional — atom name or {w,h} tuple
         "landscape"      => false,                      # optional
-        "background"     => true,                       # optional
+        "background"     => true,                       # optional — print background graphics
+        "header"         => "<span>My Header</span>",    # optional — header HTML template
+        "footer"         => "<span>Page %p</span>",     # optional — footer HTML template
+        "wait_for"       => %{selector: "#ready", attribute: "data-loaded"},  # optional
+        "margins"        => %{top: 0.4, bottom: 0.4, left: 0.4, right: 0.4}, # optional, inches
         "disable_scripts"   => false,                   # optional
         "offline"           => true                     # optional
       }
@@ -105,21 +109,114 @@ defmodule Quire.Workers.ConvertWorker do
 
   # ── chromic_pdf options ──────────────────────────────────────────────────
 
-  defp build_chrome_opts(args) do
-    opts = [discard_stderr: true]
+  @paper_sizes %{
+    a0: {33.1, 46.8},
+    a1: {23.4, 33.1},
+    a2: {16.5, 23.4},
+    a3: {11.7, 16.5},
+    a4: {8.3, 11.7},
+    a5: {5.8, 8.3},
+    a6: {4.1, 5.8},
+    a7: {2.9, 4.1},
+    a8: {2.0, 2.9},
+    a9: {1.5, 2.0},
+    a10: {1.0, 1.5},
+    us_letter: {8.5, 11.0},
+    legal: {8.5, 14.0},
+    tabloid: {11.0, 17.0}
+  }
 
-    opts = if args["page_size"], do: Keyword.put(opts, :page_size, args["page_size"]), else: opts
-    opts = if args["landscape"], do: Keyword.put(opts, :landscape, true), else: opts
-    opts = if args["background"] == false, do: Keyword.put(opts, :background, false), else: opts
+  defp build_chrome_opts(args) do
+    print_to_pdf = %{}
+
+    # — page size —
+    print_to_pdf =
+      if name = args["page_size"] do
+        {w, h} = resolve_paper_size(name)
+        print_to_pdf |> Map.put("paperWidth", w) |> Map.put("paperHeight", h)
+      else
+        print_to_pdf
+      end
+
+    # — landscape orientation —
+    print_to_pdf =
+      if args["landscape"], do: Map.put(print_to_pdf, "landscape", true), else: print_to_pdf
+
+    # — background graphics —
+    print_to_pdf =
+      if args["background"] == false,
+        do: Map.put(print_to_pdf, "printBackground", false),
+        else: print_to_pdf
+
+    # — margins (converted to inches) —
+    print_to_pdf =
+      if margins = args["margins"] do
+        print_to_pdf
+        |> maybe_put_margin("marginTop", margins["top"] || margins[:top])
+        |> maybe_put_margin("marginBottom", margins["bottom"] || margins[:bottom])
+        |> maybe_put_margin("marginLeft", margins["left"] || margins[:left])
+        |> maybe_put_margin("marginRight", margins["right"] || margins[:right])
+      else
+        print_to_pdf
+      end
+
+    # — header / footer —
+    header = args["header"]
+    footer = args["footer"]
+
+    print_to_pdf =
+      if header or footer do
+        print_to_pdf
+        |> Map.put("displayHeaderFooter", true)
+        |> then(fn m -> if header, do: Map.put(m, "headerTemplate", header), else: m end)
+        |> then(fn m -> if footer, do: Map.put(m, "footerTemplate", footer), else: m end)
+      else
+        print_to_pdf
+      end
+
+    # Assemble the final option list — session-level options stay flat
+    opts =
+      [
+        discard_stderr: true,
+        print_to_pdf: print_to_pdf
+      ]
+
+    # — session-level options —
     opts = if args["disable_scripts"], do: Keyword.put(opts, :disable_scripts, true), else: opts
     opts = if args["offline"] != false, do: Keyword.put(opts, :offline, true), else: opts
 
-    if args["margins"] && args["margins"] != %{} do
-      Keyword.put(opts, :margins, args["margins"])
-    else
-      opts
-    end
+    # — wait_for selector —
+    opts =
+      if wait = args["wait_for"] do
+        # Accept both string-keyed and atom-keyed maps
+        wait =
+          case wait do
+            %{"selector" => sel, "attribute" => attr} -> %{selector: sel, attribute: attr}
+            %{selector: sel, attribute: attr} -> %{selector: sel, attribute: attr}
+            _ -> nil
+          end
+
+        if wait, do: Keyword.put(opts, :wait_for, wait), else: opts
+      else
+        opts
+      end
+
+    opts
   end
+
+  defp resolve_paper_size(name) when is_binary(name),
+    do: resolve_paper_size(String.downcase(name))
+
+  defp resolve_paper_size(name) when is_atom(name) do
+    Map.get(@paper_sizes, name, {8.5, 11.0})
+  end
+
+  defp resolve_paper_size({_w, _h} = dims), do: dims
+
+  defp resolve_paper_size(_), do: {8.5, 11.0}
+
+  defp maybe_put_margin(map, key, nil), do: map
+  defp maybe_put_margin(map, key, value) when is_number(value), do: Map.put(map, key, value)
 
   defp decode_pdf(base64_str) when is_binary(base64_str) do
     # Without an output path chromic_pdf returns base64-encoded PDF bytes
