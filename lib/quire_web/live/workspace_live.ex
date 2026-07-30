@@ -8,8 +8,9 @@ defmodule QuireWeb.WorkspaceLive do
   Mounted at `/workspace/:id` for authenticated users. Wired here: menu
   bar tab selection, rail panel toggles, page navigation, and the
   multi-document tab strip (T-032) — open, switch, close, reorder
-  tabs, and an unsaved-changes confirmation modal. Document loading
-  and the per-tab ribbon LiveComponents (§9), and the backstage
+  tabs, and an unsaved-changes confirmation modal — and the §8.5
+  keyboard map (T-033) with its discoverable shortcuts modal. Document
+  loading and the per-tab ribbon LiveComponents (§9), and the backstage
   overlay (T-036) build on this shell.
   """
   use QuireWeb, :live_view
@@ -17,9 +18,14 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
+  import QuireWeb.Chrome.ShortcutsModal, only: [shortcuts_modal: 1]
   import QuireWeb.Chrome.StatusBar, only: [status_bar: 1]
   import QuireWeb.Chrome.TitleBar, only: [title_bar: 1]
   import QuireWeb.Shared.Modal, only: [modal: 1]
+
+  # The shell markup lives in workspace_live/workspace.html.heex (T-033);
+  # render/1 below only precomputes derived assigns and delegates to it.
+  embed_templates "workspace_live/*"
 
   @left_rail_items [
     %{id: :thumbnails, icon: "hero-squares-2x2", label: "Thumbnails"},
@@ -53,52 +59,17 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:zoom, 100)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
+      |> assign(:show_shortcuts, false)
 
     {:ok, socket}
   end
 
   @impl true
   def render(assigns) do
-    assigns =
-      assigns
-      |> assign(:left_items, rail_items(@left_rail_items, assigns.left_panel))
-      |> assign(:right_items, rail_items(@right_rail_items, assigns.right_panel))
-
-    ~H"""
-    <Layouts.workspace flash={@flash}>
-      <.title_bar document_title={@document_title} />
-      <.menu_bar active_tab={@active_tab} on_tab_click="select_tab" />
-      <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
-      <.document_tabs documents={@documents} active_id={@active_document_id} />
-
-      <div class="flex flex-1 min-h-0">
-        <.rail side="left" items={@left_items} on_item_click="toggle_panel" />
-        <.side_panel :if={@left_panel} side="left" panel={@left_panel} />
-
-        <main
-          id="document-canvas"
-          class="flex-1 min-w-0 flex items-center justify-center"
-          aria-label="Document canvas"
-        >
-          <.no_document_placeholder />
-        </main>
-
-        <.side_panel :if={@right_panel} side="right" panel={@right_panel} />
-        <.rail side="right" items={@right_items} on_item_click="toggle_panel" />
-      </div>
-
-      <.status_bar
-        page={@page}
-        total_pages={@total_pages}
-        zoom={@zoom}
-        progress={@progress}
-        on_prev_page="prev_page"
-        on_next_page="next_page"
-      />
-
-      <.confirm_close_modal :if={@confirm_close_doc} confirm_close_doc={@confirm_close_doc} />
-    </Layouts.workspace>
-    """
+    assigns
+    |> assign(:left_items, rail_items(@left_rail_items, assigns.left_panel))
+    |> assign(:right_items, rail_items(@right_rail_items, assigns.right_panel))
+    |> workspace()
   end
 
   # ── Document tab event handlers ──────────────────────────────────────────
@@ -251,9 +222,52 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
+  # Shift+/ ("?") — open the keyboard shortcuts modal (T-033)
+  def handle_event("keydown", %{"key" => "?"}, socket) do
+    {:noreply, assign(socket, :show_shortcuts, true)}
+  end
+
+  # Esc — cancel/close: dismiss whichever modal is open
+  def handle_event("keydown", %{"key" => "Escape"}, socket) do
+    socket =
+      socket
+      |> assign(:show_shortcuts, false)
+      |> assign(:confirm_close_doc, nil)
+
+    {:noreply, socket}
+  end
+
+  # PageUp / PageDown / Home / End — page navigation
+  def handle_event("keydown", %{"key" => key}, socket)
+      when key in ~w(PageUp PageDown Home End) do
+    {:noreply, assign(socket, :page, page_for_key(key, socket.assigns))}
+  end
+
+  # Ctrl/⌘+= / - / 0 / 1 — zoom in / out / fit page / actual size
+  def handle_event("keydown", %{"key" => key} = params, socket)
+      when key in ["=", "+", "-", "0", "1"] do
+    if params["ctrlKey"] || params["metaKey"] do
+      {:noreply, assign(socket, :zoom, zoom_for_key(key, socket.assigns.zoom))}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # The rest of the §8.5 map — open/save/print, undo/redo, find,
+  # select-all, Delete, F11 and Alt+letter access keys — depends on a
+  # loaded document, the undo stack or the ribbon (§9); those keypresses
+  # fall through here until the features land.
   def handle_event("keydown", _params, socket), do: {:noreply, socket}
 
   def handle_event("keyup", _params, socket), do: {:noreply, socket}
+
+  def handle_event("toggle_shortcuts", _params, socket) do
+    {:noreply, assign(socket, :show_shortcuts, !socket.assigns.show_shortcuts)}
+  end
+
+  def handle_event("close_shortcuts", _params, socket) do
+    {:noreply, assign(socket, :show_shortcuts, false)}
+  end
 
   # ── Pre-existing event handlers ──────────────────────────────────────────
 
@@ -295,6 +309,26 @@ defmodule QuireWeb.WorkspaceLive do
   defp rail_items(items, active_panel) do
     Enum.map(items, &Map.put(&1, :active, &1.id == active_panel))
   end
+
+  defp page_for_key("PageUp", assigns), do: max(assigns.page - 1, 1)
+  defp page_for_key("PageDown", assigns), do: min(assigns.page + 1, assigns.total_pages)
+  defp page_for_key("Home", _assigns), do: 1
+  defp page_for_key("End", assigns), do: assigns.total_pages
+
+  # Matches the ZoomControl presets; keyboard zoom steps through them.
+  @zoom_levels [50, 75, 100, 125, 150, 200]
+
+  defp zoom_for_key(key, zoom) when key in ["=", "+"] do
+    Enum.find(@zoom_levels, List.last(@zoom_levels), &(&1 > zoom))
+  end
+
+  defp zoom_for_key("-", zoom) do
+    @zoom_levels |> Enum.reverse() |> Enum.find(hd(@zoom_levels), &(&1 < zoom))
+  end
+
+  # "0" (fit page) and "1" (actual size) both resolve to 100% until a
+  # document is loaded and fit-page can be computed from real geometry.
+  defp zoom_for_key(_key, _zoom), do: 100
 
   # Removes a document from the list and adjusts active_document_id.
   defp remove_doc(socket, id) do

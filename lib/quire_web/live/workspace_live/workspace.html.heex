@@ -1,0 +1,72 @@
+<Layouts.workspace flash={@flash}>
+  <div
+    id="workspace-shell"
+    phx-hook=".KeyboardShortcuts"
+    phx-keydown="keydown"
+    phx-keyup="keyup"
+    tabindex="-1"
+    class="flex flex-col flex-1 min-h-0"
+  >
+    <.title_bar document_title={@document_title} />
+    <.menu_bar active_tab={@active_tab} on_tab_click="select_tab" />
+    <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
+    <.document_tabs documents={@documents} active_id={@active_document_id} />
+
+    <div class="flex flex-1 min-h-0">
+      <.rail side="left" items={@left_items} on_item_click="toggle_panel" />
+      <.side_panel :if={@left_panel} side="left" panel={@left_panel} />
+
+      <main
+        id="document-canvas"
+        class="flex-1 min-w-0 flex items-center justify-center"
+        aria-label="Document canvas"
+      >
+        <.no_document_placeholder />
+      </main>
+
+      <.side_panel :if={@right_panel} side="right" panel={@right_panel} />
+      <.rail side="right" items={@right_items} on_item_click="toggle_panel" />
+    </div>
+
+    <.status_bar
+      page={@page}
+      total_pages={@total_pages}
+      zoom={@zoom}
+      progress={@progress}
+      on_prev_page="prev_page"
+      on_next_page="next_page"
+    />
+
+    <.confirm_close_modal :if={@confirm_close_doc} confirm_close_doc={@confirm_close_doc} />
+
+    <.shortcuts_modal :if={@show_shortcuts} on_close="close_shortcuts" />
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".KeyboardShortcuts">
+      export default {
+        mounted() {
+          // Focus the shell so phx-keydown fires without the user clicking first
+          this.el.focus();
+
+          // Refocus the shell on any click outside form fields, so typing
+          // in an input keeps its events while chrome shortcuts stay live
+          document.addEventListener("click", (e) => {
+            if (e.target.tagName !== "INPUT" && e.target.tagName !== "SELECT" && e.target.tagName !== "TEXTAREA") {
+              this.el.focus();
+            }
+          });
+
+          // The §8.5 keymap claims combos the browser reserves (⌘O/S/P,
+          // ⌘F/G, zoom). Swallow the browser default when focus is not in
+          // an editable element so the keypress reaches the server instead.
+          const reserved = ["o", "s", "p", "f", "g", "z", "y", "a", "=", "+", "-", "0", "1"];
+          document.addEventListener("keydown", (e) => {
+            if (!(e.ctrlKey || e.metaKey)) return;
+            if (!reserved.includes(e.key.toLowerCase())) return;
+            if (e.target.closest("input, select, textarea, [contenteditable]")) return;
+            e.preventDefault();
+          }, true);
+        }
+      }
+    </script>
+  </div>
+</Layouts.workspace>

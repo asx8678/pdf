@@ -69,4 +69,91 @@ defmodule QuireWeb.WorkspaceLiveTest do
       assert has_element?(lv, @pill, "Edit")
     end
   end
+
+  describe "keyboard shortcuts (§8.5, T-033)" do
+    test "the shell carries the keyboard hook and key bindings", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      assert has_element?(
+               lv,
+               ~s{div#workspace-shell[phx-hook=".KeyboardShortcuts"][tabindex="-1"]}
+             )
+    end
+
+    test "? opens the shortcuts modal listing every category", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      refute has_element?(lv, "div[role='dialog'][aria-label='Keyboard shortcuts']")
+
+      html = render_keydown(lv, "keydown", %{"key" => "?"})
+
+      assert has_element?(lv, "div[role='dialog'][aria-label='Keyboard shortcuts']")
+
+      for category <- ~w(File Edit Find Navigation View Other) do
+        assert html =~ category
+      end
+
+      assert html =~ "<kbd>"
+      assert html =~ "Open document"
+      assert html =~ "Zoom in"
+      assert html =~ "Ribbon tab access keys"
+    end
+
+    test "Esc closes the shortcuts modal", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      render_keydown(lv, "keydown", %{"key" => "?"})
+      assert has_element?(lv, "div[role='dialog'][aria-label='Keyboard shortcuts']")
+
+      render_keydown(lv, "keydown", %{"key" => "Escape"})
+      refute has_element?(lv, "div[role='dialog'][aria-label='Keyboard shortcuts']")
+    end
+
+    test "the modal close button closes the shortcuts modal", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      render_keydown(lv, "keydown", %{"key" => "?"})
+      assert has_element?(lv, "div[role='dialog'][aria-label='Keyboard shortcuts']")
+
+      lv
+      |> element(
+        ~s{div[role='dialog'][aria-label='Keyboard shortcuts'] button[aria-label='Close']}
+      )
+      |> render_click()
+
+      refute has_element?(lv, "div[role='dialog'][aria-label='Keyboard shortcuts']")
+    end
+
+    test "Ctrl+= / Ctrl+- step zoom through the presets, Ctrl+0 resets", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      assert has_element?(lv, ~s{select[aria-label='Zoom level'] option[value='100'][selected]})
+
+      render_keydown(lv, "keydown", %{"key" => "=", "ctrlKey" => true})
+      assert has_element?(lv, ~s{select[aria-label='Zoom level'] option[value='125'][selected]})
+
+      render_keydown(lv, "keydown", %{"key" => "-", "metaKey" => true})
+      assert has_element?(lv, ~s{select[aria-label='Zoom level'] option[value='100'][selected]})
+
+      render_keydown(lv, "keydown", %{"key" => "=", "ctrlKey" => true})
+      render_keydown(lv, "keydown", %{"key" => "0", "ctrlKey" => true})
+      assert has_element?(lv, ~s{select[aria-label='Zoom level'] option[value='100'][selected]})
+    end
+
+    test "zoom keys without a modifier leave the zoom alone", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      render_keydown(lv, "keydown", %{"key" => "="})
+      assert has_element?(lv, ~s{select[aria-label='Zoom level'] option[value='100'][selected]})
+    end
+
+    test "page navigation keys stay within bounds on a one-page document", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      for key <- ~w(PageUp PageDown Home End) do
+        render_keydown(lv, "keydown", %{"key" => key})
+        assert has_element?(lv, "div[role='navigation'][aria-label='Page navigation']", "1 / 1")
+      end
+    end
+  end
 end

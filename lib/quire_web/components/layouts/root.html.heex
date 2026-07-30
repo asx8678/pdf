@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="Quire" suffix=" · Phoenix Framework" phx-no-format>{assigns[:page_title]}</.live_title>
+    <.live_title default="Quire" phx-no-format>{assigns[:page_title]}</.live_title>
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <script defer phx-track-static type="text/javascript" src={~p"/assets/js/app.js"}>
     </script>
@@ -43,14 +43,17 @@
       class="w-full relative z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-end"
     >
       <%= if @current_scope do %>
-        <li>
+        <li class="text-sm text-gray-500 dark:text-gray-400">
           {@current_scope.user.email}
         </li>
         <li>
-          <.link href={~p"/users/settings"}>Settings</.link>
+          <.link href={~p"/workspace/start-here"} class="text-sm font-medium hover:underline">Workspace</.link>
         </li>
         <li>
-          <.link href={~p"/users/log-out"} method="delete">Log out</.link>
+          <.link href={~p"/users/settings"} class="text-sm font-medium hover:underline">Settings</.link>
+        </li>
+        <li>
+          <.link href={~p"/users/log-out"} method="delete" class="text-sm font-medium hover:underline">Log out</.link>
         </li>
       <% else %>
         <li>

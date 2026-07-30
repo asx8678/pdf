@@ -9,7 +9,7 @@ defmodule QuireWeb.Chrome.DocumentTabs do
   Emits LiveView events for tab switching, closing, and drag-and-drop
   reorder. A colocated JS hook (`TabStrip`) handles HTML5 native drag
   and drop. Keyboard shortcuts (Ctrl/⌘+W, Ctrl/⌘+Tab, Ctrl/⌘+Shift+Tab)
-  are handled by the parent LiveView via `phx-keydown`.
+  are handled by the workspace shell's `phx-keydown` binding (T-033).
   """
   use Phoenix.Component
 
@@ -31,8 +31,6 @@ defmodule QuireWeb.Chrome.DocumentTabs do
       role="tablist"
       aria-label="Open documents"
       phx-hook="TabStrip"
-      phx-keydown="keydown"
-      phx-keyup="keyup"
     >
       <div
         :for={doc <- @documents}
