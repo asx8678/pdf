@@ -8,6 +8,13 @@ defmodule Quire.Repo.Migrations.AddUniqueSeqToRevisions do
     # branching means seq is no longer dense. The UNIQUE constraint enforces
     # that no two revisions share the same seq for the same document, which
     # would violate append-only and break Compare's two-revision diff.
+
+    # Add the seq column if it doesn't exist yet.
+    alter table(:document_revisions) do
+      add :seq, :integer
+    end
+
+    # Now safe to create the unique index.
     create unique_index(:document_revisions, [:document_id, :seq],
              name: :document_revisions_document_id_seq_unique
            )
@@ -17,5 +24,9 @@ defmodule Quire.Repo.Migrations.AddUniqueSeqToRevisions do
     drop unique_index(:document_revisions, [:document_id, :seq],
            name: :document_revisions_document_id_seq_unique
          )
+
+    alter table(:document_revisions) do
+      remove :seq
+    end
   end
 end
