@@ -36,6 +36,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.RibbonButton, only: [ribbon_button: 1]
   import QuireWeb.Chrome.RibbonSplitButton, only: [ribbon_split_button: 1]
   import QuireWeb.Shared.Modal, only: [modal: 1]
+  import Ecto.Query, only: [from: 2]
 
   # The shell markup lives in workspace_live/workspace.html.heex (T-033);
   # render/1 below only precomputes derived assigns and delegates to it.
@@ -137,6 +138,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:show_ocr_options, false)
       |> assign(:show_ocr_confidence, false)
       |> assign(:ocr_confidence_result, nil)
+      |> assign(:show_ocr_prompt, false)
+      |> assign(:ocr_prompt_dismissed, false)
       |> assign(:measure_mode_active, false)
       |> assign(:active_measure_mode, nil)
       |> assign(:calibrating, false)
@@ -788,7 +791,13 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("document_loaded", %{"page_count" => page_count}, socket) do
-    {:noreply, assign(socket, :total_pages, page_count)}
+    socket = assign(socket, :total_pages, page_count)
+
+    if socket.assigns.ocr_prompt_dismissed do
+      {:noreply, socket}
+    else
+      {:noreply, check_text_layer(socket)}
+    end
   end
 
   def handle_event("document_ready", %{"total_pages" => total_pages} = params, socket) do
@@ -1156,6 +1165,45 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("dismiss_whiteout_warning", _params, socket) do
     {:noreply, assign(socket, :whiteout_warning_visible, false)}
+  end
+
+  @doc """
+  Dismisses the OCR prompt for the current session.
+  """
+  def handle_event("dismiss_ocr_prompt", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_ocr_prompt, false)
+     |> assign(:ocr_prompt_dismissed, true)}
+  end
+
+  @doc """
+  Checks whether the document has any extractable text and assigns
+  `show_ocr_prompt` if all pages lack a text layer.
+  """
+  defp check_text_layer(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      has_any_text =
+        Quire.Repo.all(
+          Ecto.Query.from(p in Quire.Documents.Page,
+            where: p.revision_id == ^rev.id and p.has_text == true,
+            select: p.id,
+            limit: 1
+          )
+        ) != []
+
+      if has_any_text do
+        assign(socket, :show_ocr_prompt, false)
+      else
+        assign(socket, :show_ocr_prompt, true)
+      end
+    else
+      _ -> assign(socket, :show_ocr_prompt, false)
+    end
   end
 
   def handle_event("dismiss_whiteout_permanently", _params, socket) do
