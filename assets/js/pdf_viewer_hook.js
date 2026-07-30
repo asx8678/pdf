@@ -99,6 +99,15 @@ const PdfViewerHook = {
       this._closeDocument();
     });
 
+    // Enter/esgin field placement mode (T-147)
+    this.handleEvent("enable_esign_placement", () => {
+      this._enableEsignPlacement();
+    });
+
+    this.handleEvent("disable_esign_placement", () => {
+      this._disableEsignPlacement();
+    });
+
     // Toggle annotation editor mode (FreeText, etc.)
     this.handleEvent("toggle_editing", ({ mode }) => {
       if (!this._viewer) return;
@@ -634,6 +643,70 @@ const PdfViewerHook = {
       }
     } catch (e) {
       // Editors will be captured on save via saveDocument()
+    }
+  },
+
+  // ── E-Sign field placement (T-147) ─────────────────────────────────
+
+  _enableEsignPlacement() {
+    this._esignPlacementEnabled = true;
+    this._bindEsignPlaceClick();
+  },
+
+  _disableEsignPlacement() {
+    this._esignPlacementEnabled = false;
+    this._unbindEsignPlaceClick();
+  },
+
+  _bindEsignPlaceClick() {
+    this._unbindEsignPlaceClick();
+    const container = this.el.querySelector("#pdf-viewer-container");
+    if (!container) return;
+    this._esignPlaceClickHandler = (e) => this._onEsignPlaceClick(e);
+    container.addEventListener("click", this._esignPlaceClickHandler);
+  },
+
+  _unbindEsignPlaceClick() {
+    if (!this._esignPlaceClickHandler) return;
+    const container = this.el.querySelector("#pdf-viewer-container");
+    if (container) {
+      container.removeEventListener("click", this._esignPlaceClickHandler);
+    }
+    this._esignPlaceClickHandler = null;
+  },
+
+  _onEsignPlaceClick(e) {
+    if (!this._esignPlacementEnabled || !this._viewer) return;
+
+    const container = this.el.querySelector("#pdf-viewer-container");
+    const rect = container.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+
+    const pages = this._viewer._pages;
+    if (!pages) return;
+
+    for (let i = 0; i < pages.length; i++) {
+      const pv = pages[i];
+      if (!pv || !pv.div) continue;
+      const pr = pv.div.getBoundingClientRect();
+
+      if (e.clientX >= pr.left && e.clientX <= pr.right &&
+          e.clientY >= pr.top && e.clientY <= pr.bottom) {
+        const vp = pv.viewport;
+        const pageIndex = pv.id - 1;
+        const [pdfX, pdfY] = vp.convertToPdfPoint(cssX, cssY);
+
+        // Encode a default field size (120x24pt at the click point)
+        const field = {
+          page_index: pageIndex,
+          rect: [pdfX, pdfY, pdfX + 120, pdfY + 24]
+        };
+
+        this.pushEvent("esign_wizard_place_field", field);
+        this._disableEsignPlacement();
+        break;
+      }
     }
   },
 

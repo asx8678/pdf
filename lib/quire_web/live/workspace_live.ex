@@ -550,6 +550,18 @@ defmodule QuireWeb.WorkspaceLive do
 
     if idx && idx < length(steps) - 1 do
       next = Enum.at(steps, idx + 1)
+
+      socket =
+        if next == :fields do
+          push_event(socket, "enable_esign_placement", %{})
+        else
+          if current == :fields do
+            push_event(socket, "disable_esign_placement", %{})
+          else
+            socket
+          end
+        end
+
       {:noreply, assign(socket, :esign_wizard_step, next)}
     else
       {:noreply, socket}
@@ -563,6 +575,14 @@ defmodule QuireWeb.WorkspaceLive do
 
     if idx && idx > 0 do
       prev = Enum.at(steps, idx - 1)
+
+      socket =
+        if current == :fields do
+          push_event(socket, "disable_esign_placement", %{})
+        else
+          socket
+        end
+
       {:noreply, assign(socket, :esign_wizard_step, prev)}
     else
       {:noreply, socket}
@@ -602,7 +622,24 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("esign_wizard_add_field", %{"signer_index" => idx}, socket) do
     signer_index = String.to_integer(idx)
     new_field = %{id: Ecto.UUID.generate(), signer_index: signer_index, kind: :signature, page_index: 0}
-    {:noreply, assign(socket, :esign_wizard_fields, socket.assigns.esign_wizard_fields ++ [new_field])}
+    socket = assign(socket, :esign_wizard_fields, socket.assigns.esign_wizard_fields ++ [new_field])
+    {:noreply, push_event(socket, "enable_esign_placement", %{})}
+  end
+
+  def handle_event("esign_wizard_place_field", %{"page_index" => pi, "rect" => rect}, socket) do
+    # Called by pdf_viewer_hook when user clicks on the viewer in placement mode
+    fields = socket.assigns.esign_wizard_fields
+
+    # Update the last added field with coordinates
+    updated = case List.last(fields) do
+      nil -> fields
+      last ->
+        List.replace_at(fields, length(fields) - 1,
+          Map.merge(last, %{page_index: pi, rect: rect})
+        )
+    end
+
+    {:noreply, assign(socket, :esign_wizard_fields, updated)}
   end
 
   def handle_event("esign_wizard_remove_field", %{"id" => field_id}, socket) do
