@@ -110,11 +110,9 @@ echo "check: all blocking checks passed"
 """
 
 [tasks.e2e]
-description = "Playwright end-to-end suite (T-199)"
-run = """
-echo "mise run e2e is implemented in T-199." >&2
-exit 1
-"""
+description = "Run Playwright end-to-end tests against a running dev server"
+dir = "test/visual"
+run = "npx playwright test"
 
 [tasks.visual]
 description = "Capture visual regression baselines (T-039 — app must be running)"

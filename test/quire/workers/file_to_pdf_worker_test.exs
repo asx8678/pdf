@@ -54,6 +54,32 @@ defmodule Quire.Workers.FileToPdfWorkerTest do
     test "accepts .md extension" do
       assert :text == FileToPdfWorker.classify_ext(".md")
     end
+
+    test "accepts all image extensions" do
+      for ext <- ~w(.png .jpg .jpeg .tiff .tif .bmp .webp .gif .heic) do
+        assert :image == FileToPdfWorker.classify_ext(ext),
+               "expected #{ext} to route to :image"
+      end
+    end
+
+    test "accepts all office extensions" do
+      for ext <- ~w(.docx .xlsx .pptx .odt .ods .odp .rtf) do
+        assert :office == FileToPdfWorker.classify_ext(ext),
+               "expected #{ext} to route to :office"
+      end
+    end
+
+    test "returns :unknown for unsupported extensions" do
+      for ext <- ~w(.exe .py .sh .zip .rar .7z) do
+        assert :unknown == FileToPdfWorker.classify_ext(ext),
+               "expected #{ext} to route to :unknown"
+      end
+    end
+
+    test "dispatch handles text formats by returning HTML-wrapped content" do
+      bytes = FileToPdfWorker.text_to_html("hello")
+      assert bytes =~ "<html"
+    end
   end
 
   defp build_job(args) do

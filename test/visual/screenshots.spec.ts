@@ -1,7 +1,9 @@
 import { test } from '@playwright/test';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { login } from './helpers';
 
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const BASELINE_DIR = path.join(__dirname, 'darwin-arm64');
 
 const WIDTHS = [1280, 1600, 1920];
