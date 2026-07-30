@@ -47,7 +47,9 @@ config :quire, Oban,
     {Oban.Plugins.Reindexer, schedule: "@weekly"},
     {Oban.Plugins.Cron,
      crontab: [
-       {"@daily", Quire.Workers.TrialExpiryWorker, description: "Downgrade expired trial licenses to standard"}
+       {"@daily", Quire.Workers.TrialExpiryWorker, description: "Downgrade expired trial licenses to standard"},
+       {"@hourly", Quire.Workers.EnvelopeExpiryWorker, description: "Expire envelopes past their deadline"},
+       {"0 */6 * * *", Quire.Workers.EnvelopeReminderWorker, description: "Remind signers of expiring envelopes"}
      ]}
   ]
 

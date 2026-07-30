@@ -20,6 +20,7 @@ defmodule Quire.Esign.Envelope do
     field :expires_at, :utc_datetime
     field :sent_at, :utc_datetime
     field :completed_at, :utc_datetime
+    field :last_reminded_at, :utc_datetime
 
     has_many :signers, Quire.Esign.Signer
     has_many :fields, Quire.Esign.Field

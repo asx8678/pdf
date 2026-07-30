@@ -20,6 +20,14 @@ defmodule Quire.Esign do
     %Envelope{}
     |> Envelope.changeset(attrs)
     |> Repo.insert()
+    |> case do
+      {:ok, envelope} ->
+        record_audit_event(envelope, "envelope_created", %{})
+        {:ok, envelope}
+
+      {:error, _} = error ->
+        error
+    end
   end
 
   @doc """
@@ -51,11 +59,18 @@ defmodule Quire.Esign do
   @doc """
   Marks a signer as having viewed the document.
   """
-  def record_signer_view(%Signer{} = signer) do
-    signer
-    |> Signer.changeset(%{})
-    |> Signer.put_status(:viewed)
-    |> Repo.update()
+  def record_signer_view(%Signer{envelope_id: envelope_id} = signer) do
+    result =
+      signer
+      |> Signer.changeset(%{})
+      |> Signer.put_status(:viewed)
+      |> Repo.update()
+
+    with {:ok, _s} <- result do
+      record_audit_event(%{id: envelope_id}, signer, "signer_viewed", %{})
+    end
+
+    result
   end
 
   @doc """
@@ -126,11 +141,18 @@ defmodule Quire.Esign do
   defp do_sign_signer(signer, attrs) do
     now = DateTime.utc_now(:second)
 
-    signer
-    |> Signer.changeset(attrs)
-    |> Signer.put_status(:signed)
-    |> Signer.put_signed_at(now)
-    |> Repo.update()
+    result =
+      signer
+      |> Signer.changeset(attrs)
+      |> Signer.put_status(:signed)
+      |> Signer.put_signed_at(now)
+      |> Repo.update()
+
+    with {:ok, _signed} <- result do
+      record_audit_event(%{id: signer.envelope_id}, signer, "signed", %{})
+    end
+
+    result
   end
 
   defp maybe_complete_envelope(envelope, _signed_signer) do
@@ -139,11 +161,20 @@ defmodule Quire.Esign do
     if remaining_unsigned == 0 do
       now = DateTime.utc_now(:second)
 
-      envelope
-      |> Envelope.changeset(%{})
-      |> Envelope.put_status(:completed)
-      |> Envelope.put_completed_at()
-      |> Repo.update()
+      result =
+        envelope
+        |> Envelope.changeset(%{})
+        |> Envelope.put_status(:completed)
+        |> Envelope.put_completed_at()
+        |> Repo.update()
+
+      with {:ok, _completed} <- result,
+           {:ok, _audit} <-
+             record_audit_event(envelope, "envelope_completed", %{}) do
+        :ok
+      else
+        {:error, _} -> :ok
+      end
     else
       # Not all signers have signed yet — check if status needs
       # to be updated to :partially_signed
@@ -173,18 +204,22 @@ defmodule Quire.Esign do
   Declines the envelope on behalf of a signer.
   """
   def decline_envelope(%Envelope{status: :sent} = envelope, %Signer{status: :pending} = signer, attrs \\ %{}) do
-    signer
-    |> Signer.changeset(attrs)
-    |> Signer.put_status(:declined)
-    |> Repo.update()
-    |> case do
-      {:ok, updated_signer} ->
-        envelope
-        |> Envelope.changeset(%{})
-        |> Envelope.put_status(:declined)
-        |> Repo.update()
-        {:ok, updated_signer}
-      error -> error
+    result =
+      signer
+      |> Signer.changeset(attrs)
+      |> Signer.put_status(:declined)
+      |> Repo.update()
+
+    with {:ok, updated_signer} <- result do
+      envelope
+      |> Envelope.changeset(%{})
+      |> Envelope.put_status(:declined)
+      |> Repo.update()
+
+      record_audit_event(envelope, updated_signer, "declined", %{})
+      {:ok, updated_signer}
+    else
+      {:error, _} = error -> error
     end
   end
 
@@ -197,10 +232,17 @@ defmodule Quire.Esign do
   can be voided.
   """
   def void_envelope(%Envelope{status: status} = envelope) when status in [:sent, :partially_signed] do
-    envelope
-    |> Envelope.changeset(%{})
-    |> Envelope.put_status(:voided)
-    |> Repo.update()
+    result =
+      envelope
+      |> Envelope.changeset(%{})
+      |> Envelope.put_status(:voided)
+      |> Repo.update()
+
+    with {:ok, _voided} <- result do
+      record_audit_event(envelope, "voided", %{})
+    end
+
+    result
   end
 
   def void_envelope(%Envelope{} = _envelope) do
@@ -211,10 +253,17 @@ defmodule Quire.Esign do
   Marks an expired envelope.  Called by a periodic job.
   """
   def expire_envelope(%Envelope{status: status} = envelope) when status in [:sent, :partially_signed] do
-    envelope
-    |> Envelope.changeset(%{})
-    |> Envelope.put_status(:expired)
-    |> Repo.update()
+    result =
+      envelope
+      |> Envelope.changeset(%{})
+      |> Envelope.put_status(:expired)
+      |> Repo.update()
+
+    with {:ok, _expired} <- result do
+      record_audit_event(envelope, "expired", %{})
+    end
+
+    result
   end
 
   def expire_envelope(%Envelope{} = _envelope) do
