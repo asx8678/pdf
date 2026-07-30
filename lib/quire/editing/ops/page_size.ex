@@ -9,10 +9,9 @@ defmodule Quire.Editing.Ops.PageSize do
   end
 
   @doc """
-  Computes the inverse of page.size.
-  Phase 0 placeholder — real undo needs the prior page dimensions.
+  Computes the inverse of page.size — restores the previous revision.
   """
-  def invert(_op_data, _context) do
-    {:ok, {:restore_revision, nil}}
+  def invert(_op_data, context) do
+    {:ok, {:restore_revision, context[:base_revision_id]}}
   end
 end

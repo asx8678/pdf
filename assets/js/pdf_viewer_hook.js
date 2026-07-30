@@ -6,7 +6,8 @@
 // Import viewer components, not the full viewer app (§3.2 lines 259-262).
 // pdf.js is loaded dynamically from the vendor copy via pdf_viewer.js.
 
-import { init, openDocument, createViewer } from "./pdf_viewer.js";
+import { init, openDocument, createViewer, pdfjsLib } from "./pdf_viewer.js";
+import { TextFormatBar } from "./text_format_bar.js";
 
 const PdfViewerHook = {
   mounted() {
@@ -15,6 +16,12 @@ const PdfViewerHook = {
     this._linkService = null;
     this._findController = null;
     this._pdfDocument = null;
+    this._previousEditorMode = 0;
+    this._editModeEnabled = false;
+    this._uiManager = null;
+    this._activeEditor = null;
+    this._formatBar = null;
+    this._formatBarAutoHideHandler = null;
 
     // Initialise pdf.js (idempotent)
     init().then(() => {
@@ -29,6 +36,14 @@ const PdfViewerHook = {
       this._findController = findController;
 
       this._wireEvents();
+
+      // Expose viewer and eventBus on the element so sibling hooks
+      // (e.g. AnnotEditHook T-102) can access them.
+      this.el._pdfViewer = this._viewer;
+      this.el._eventBus = this._eventBus;
+
+      // Initialise the floating format bar (T-090)
+      this._initFormatBar();
 
       // If server pre-set a document URL, open it
       const docUrl = this.el.dataset.documentUrl;
@@ -82,6 +97,41 @@ const PdfViewerHook = {
 
     this.handleEvent("close_document", () => {
       this._closeDocument();
+    });
+
+    // Toggle annotation editor mode (FreeText, etc.)
+    this.handleEvent("toggle_editing", ({ mode }) => {
+      if (!this._viewer) return;
+      const { AnnotationEditorType } = pdfjsLib;
+
+      if (mode === "add_text") {
+        const currentMode = this._viewer.annotationEditorMode;
+        if (currentMode === AnnotationEditorType.FREETEXT) {
+          // Toggle off: capture committed editors first, then deactivate
+          this._captureCommittedEditors();
+          this._viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+        } else {
+          // Toggle on: activate FreeText mode
+          this._viewer.annotationEditorMode = { mode: AnnotationEditorType.FREETEXT };
+        }
+      } else if (mode === "edit_text") {
+        // Edit mode — client-side click-on-text is handled by the
+        // server-driven workflow: the server identifies the run via
+        // Quire.Editor.RunIdentifier and opens a FreeText editor for
+        // the selected text region, then receives edits via
+        // text.edit ops.
+        if (this._editModeEnabled) {
+          // Toggle off: restore normal viewer interaction
+          this._editModeEnabled = false;
+          this._viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+          this.pushEvent("edit_mode_changed", { active: false });
+        } else {
+          // Toggle on: switch to edit mode, disable FreeText creation
+          this._editModeEnabled = true;
+          this._viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+          this.pushEvent("edit_mode_changed", { active: true });
+        }
+      }
     });
 
     // Ctrl+scroll zoom (T-051 §14.2: debounce re-render, CSS transform interim)
@@ -142,6 +192,11 @@ const PdfViewerHook = {
   },
 
   destroyed() {
+    if (this._formatBarAutoHideHandler) {
+      document.removeEventListener("pointerdown", this._formatBarAutoHideHandler, true);
+      this._formatBarAutoHideHandler = null;
+    }
+    this._hideFormatBar();
     this._closeDocument();
   },
 
@@ -176,6 +231,41 @@ const PdfViewerHook = {
     // report the flattened match list to the search panel.
     this._eventBus.on("updatefindcontrolstate", ({ state }) => {
       if (state === 0 || state === 1) this._pushSearchResults();
+    });
+
+    // Track annotation editor mode changes and capture committed editors
+    this._eventBus.on("annotationeditormodechanged", ({ mode }) => {
+      const { AnnotationEditorType } = pdfjsLib;
+      if (this._previousEditorMode === AnnotationEditorType.FREETEXT && mode === AnnotationEditorType.NONE) {
+        this._captureCommittedEditors();
+        this._hideFormatBar();
+      }
+      this._previousEditorMode = mode;
+    });
+
+    // Capture the AnnotationEditorUIManager reference for format bar
+    this._eventBus.on("annotationeditoruimanager", ({ uiManager }) => {
+      this._uiManager = uiManager;
+    });
+
+    // Track editor selection changes to show/hide the format bar
+    this._eventBus.on("editingstateschanged", ({ details }) => {
+      if (!this._formatBar) return;
+      if (details.hasSelectedEditor) {
+        this._showFormatBar();
+      } else {
+        // Only hide if we're not in FreeText mode (editor may be temporarily blurred)
+        const { AnnotationEditorType } = pdfjsLib;
+        if (this._previousEditorMode !== AnnotationEditorType.FREETEXT) {
+          this._hideFormatBar();
+        }
+      }
+    });
+
+    // React to internal property changes (size, colour via picker, etc.)
+    this._eventBus.on("annotationeditorparamschanged", ({ details }) => {
+      if (!this._formatBar || !this._formatBar._visible) return;
+      this._syncFormatBarFromEditor();
     });
   },
 
@@ -229,6 +319,315 @@ const PdfViewerHook = {
     if (this._viewer) this._viewer.setDocument(null);
     if (this._findController) this._findController.setDocument(null);
     this._pdfDocument = null;
+  },
+
+  // --- Floating format bar (T-090) ---
+
+  /** Create the TextFormatBar instance attached to the viewer wrapper. */
+  _initFormatBar() {
+    const wrapper = this.el.querySelector("#pdf-viewer-wrapper");
+    if (!wrapper) return;
+
+    this._formatBar = new TextFormatBar({
+      container: wrapper,
+      eventBus: this._eventBus,
+      onStyleChange: (type, value) => this._onFormatBarChange(type, value),
+    });
+
+    // Auto-hide format bar when clicking outside both it and the editor
+    this._formatBarAutoHideHandler = (e) => {
+      if (!this._formatBar || !this._formatBar._visible) return;
+      const barEl = this._formatBar._el;
+      if (!barEl) return;
+
+      // If click is inside the format bar — ignore
+      if (barEl.contains(e.target)) return;
+
+      // If click is inside the active editor(s) — ignore
+      if (this._activeEditor) {
+        if (this._activeEditor.div && this._activeEditor.div.contains(e.target)) return;
+        if (this._activeEditor.editorDiv && this._activeEditor.editorDiv.contains(e.target)) return;
+      }
+
+      // Click was outside — hide
+      this._hideFormatBar();
+    };
+    document.addEventListener("pointerdown", this._formatBarAutoHideHandler, true);
+  }
+
+  /** Show the format bar positioned above the active editor. */
+  _showFormatBar() {
+    if (!this._formatBar || !this._uiManager) return;
+
+    const editor = this._uiManager.getActive();
+    if (!editor || !editor.div) return;
+
+    this._activeEditor = editor;
+
+    // Get the editor's bounding rect relative to the viewport
+    const rect = editor.div.getBoundingClientRect();
+    const styles = this._collectEditorStyles(editor);
+
+    this._formatBar.show(rect, styles);
+  }
+
+  /** Hide the format bar. */
+  _hideFormatBar() {
+    if (this._formatBar) {
+      this._formatBar.hide();
+    }
+    this._activeEditor = null;
+  }
+
+  /** Sync the format bar controls from the active editor's current state. */
+  _syncFormatBarFromEditor() {
+    if (!this._formatBar || !this._uiManager) return;
+    const editor = this._uiManager.getActive();
+    if (!editor) return;
+    this._activeEditor = editor;
+    const styles = this._collectEditorStyles(editor);
+    this._formatBar.updateStyles(styles);
+  }
+
+  /**
+   * Read all style properties from a FreeText editor into a plain object.
+   * @param {object} editor - FreeTextEditor instance
+   * @returns {object}
+   */
+  _collectEditorStyles(editor) {
+    const div = editor.editorDiv;
+    const style = div ? window.getComputedStyle(div) : {};
+
+    // Parse font size from "calc(Xpx * ...)"
+    let fontSize = 12;
+    if (editor.editorDiv) {
+      const cs = style.fontSize || "";
+      const m = cs.match(/(\d+(\.\d+)?)/);
+      if (m) fontSize = parseFloat(m[1]);
+    }
+
+    return {
+      fontFamily:     style.fontFamily ? style.fontFamily.split(",")[0].replace(/['"]/g, "").trim() : "Helvetica",
+      fontSize,
+      bold:           style.fontWeight === "bold" || parseInt(style.fontWeight, 10) >= 700,
+      italic:         style.fontStyle === "italic",
+      underline:      style.textDecorationLine ? style.textDecorationLine.includes("underline") : false,
+      strikethrough:  style.textDecorationLine ? style.textDecorationLine.includes("line-through") : false,
+      fontColor:      editor.color || style.color || "#000000",
+      highlightColor: style.backgroundColor && style.backgroundColor !== "rgba(0, 0, 0, 0)" && style.backgroundColor !== "transparent"
+        ? this._rgbToHex(style.backgroundColor)
+        : "#ffff00",
+      alignment:      style.textAlign || "left",
+    };
+  }
+
+  /**
+   * Handle a style change from the format bar.
+   * @param {string} type - Style property key
+   * @param {*} value - New value
+   */
+  _onFormatBarChange(type, value) {
+    switch (type) {
+      case "fontSize":
+        this._dispatchEditorParam(11, value); // FREETEXT_SIZE
+        break;
+
+      case "fontColor":
+        this._dispatchEditorParam(12, value); // FREETEXT_COLOR
+        break;
+
+      case "fontFamily":
+        this._applyEditorStyle("fontFamily", value);
+        break;
+
+      case "bold":
+        // value is the toggled active state — invert
+        this._applyEditorStyle("fontWeight", value ? "bold" : "normal");
+        break;
+
+      case "italic":
+        this._applyEditorStyle("fontStyle", value ? "italic" : "normal");
+        break;
+
+      case "underline":
+        this._toggleTextDecoration("underline", value);
+        break;
+
+      case "strikethrough":
+        this._toggleTextDecoration("line-through", value);
+        break;
+
+      case "highlightColor":
+        this._applyEditorStyle("backgroundColor", value);
+        break;
+
+      case "alignment":
+        this._applyEditorStyle("textAlign", value);
+        break;
+
+      case "indent":
+        this._adjustIndent(value);
+        break;
+
+      case "link":
+        this._insertLink();
+        break;
+
+      case "lineSpacing":
+        this._promptAndApply("lineHeight", "Enter line spacing (e.g. 1.5):", "1.5");
+        break;
+
+      case "charSpacing":
+        this._promptAndApply("letterSpacing", "Enter character spacing in px (e.g. 1):", "0");
+        break;
+
+      case "superscript":
+        this._applyEditorStyle("verticalAlign", "super");
+        this._applyEditorStyle("fontSize", "smaller");
+        break;
+
+      case "subscript":
+        this._applyEditorStyle("verticalAlign", "sub");
+        this._applyEditorStyle("fontSize", "smaller");
+        break;
+
+      case "case":
+        this._cycleTextCase();
+        break;
+
+      case "close":
+        this._hideFormatBar();
+        break;
+    }
+  }
+
+  /**
+   * Dispatch a pdf.js annotation editor param update via eventBus.
+   * @param {number} type - AnnotationEditorParamsType constant
+   * @param {*} value
+   */
+  _dispatchEditorParam(type, value) {
+    if (!this._eventBus) return;
+    this._eventBus.dispatch("switchannotationeditorparams", {
+      source: this,
+      type,
+      value,
+    });
+  }
+
+  /**
+   * Apply a CSS style to the active editor's contenteditable div.
+   */
+  _applyEditorStyle(prop, value) {
+    if (!this._activeEditor || !this._activeEditor.editorDiv) return;
+    this._activeEditor.editorDiv.style[prop] = value;
+  }
+
+  /**
+   * Toggle a text-decoration line value on/off.
+   */
+  _toggleTextDecoration(line, active) {
+    if (!this._activeEditor || !this._activeEditor.editorDiv) return;
+    const div = this._activeEditor.editorDiv;
+    const cur = div.style.textDecorationLine || "";
+    const lines = cur.split(/\s+/).filter(Boolean);
+    if (active) {
+      if (!lines.includes(line)) lines.push(line);
+    } else {
+      const idx = lines.indexOf(line);
+      if (idx !== -1) lines.splice(idx, 1);
+    }
+    div.style.textDecorationLine = lines.join(" ");
+  }
+
+  /**
+   * Adjust the left padding of the editor to simulate indent/outdent.
+   * @param {number} dir - +1 to increase, -1 to decrease
+   */
+  _adjustIndent(dir) {
+    if (!this._activeEditor || !this._activeEditor.editorDiv) return;
+    const div = this._activeEditor.editorDiv;
+    const cur = parseFloat(div.style.paddingLeft) || 0;
+    const step = 20;
+    div.style.paddingLeft = `${Math.max(0, cur + dir * step)}px`;
+  }
+
+  /**
+   * Insert an anchor/link into the editor content.
+   */
+  _insertLink() {
+    if (!this._activeEditor || !this._activeEditor.editorDiv) return;
+    const url = prompt("Enter URL:");
+    if (!url) return;
+    const div = this._activeEditor.editorDiv;
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount && div.contains(selection.anchorNode)) {
+      document.execCommand("createLink", false, url);
+    } else {
+      // No selection — insert a placeholder link
+      const link = document.createElement("a");
+      link.href = url;
+      link.textContent = url;
+      link.target = "_blank";
+      div.appendChild(link);
+    }
+  }
+
+  /**
+   * Prompt for a value and apply as a CSS property.
+   */
+  _promptAndApply(prop, msg, fallback) {
+    const val = prompt(msg, fallback);
+    if (val !== null) {
+      this._applyEditorStyle(prop, val);
+    }
+  }
+
+  /**
+   * Cycle text-transform through none → uppercase → capitalize → none.
+   */
+  _cycleTextCase() {
+    if (!this._activeEditor || !this._activeEditor.editorDiv) return;
+    const div = this._activeEditor.editorDiv;
+    const cur = div.style.textTransform || "";
+    const order = ["", "uppercase", "capitalize"];
+    const idx = order.indexOf(cur);
+    div.style.textTransform = order[(idx + 1) % order.length];
+  }
+
+  /** Convert an rgb/rgba string to hex. */
+  _rgbToHex(rgb) {
+    const m = rgb.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    if (!m) return "#ffff00";
+    const r = parseInt(m[1], 10).toString(16).padStart(2, "0");
+    const g = parseInt(m[2], 10).toString(16).padStart(2, "0");
+    const b = parseInt(m[3], 10).toString(16).padStart(2, "0");
+    return `#${r}${g}${b}`;
+  }
+
+  // Serialize committed editors (FreeText etc.) from annotationStorage
+  // and push the data to the server as a free_text_committed event.
+  _captureCommittedEditors() {
+    if (!this._pdfDocument) return;
+    try {
+      const storage = this._pdfDocument.annotationStorage;
+      const data = storage.serializable;
+      if (!data || !data.map || data.map.size === 0) return;
+
+      const editors = [];
+      for (const [id, editorData] of data.map) {
+        // AnnotationEditorType.FREETEXT === 3
+        if (editorData.annotationType === 3) {
+          editors.push({ id, ...editorData });
+        }
+      }
+
+      if (editors.length > 0) {
+        this.pushEvent("free_text_committed", { editors });
+      }
+    } catch (e) {
+      // Editors will be captured on save via saveDocument()
+    }
   },
 };
 

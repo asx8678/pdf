@@ -77,6 +77,13 @@ defmodule QuireWeb.Router do
     get "/:id/pdf", DocumentController, :show
   end
 
+  # Blob downloads — serves Storage blobs as file downloads (T-066)
+  scope "/download", QuireWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    get "/zip/:uuid", DownloadController, :zip
+  end
+
   scope "/", QuireWeb do
     pipe_through [:browser]
 

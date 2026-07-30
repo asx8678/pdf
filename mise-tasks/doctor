@@ -10,6 +10,7 @@
 # the dirty-scheduler benchmark — are T-013's (pdf-cyt), which appends the §7.2
 # self-check via `mix run --no-start`.
 
+ulimit -n 8192
 set -uo pipefail
 
 failures=0

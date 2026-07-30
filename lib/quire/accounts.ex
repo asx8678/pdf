@@ -366,6 +366,70 @@ defmodule Quire.Accounts do
     update_user_settings(user_id, %{qat_items: items})
   end
 
+  ## Saved signatures
+
+  @doc """
+  Returns saved signatures for the given `user_id`.
+
+  Signatures are stored as a list of maps under the `signatures` key in
+  user_settings. Each entry has:
+    `id` — UUID for identification
+    `label` — user-given name
+    `type` — "draw" | "type" | "upload"
+    `data` — mode-specific payload (curve data, text+font, or image bytes)
+    `created_at` — ISO8601 timestamp
+  """
+  def list_saved_signatures(user_id) do
+    settings = get_user_settings(user_id)
+    Map.get(settings, :signatures) || []
+  end
+
+  @doc """
+  Saves a new signature for the given `user_id`.
+
+  Returns `{:ok, updated_signatures}` or `{:error, reason}`.
+  """
+  def save_signature(user_id, attrs) do
+    current = list_saved_signatures(user_id)
+
+    signature = %{
+      "id" => Ecto.UUID.generate(),
+      "label" => attrs["label"] || attrs[:label] || "Signature",
+      "type" => attrs["type"] || attrs[:type],
+      "data" => attrs["data"] || attrs[:data],
+      "created_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    case update_user_settings(user_id, %{signatures: [signature | current]}) do
+      {:ok, _setting} -> {:ok, signature}
+      error -> error
+    end
+  end
+
+  @doc """
+  Deletes a saved signature by `id` for the given `user_id`.
+  """
+  def delete_saved_signature(user_id, sig_id) do
+    current = list_saved_signatures(user_id)
+    updated = Enum.reject(current, &(&1["id"] == sig_id))
+    update_user_settings(user_id, %{signatures: updated})
+  end
+
+  @doc """
+  Updates a saved signature's label for the given `user_id`.
+  """
+  def update_signature_label(user_id, sig_id, new_label) do
+    current = list_saved_signatures(user_id)
+
+    updated =
+      Enum.map(current, fn
+        %{"id" => ^sig_id} = sig -> Map.put(sig, "label", new_label)
+        sig -> sig
+      end)
+
+    update_user_settings(user_id, %{signatures: updated})
+  end
+
   ## Token helper
 
   defp update_user_and_delete_all_tokens(changeset) do

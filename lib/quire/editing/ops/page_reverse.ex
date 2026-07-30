@@ -9,11 +9,9 @@ defmodule Quire.Editing.Ops.PageReverse do
   end
 
   @doc """
-  Computes the inverse of page.reverse.
-  Reversing again restores the original order.
-  Phase 0 placeholder.
+  Computes the inverse of page.reverse — restores the previous revision.
   """
-  def invert(_op_data, _context) do
-    {:ok, {:restore_revision, nil}}
+  def invert(_op_data, context) do
+    {:ok, {:restore_revision, context[:base_revision_id]}}
   end
 end

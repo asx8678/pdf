@@ -80,11 +80,11 @@ defmodule Quire.Render do
   @doc """
   Extracts embedded raster images and stores them in the blob store.
 
-  Returns a list of `Quire.Storage.Ref` values pointing to the extracted
-  image PNGs.
+  Returns a list of `{page_number, image_index_within_page, ref}` triples
+  where each `ref` points to a PNG blob in Storage.
   """
   @callback extract_images(ref :: Ref.t(), opts :: keyword()) ::
-              {:ok, [Ref.t()]} | {:error, term()}
+              {:ok, [{non_neg_integer(), non_neg_integer(), Ref.t()}]} | {:error, term()}
 
   @doc """
   Returns the bookmark/outline tree for the document.
@@ -235,9 +235,11 @@ defmodule Quire.Render do
   @doc """
   Extracts embedded raster images, storing each as a blob.
 
-  Returns a list of `Quire.Storage.Ref` values.
+  Returns a list of `{page_number, image_index_within_page, ref}` triples.
+  Page numbers are zero-based; image indices are zero-based within each page.
   """
-  @spec extract_images(ref :: Ref.t(), opts :: keyword()) :: {:ok, [Ref.t()]} | {:error, term()}
+  @spec extract_images(ref :: Ref.t(), opts :: keyword()) ::
+          {:ok, [{non_neg_integer(), non_neg_integer(), Ref.t()}]} | {:error, term()}
   def extract_images(ref, opts \\ []) do
     Quire.Engine.trace(__MODULE__, :extract_images, [ref, opts], fn ->
       adapter().extract_images(ref, opts)

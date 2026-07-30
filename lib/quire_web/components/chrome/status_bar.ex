@@ -77,21 +77,42 @@ defmodule QuireWeb.Chrome.StatusBar do
 
         <.rotate_control rotation={@rotation} />
 
-        <button type="button" phx-click="set_scroll_mode" phx-value-mode={next_scroll_mode(@scroll_mode)}
-          class={["p-1 rounded text-xs transition-colors", @scroll_mode != :vertical && "bg-accent/10 text-accent"]}
-          aria-label="Scroll mode: {@scroll_mode}">
+        <button
+          type="button"
+          phx-click="set_scroll_mode"
+          phx-value-mode={next_scroll_mode(@scroll_mode)}
+          class={[
+            "p-1 rounded text-xs transition-colors",
+            @scroll_mode != :vertical && "bg-accent/10 text-accent"
+          ]}
+          aria-label="Scroll mode: {@scroll_mode}"
+        >
           <.icon name="hero-arrows-up-down" class="size-3.5" />
         </button>
 
-        <button type="button" phx-click="set_spread_mode" phx-value-mode={next_spread_mode(@spread_mode)}
-          class={["p-1 rounded text-xs transition-colors", @spread_mode != :none && "bg-accent/10 text-accent"]}
-          aria-label="Spread mode: {@spread_mode}">
+        <button
+          type="button"
+          phx-click="set_spread_mode"
+          phx-value-mode={next_spread_mode(@spread_mode)}
+          class={[
+            "p-1 rounded text-xs transition-colors",
+            @spread_mode != :none && "bg-accent/10 text-accent"
+          ]}
+          aria-label="Spread mode: {@spread_mode}"
+        >
           <.icon name="hero-rectangle-stack" class="size-3.5" />
         </button>
 
-        <button type="button" phx-click="set_fit_mode" phx-value-mode={next_fit_mode(@fit_mode)}
-          class={["p-1 rounded text-xs transition-colors", @fit_mode != :fit_page && "bg-accent/10 text-accent"]}
-          aria-label="Fit mode: {@fit_mode}">
+        <button
+          type="button"
+          phx-click="set_fit_mode"
+          phx-value-mode={next_fit_mode(@fit_mode)}
+          class={[
+            "p-1 rounded text-xs transition-colors",
+            @fit_mode != :fit_page && "bg-accent/10 text-accent"
+          ]}
+          aria-label="Fit mode: {@fit_mode}"
+        >
           <.icon name="hero-arrows-pointing-in" class="size-3.5" />
         </button>
 
@@ -134,6 +155,4 @@ defmodule QuireWeb.Chrome.StatusBar do
     </div>
     """
   end
-
-
 end

@@ -284,26 +284,30 @@ defmodule Quire.Render.Pdfium do
             case ExPdfium.images(doc, page) do
               {:ok, images} ->
                 image_results =
-                  Enum.reduce_while(images, {:ok, acc}, fn img, {:ok, inner_acc} ->
-                    case ExPdfium.image_data(doc, page, img.index) do
-                      {:ok, bitmap} ->
-                        png = bitmap_to_png!(bitmap)
+                  Enum.reduce_while(
+                    Enum.with_index(images),
+                    {:ok, acc},
+                    fn {img, img_idx}, {:ok, inner_acc} ->
+                      case ExPdfium.image_data(doc, page, img.index) do
+                        {:ok, bitmap} ->
+                          png = bitmap_to_png!(bitmap)
 
-                        case Storage.put(png, []) do
-                          {:ok, ref} -> {:cont, {:ok, [ref | inner_acc]}}
-                          {:error, reason} -> {:halt, {:error, reason}}
-                        end
+                          case Storage.put(png, []) do
+                            {:ok, ref} -> {:cont, {:ok, [{page, img_idx, ref} | inner_acc]}}
+                            {:error, reason} -> {:halt, {:error, reason}}
+                          end
 
-                      {:error, reason} ->
-                        {:halt,
-                         {:error,
-                          error(
-                            :extract_images,
-                            :nif,
-                            "image_data for page #{page} index #{img.index} failed: #{inspect(reason)}"
-                          )}}
+                        {:error, reason} ->
+                          {:halt,
+                           {:error,
+                            error(
+                              :extract_images,
+                              :nif,
+                              "image_data for page #{page} index #{img.index} failed: #{inspect(reason)}"
+                            )}}
+                      end
                     end
-                  end)
+                  )
 
                 case image_results do
                   {:ok, _} -> {:cont, image_results}

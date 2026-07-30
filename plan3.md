@@ -2257,14 +2257,65 @@ e-sign requests, completed background jobs, and licence expiry warnings.
 ### 11.2 Licensing
 
 The reference has a persistent `Activate now` button, so tiering is part of
-parity.
+parity. Features are mapped to product tiers by a feature-key system:
 
-| Tier | Includes |
-|---|---|
-| **Trial** (14 days) | Everything, watermarked output on export |
-| **Standard** | View, annotate, fill & sign, basic convert, merge/split, compress |
-| **Premium** | + Edit, Forms, Secure, OCR, batch |
-| **Business** | + E-Sign, Translate, cloud connectors, team seats |
+| Category | Feature Key | Feature | Tier |
+|---|---|---|---|
+| **View & Navigation** | `nav.zoom` | Zoom in, zoom out, zoom-to-fit | Free |
+| | `nav.search` | Find and search within document | Free |
+| | `nav.bookmarks` | Bookmarks navigation panel | Free |
+| | `nav.navigate` | Page navigation (goto, prev/next, page number) | Free |
+| | `view.scroll` | Scroll mode (continuous, single page) | Free |
+| | `view.spread` | Spread mode (side-by-side, cover page) | Free |
+| | `view.fit` | Fit page / Fit width / Actual size | Free |
+| | `view.fullscreen` | Fullscreen mode | Free |
+| | `view.split` | Split view | Free |
+| | `view.rotate` | Rotate view (temporary) | Free |
+| | `view.snapshot` | Snapshot — copy area as image | Free |
+| | `view.read_aloud` | Read aloud (text-to-speech) | Free |
+| **Page Operations** | `page.insert` | Insert blank pages or from file | Pro |
+| | `page.extract` | Extract selected pages | Pro |
+| | `page.replace` | Replace pages with another document | Pro |
+| | `page.reverse` | Reverse page order | Pro |
+| | `page.delete` | Delete selected pages | Pro |
+| | `page.rotate` | Rotate pages permanently | Pro |
+| | `page.crop` | Crop page content | Pro |
+| | `page.export_images` | Export pages as images | Pro |
+| | `page.reorder` | Reorder pages via drag-and-drop | Pro |
+| | `page.background` | Page background color/pattern/image | Enterprise |
+| | `page.size_margin` | Page size and margin adjustment | Enterprise |
+| **Edit** | `edit.text_add` | Add text content | Pro |
+| | `edit.text_edit` | Edit existing text content | Pro |
+| | `edit.format_bar` | Text formatting toolbar | Pro |
+| | `edit.image_insert` | Insert image into document | Pro |
+| | `edit.format_painter` | Copy and apply formatting | Pro |
+| | `edit.link` | Add or edit hyperlinks | Pro |
+| **Annotation / Comment** | `annot.sticky_note` | Sticky note annotation | Pro |
+| | `annot.highlight` | Text highlight annotation | Pro |
+| | `annot.underline` | Text underline annotation | Pro |
+| | `annot.strikethrough` | Text strikethrough annotation | Pro |
+| | `annot.free_text` | Free text annotation | Pro |
+| | `annot.draw` | Draw / ink / pencil annotation | Pro |
+| | `annot.stamp` | Stamp annotation | Pro |
+| | `annot.file_attachment` | File attachment annotation | Pro |
+| **Forms** | `forms.fill` | Fill form fields | Pro |
+| | `forms.edit` | Create and edit form field definitions | Enterprise |
+| **Sign** | `sign.draw` | Draw signature with mouse/trackpad | Enterprise |
+| | `sign.type` | Type signature text | Enterprise |
+| | `sign.upload` | Upload signature image | Enterprise |
+| | `sign.saved` | Manage saved signatures | Enterprise |
+| | `sign.digital` | Digital certificate-based signature (PAdES) | Enterprise |
+| **Secure** | `secure.encrypt` | PDF encryption (AES-128 / AES-256) | Enterprise |
+| | `secure.permissions` | Document permission restrictions | Enterprise |
+| | `secure.redact` | Content redaction | Enterprise |
+| **OCR** | `ocr.recognize` | Optical character recognition | Enterprise |
+| **E-Sign** | `esign.envelope` | Create and send signature envelopes | Enterprise |
+| | `esign.sign` | Sign documents received via envelope | Enterprise |
+| | `esign.track` | Track envelope delivery and signing status | Enterprise |
+| **Export** | `export.pdfa` | Export to PDF/A (best-effort) | Enterprise |
+| | `export.image` | PDF to image conversion | Enterprise |
+| | `export.txt` | PDF to plain text extraction | Enterprise |
+| **Compare** | `compare.diff` | Document comparison / visual diff | Enterprise |
 
 Implement `Quire.Licensing.allows?(user, :feature_key)` and a
 `<.gated feature={:ocr}>` component that renders an upsell overlay instead of
@@ -3164,7 +3215,7 @@ own machine; this table is only what was current when the plan was written.
 | mise | 2026.7.x | MIT |
 | PostgreSQL | 18.4 — `brew install postgresql@18` | PostgreSQL licence |
 | Elixir | 1.20.2 | Apache-2.0 |
-| Erlang/OTP | 28.x (27 acceptable) | Apache-2.0 |
+| Erlang/OTP | 28.x | Apache-2.0 |
 | Phoenix | 1.8.9 | MIT |
 | Phoenix LiveView | 1.2.7 | MIT |
 | pdfjs-dist | 6.1.200 | Apache-2.0 |

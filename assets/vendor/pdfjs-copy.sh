@@ -12,6 +12,7 @@ mkdir -p "$DST"
 cp "$SRC/web/pdf_viewer.mjs" "$DST/"
 cp "$SRC/build/pdf.mjs" "$DST/"
 cp "$SRC/build/pdf.worker.mjs" "$DST/"
+cp "$SRC/build/pdf.sandbox.mjs" "$DST/"
 
 # Copy resource directories needed for CJK, JPEG2000 and font rendering
 # plan3.md §3.2 lines 251-254: missing these produces silent blank pages

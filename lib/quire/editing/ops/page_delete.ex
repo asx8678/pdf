@@ -9,10 +9,9 @@ defmodule Quire.Editing.Ops.PageDelete do
   end
 
   @doc """
-  Computes the inverse of page.delete — re-inserts the deleted page.
-  The original page content should have been preserved in op_data.
+  Computes the inverse of page.delete — restores the previous revision.
   """
-  def invert(op_data, _context) do
-    {:ok, Map.put(op_data, :kind, "page.insert")}
+  def invert(_op_data, context) do
+    {:ok, {:restore_revision, context[:base_revision_id]}}
   end
 end

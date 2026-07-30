@@ -8,9 +8,10 @@ defmodule Quire.Workers.TextExtractWorker do
 
   ## Idempotency
 
-  The `(revision_id, page_index)` unique index on `document_page_text` ensures
-  that a retry does not produce duplicate rows.  `on_conflict: :nothing` makes
-  the second run a no-op.
+  The `(revision_id, page_index)` unique index on `document_page_text`
+  combined with `on_conflict: {:replace, [:content, :spans]}` means a retry
+  overwrites the existing row with freshly-extracted text — safe when
+  placeholder rows were pre-seeded by a transform op.
 
   ## Queue
 
@@ -40,20 +41,7 @@ defmodule Quire.Workers.TextExtractWorker do
     if is_nil(ref) do
       {:error, "no storage ref on revision #{revision_id}"}
     else
-      # Idempotency check — if page-text rows already exist, skip extraction.
-      existing_count =
-        Repo.aggregate(
-          from(pt in PageText, where: pt.revision_id == ^revision_id),
-          :count,
-          :id
-        )
-
-      result =
-        if existing_count == 0 do
-          do_extract(ref, revision_id)
-        else
-          {:ok, :already_populated}
-        end
+      result = do_extract(ref, revision_id)
 
       case result do
         {:ok, _} ->
@@ -97,7 +85,7 @@ defmodule Quire.Workers.TextExtractWorker do
         end)
 
       Repo.insert_all(PageText, rows,
-        on_conflict: :nothing,
+        on_conflict: {:replace, [:content, :spans]},
         conflict_target: [:revision_id, :page_index]
       )
 

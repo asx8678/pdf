@@ -26,6 +26,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
   import QuireWeb.Chrome.SearchPanel, only: [search_panel: 1]
+  import QuireWeb.Chrome.SignaturesPanel, only: [signatures_panel: 1]
   import QuireWeb.Chrome.ShortcutsModal, only: [shortcuts_modal: 1]
   import QuireWeb.Chrome.StatusBar, only: [status_bar: 1]
   import QuireWeb.Chrome.ThumbnailsPanel, only: [thumbnails_panel: 1]
@@ -39,7 +40,8 @@ defmodule QuireWeb.WorkspaceLive do
   @left_rail_items [
     %{id: :thumbnails, icon: "hero-squares-2x2", label: "Thumbnails"},
     %{id: :bookmarks, icon: "hero-bookmark", label: "Bookmarks"},
-    %{id: :layers, icon: "hero-rectangle-stack", label: "Layers"}
+    %{id: :layers, icon: "hero-rectangle-stack", label: "Layers"},
+    %{id: :signatures, icon: "hero-pencil", label: "Signatures"}
   ]
 
   @right_rail_items [
@@ -47,7 +49,7 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :attachments, icon: "hero-paper-clip", label: "Attachments"}
   ]
 
-  @panels [:thumbnails, :bookmarks, :layers, :search, :attachments]
+  @panels [:thumbnails, :bookmarks, :layers, :search, :attachments, :signatures]
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -83,6 +85,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:bookmarks, [])
       |> assign(:layers, [])
       |> assign(:attachments, [])
+      |> assign(:signatures, [])
       |> assign(:search_query, "")
       |> assign(:search_results, [])
       |> assign(:search_total, 0)
@@ -108,6 +111,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:backstage_open, false)
       |> assign(:backstage_view, nil)
       |> assign(:show_email_compose, false)
+      |> load_saved_signatures()
 
     {:ok, socket}
   end
@@ -750,6 +754,48 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :rotation, 0) |> push_event("rotate", %{rotation: 0})}
   end
 
+  # ── Signature capture event handlers (T-114) ────────────────────────────
+
+  def handle_event("save_signature", params, socket) do
+    user_id = socket.assigns.current_user.id
+
+    params =
+      if is_binary(params["data"]),
+        do: Map.put(params, "data", Jason.decode!(params["data"])),
+        else: params
+
+    case Quire.Accounts.save_signature(user_id, params) do
+      {:ok, _sig} ->
+        {:noreply, load_saved_signatures(socket) |> put_flash(:info, "Signature saved")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save signature")}
+    end
+  end
+
+  def handle_event("delete_signature", %{"id" => sig_id}, socket) do
+    user_id = socket.assigns.current_user.id
+    Quire.Accounts.delete_saved_signature(user_id, sig_id)
+    {:noreply, load_saved_signatures(socket)}
+  end
+
+  def handle_event("signature_label_updated", %{"id" => sig_id, "label" => label}, socket) do
+    user_id = socket.assigns.current_user.id
+    Quire.Accounts.update_signature_label(user_id, sig_id, label)
+    {:noreply, load_saved_signatures(socket)}
+  end
+
+  def handle_event("signature_use", %{"id" => _sig_id}, socket) do
+    # T-115: Place the selected signature on the page
+    {:noreply, socket}
+  end
+
+  defp load_saved_signatures(socket) do
+    user_id = socket.assigns.current_user.id
+    signatures = Quire.Accounts.list_saved_signatures(user_id)
+    assign(socket, :signatures, signatures)
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────────
 
   defp rail_items(items, active_panel) do
@@ -931,6 +977,7 @@ defmodule QuireWeb.WorkspaceLive do
   attr :bookmarks, :list, default: []
   attr :layers, :list, default: []
   attr :attachments, :list, default: []
+  attr :signatures, :list, default: []
   attr :search_query, :string, default: ""
   attr :search_results, :list, default: []
   attr :search_total, :integer, default: 0
@@ -970,6 +1017,8 @@ defmodule QuireWeb.WorkspaceLive do
           <.layers_panel layers={@layers} />
         <% @panel == :attachments -> %>
           <.attachments_panel attachments={@attachments} />
+        <% @panel == :signatures -> %>
+          <.signatures_panel signatures={@signatures} />
         <% @panel == :search -> %>
           <.search_panel
             query={@search_query}
@@ -994,6 +1043,7 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:layers), do: "Layers"
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
+  defp panel_title(:signatures), do: "Signatures"
 
   defp no_document_placeholder(assigns) do
     ~H"""

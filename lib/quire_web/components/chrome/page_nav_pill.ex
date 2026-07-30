@@ -13,7 +13,10 @@ defmodule QuireWeb.Chrome.PageNavPill do
 
   def page_nav_pill(assigns) do
     ~H"""
-    <div id={@id} class="flex items-center gap-1 bg-chrome-bg border border-chrome-border rounded-full px-2 py-1">
+    <div
+      id={@id}
+      class="flex items-center gap-1 bg-chrome-bg border border-chrome-border rounded-full px-2 py-1"
+    >
       <button
         type="button"
         phx-click="navigate_page"

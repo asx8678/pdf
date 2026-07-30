@@ -22,6 +22,7 @@ const STANDARD_FONT_DATA_URL = "/vendor/pdfjs/standard_fonts/";
 const ICC_URL = "/vendor/pdfjs/iccs/";
 const WASM_URL = "/vendor/pdfjs/wasm/";
 const WORKER_SRC = "/vendor/pdfjs/pdf.worker.mjs";
+const SANDBOX_SRC = "/vendor/pdfjs/pdf.sandbox.mjs";
 
 // Cached module references (populated by init())
 let _pdfjsLib = null;
@@ -31,6 +32,7 @@ let _PDFLinkService = null;
 let _PDFFindController = null;
 let _ScrollMode = null;
 let _SpreadMode = null;
+let _PDFScriptingManager = null;
 
 /**
  * Initialise pdf.js — must be called once before creating a viewer.
@@ -47,6 +49,7 @@ export async function init() {
     EventBus,
     PDFLinkService,
     PDFFindController,
+    PDFScriptingManager,
     ScrollMode,
     SpreadMode,
   } = await import("/vendor/pdfjs/pdf_viewer.mjs");
@@ -58,6 +61,7 @@ export async function init() {
   _EventBus = EventBus;
   _PDFLinkService = PDFLinkService;
   _PDFFindController = PDFFindController;
+  _PDFScriptingManager = PDFScriptingManager;
   _ScrollMode = ScrollMode;
   _SpreadMode = SpreadMode;
 }
@@ -98,7 +102,7 @@ export function openDocument(url, opts = {}) {
  * Create a pdf.js PDFViewer inside a container element.
  *
  * @param {HTMLElement} container - The viewer container element
- * @returns {{ viewer: PDFViewer, eventBus: EventBus, linkService: PDFLinkService }}
+ * @returns {{ viewer: PDFViewer, eventBus: EventBus, linkService: PDFLinkService, findController: PDFFindController, scriptingManager: PDFScriptingManager }}
  */
 export function createViewer(container) {
   if (!_pdfjsLib) throw new Error("pdf.js not initialised — call init() first");
@@ -113,6 +117,12 @@ export function createViewer(container) {
     linkService,
   });
 
+  const scriptingManager = new _PDFScriptingManager({
+    eventBus,
+    sandboxBundleSrc: SANDBOX_SRC,
+    wasmUrl: WASM_URL,
+  });
+
   const viewer = new _PDFViewer({
     container,
     eventBus,
@@ -122,14 +132,16 @@ export function createViewer(container) {
     annotationMode: 2, // Enable annotations
     imageResourcesPath: "/vendor/pdfjs/image-resources/",
     enablePrintAutoRotate: true,
+    enableSignatureEditor: true,
     useOnlyCssZoom: false,
     maxCanvasPixels: 4096 * 4096, // §14.1 budget
   });
 
   linkService.setViewer(viewer);
+  scriptingManager.setViewer(viewer);
   findController.setDocument(null);
 
-  return { viewer, eventBus, linkService, findController };
+  return { viewer, eventBus, linkService, findController, scriptingManager };  
 }
 
 // Re-export constants and classes for use by the hook
@@ -139,11 +151,13 @@ export {
   _EventBus as EventBus,
   _PDFLinkService as PDFLinkService,
   _PDFFindController as PDFFindController,
+  _PDFScriptingManager as PDFScriptingManager,
   _ScrollMode as ScrollMode,
   _SpreadMode as SpreadMode,
   CMAP_URL,
   STANDARD_FONT_DATA_URL,
   ICC_URL,
   WASM_URL,
+  SANDBOX_SRC,
   WORKER_SRC,
 };

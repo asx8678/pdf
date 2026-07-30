@@ -60,6 +60,12 @@ const DocMutateHook = {
               }
               break;
 
+            case "text.add":
+              // FreeText annotations are handled by pdf.js's saveDocument;
+              // no pdf-lib modification needed. The serialized editor data
+              // is embedded in the PDF bytes when the user saves.
+              break;
+
             default:
               throw new Error(`Unknown mutation kind: ${kind}`);
           }

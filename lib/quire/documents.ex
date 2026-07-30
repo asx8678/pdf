@@ -58,6 +58,29 @@ defmodule Quire.Documents do
     end
   end
 
+  # ── Revisions ────────────────────────────────────────────────────────────
+
+  @doc """
+  Create a new revision for a document.
+
+  `attrs` is a keyword list or map that may contain:
+    * `:label` — human-readable label (default `"Untitled revision"`)
+    * `:source` — source map (must contain `"storage_ref"` key pointing to
+      the new document's `Quire.Storage.Ref` JSON representation)
+
+  Returns `{:ok, %Revision{}}` or `{:error, changeset}`.
+  """
+  @spec create_revision(Document.t(), keyword() | map()) ::
+          {:ok, Revision.t()} | {:error, Ecto.Changeset.t()}
+  def create_revision(%Document{} = doc, attrs) do
+    %Revision{
+      document_id: doc.id,
+      label: attrs[:label] || "Untitled revision",
+      source: attrs[:source] || %{}
+    }
+    |> Repo.insert()
+  end
+
   # ── Open pipeline (§10.3) ──────────────────────────────────────────────
 
   @doc """

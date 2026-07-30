@@ -9,10 +9,9 @@ defmodule Quire.Editing.Ops.PageReplace do
   end
 
   @doc """
-  Computes the inverse of page.replace.
-  Phase 0 placeholder — real undo needs the original page content.
+  Computes the inverse of page.replace — restores the previous revision.
   """
-  def invert(_op_data, _context) do
-    {:ok, {:restore_revision, nil}}
+  def invert(_op_data, context) do
+    {:ok, {:restore_revision, context[:base_revision_id]}}
   end
 end

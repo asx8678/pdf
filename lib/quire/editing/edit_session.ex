@@ -288,7 +288,11 @@ defmodule Quire.Editing.EditSession do
   defp compute_inverse(kind, op, state) do
     case Quire.Editing.Operation.module_for_kind(kind) do
       {:ok, mod} ->
-        case mod.invert(op, %{document_id: state.document_id, user_id: state.user_id}) do
+        case mod.invert(op, %{
+               document_id: state.document_id,
+               user_id: state.user_id,
+               base_revision_id: state.base_revision_id
+             }) do
           {:ok, inverse} -> inverse
           _ -> nil
         end

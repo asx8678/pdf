@@ -6,6 +6,19 @@ defmodule Quire.Editing do
   document-editing operations. Each open document gets an `EditSession`
   GenServer under a `DynamicSupervisor`, registered in the
   `EditSessionRegistry` keyed by `{document_id, user_id}`.
+
+  ## Save strategy and signatures (pdf-17l)
+
+  The `flush/3` function stores received bytes as a new revision and updates
+  the document's `current_revision_id`.  This is a **full re-serialisation**
+  (the entire file is rewritten), which invalidates any existing PAdES
+  digital signatures whose `/ByteRange` entries reference byte offsets in the
+  prior file layout.
+
+  When the current revision contains signatures, the save flow
+  (`WorkspaceLive`) detects them and warns the user before proceeding.
+  A future enhancement should use `Quire.Pdf.incremental_save/1` to append
+  only changed objects, keeping signature validity intact.
   """
 
   alias Quire.Editing.EditSession

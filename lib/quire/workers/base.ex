@@ -20,8 +20,13 @@ defmodule Quire.Workers.Base do
 
   @doc false
   def __using__(_opts) do
+    # Workers MUST `use Oban.Worker` in their own module body.
+    # This __using__ macro only injects the callback declaration
+    # and any shared helpers.  The `use Oban.Worker` cannot live
+    # inside a quote'd macro — Oban's @before_compile hook does
+    # not fire through that indirection, leaving new/1 undefined.
     quote do
-      use Oban.Worker, queue: :default
+      @behaviour Quire.Workers.Base
     end
   end
 

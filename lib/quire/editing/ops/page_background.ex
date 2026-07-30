@@ -9,11 +9,9 @@ defmodule Quire.Editing.Ops.PageBackground do
   end
 
   @doc """
-  Computes the inverse of page.background.
-  No delete counterpart exists for backgrounds in the catalogue,
-  so uses restore_revision as a Phase 0 placeholder.
+  Computes the inverse of page.background — restores the previous revision.
   """
-  def invert(_op_data, _context) do
-    {:ok, {:restore_revision, nil}}
+  def invert(_op_data, context) do
+    {:ok, {:restore_revision, context[:base_revision_id]}}
   end
 end

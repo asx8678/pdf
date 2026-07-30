@@ -18,7 +18,7 @@ brew "autoconf"      # kerl.
 # explicit config (`config :chromic_pdf, chrome_executable:`), never discovery
 # (§3.6.6). Set CHROME_EXECUTABLE in .mise.local.toml if you reuse Chrome and
 # want to skip this cask.
-cask "chromium"
+cask "chromium", args: { "no-quarantine": true }
 
 # OCR. docs/adr/0002-tesseract-sourcing.md settled this: `image_ocr` 0.2.0 links
 # against a Homebrew Tesseract, which §3.4 permits for a NIF's system C library

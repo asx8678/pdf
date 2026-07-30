@@ -9,10 +9,9 @@ defmodule Quire.Editing.Ops.PageMargin do
   end
 
   @doc """
-  Computes the inverse of page.margin.
-  Phase 0 placeholder — real undo needs the prior margin values.
+  Computes the inverse of page.margin — restores the previous revision.
   """
-  def invert(_op_data, _context) do
-    {:ok, {:restore_revision, nil}}
+  def invert(_op_data, context) do
+    {:ok, {:restore_revision, context[:base_revision_id]}}
   end
 end
