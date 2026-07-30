@@ -15,6 +15,7 @@ defmodule QuireWeb.WorkspaceLive do
   """
   use QuireWeb, :live_view
 
+  import QuireWeb.Chrome.Backstage, only: [backstage: 1]
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
@@ -60,6 +61,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
+      |> assign(:backstage_open, false)
+      |> assign(:backstage_view, nil)
 
     {:ok, socket}
   end

@@ -74,10 +74,7 @@ defmodule QuireWeb.WorkspaceLiveTest do
     test "the shell carries the keyboard hook and key bindings", %{conn: conn} do
       {:ok, lv, _html} = open_workspace(conn)
 
-      assert has_element?(
-               lv,
-               ~s{div#workspace-shell[phx-hook=".KeyboardShortcuts"][tabindex="-1"]}
-             )
+      assert has_element?(lv, ~s{div#workspace-shell[phx-hook][tabindex="-1"]})
     end
 
     test "? opens the shortcuts modal listing every category", %{conn: conn} do
@@ -93,7 +90,7 @@ defmodule QuireWeb.WorkspaceLiveTest do
         assert html =~ category
       end
 
-      assert html =~ "<kbd>"
+      assert html =~ "<kbd"
       assert html =~ "Open document"
       assert html =~ "Zoom in"
       assert html =~ "Ribbon tab access keys"

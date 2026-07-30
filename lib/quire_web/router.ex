@@ -25,12 +25,6 @@ defmodule QuireWeb.Router do
 
   defp put_chrome_shell(conn, _opts), do: assign(conn, :chrome_shell, true)
 
-  scope "/", QuireWeb do
-    pipe_through :browser
-
-    get "/", PageController, :home
-  end
-
   # Other scopes may use custom stacks.
   # scope "/api", QuireWeb do
   #   pipe_through :api
@@ -81,6 +75,7 @@ defmodule QuireWeb.Router do
 
     live_session :current_user,
       on_mount: [{QuireWeb.UserAuth, :mount_current_scope}] do
+      live "/", HomeLive, :index
       live "/users/register", UserLive.Registration, :new
       live "/users/log-in", UserLive.Login, :new
       live "/users/log-in/:token", UserLive.Confirmation, :new

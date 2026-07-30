@@ -39,6 +39,14 @@
 
     <.confirm_close_modal :if={@confirm_close_doc} confirm_close_doc={@confirm_close_doc} />
 
+    <.backstage
+      open={@backstage_open}
+      active_view={@backstage_view}
+      dirty={Enum.any?(@documents, & &1.dirty)}
+      on_select="backstage_select"
+      on_close="close_backstage"
+    />
+
     <.shortcuts_modal :if={@show_shortcuts} on_close="close_shortcuts" />
 
     <script :type={Phoenix.LiveView.ColocatedHook} name=".KeyboardShortcuts">
