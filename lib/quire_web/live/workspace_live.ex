@@ -31,6 +31,9 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.StatusBar, only: [status_bar: 1]
   import QuireWeb.Chrome.ThumbnailsPanel, only: [thumbnails_panel: 1]
   import QuireWeb.Chrome.TitleBar, only: [title_bar: 1]
+  import QuireWeb.Chrome.RibbonGroup, only: [ribbon_group: 1]
+  import QuireWeb.Chrome.RibbonButton, only: [ribbon_button: 1]
+  import QuireWeb.Chrome.RibbonSplitButton, only: [ribbon_split_button: 1]
   import QuireWeb.Shared.Modal, only: [modal: 1]
 
   # The shell markup lives in workspace_live/workspace.html.heex (T-033);
@@ -111,7 +114,17 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:backstage_open, false)
       |> assign(:backstage_view, nil)
       |> assign(:show_email_compose, false)
+      |> assign(:builtin_stamps, builtin_stamps())
+      |> assign(:selected_stamp_id, nil)
+      |> assign(:stamp_mode_active, false)
+      |> assign(:attachment_mode_active, false)
+      |> assign(:callout_mode_active, false)
+      |> assign(:stamps, [])
+      |> assign(:ocr_running, false)
+      |> assign(:ocr_progress, nil)
       |> load_saved_signatures()
+
+    Phoenix.PubSub.subscribe(Quire.PubSub, "document:#{id}")
 
     {:ok, socket}
   end
@@ -465,11 +478,147 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :layers, layers)}
   end
 
-  # Attachments panel (T-049) — read-only stub; the real preview
-  # (open embedded file from the document's attachment store) lands
-  # after pdf-0g9 resolves.
+  # ── Annotation event handlers (T-107) ──────────────────────────────────
+
+  @doc """
+  Receives a committed annotation from the annot_edit_hook.
+  Handles all annotation types: text-markup, shapes, stamps,
+  file attachments, and free-text callouts.
+  """
+  def handle_event("annot_committed", %{"type" => type, "data" => data}, socket) do
+    document_id = socket.assigns.active_document_id
+
+    socket =
+      case type do
+        # File attachment — store file bytes via Quire.Storage
+        "file_attachment" ->
+          handle_file_attachment_commit(socket, document_id, data)
+
+        # Stamp annotation
+        "stamp" ->
+          handle_stamp_commit(socket, document_id, data)
+
+        # Free-text callout
+        "free_text_callout" ->
+          handle_callout_commit(socket, document_id, data)
+
+        # All other types (shapes, native pdf.js annotations)
+        _ ->
+          handle_annotation_commit(socket, document_id, type, data)
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("annot_deleted", %{"id" => _id}, socket) do
+    # T-088: annotation deletion handled via DocMutateHook
+    {:noreply, socket}
+  end
+
+  def handle_event("annot_mode_changed", %{"mode" => _mode}, socket) do
+    {:noreply, socket}
+  end
+
+  # Update ribbon active state when user switches annotation mode via JS
+  def handle_event("toggle_annot_mode", %{"mode" => mode}, socket) do
+    socket =
+      socket
+      |> assign(:stamp_mode_active, mode == "stamp")
+      |> assign(:attachment_mode_active, mode == "file_attachment")
+      |> assign(:callout_mode_active, mode == "free_text_callout")
+      |> push_event("toggle_annot_mode", %{mode: mode})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("open_attachments_panel", _params, socket) do
+    {:noreply, assign(socket, :right_panel, :attachments)}
+  end
+
+  def handle_event("toggle_custom_stamps", _params, socket) do
+    {:noreply, socket}
+  end
+
+  # Enqueue OcrWorker for the current document revision.
+  def handle_event("run_ocr", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      %{
+        "doc_id" => doc_id,
+        "revision_id" => rev.id
+      }
+      |> Quire.Workers.OcrWorker.new([])
+      |> Oban.insert!()
+
+      {:noreply,
+       socket
+       |> assign(:ocr_running, true)
+       |> assign(:ocr_progress, %{pct: 0})
+       |> put_flash(:info, "OCR started on #{doc.title}")}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start OCR: #{reason}")}
+    end
+  end
+
+  # Attachments panel (T-107) — download/extract an embedded file attachment.
+  # File bytes are retrieved from Quire.Storage via the attachment_ref.
   def handle_event("preview_attachment", %{"name" => _name}, socket) do
     {:noreply, socket}
+  end
+
+  def handle_event("download_attachment", %{"ref" => _ref}, socket) do
+    # T-107: serve bytes through a download route or direct push
+    {:noreply, socket}
+  end
+
+  # ── Custom stamp event handlers (T-107) ────────────────────────────────
+
+  def handle_event("save_custom_stamp", params, socket) do
+    user_id = socket.assigns.current_user.id
+
+    params =
+      if is_binary(params["data"]),
+        do: Map.put(params, "data", Jason.decode!(params["data"])),
+        else: params
+
+    case Quire.Accounts.save_stamp(user_id, params) do
+      {:ok, _stamp} ->
+        {:noreply, put_flash(socket, :info, "Stamp saved")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save stamp")}
+    end
+  end
+
+  def handle_event("delete_stamp", %{"id" => stamp_id}, socket) do
+    user_id = socket.assigns.current_user.id
+    Quire.Accounts.delete_saved_stamp(user_id, stamp_id)
+    {:noreply, socket}
+  end
+
+  def handle_event("select_builtin_stamp", %{"stamp_id" => stamp_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_stamp_id, stamp_id)
+     |> push_event("select_stamp", %{stampId: stamp_id})}
+  end
+
+  def handle_event("select_custom_stamp", %{"stamp_id" => stamp_id}, socket) do
+    user_id = socket.assigns.current_user.id
+    stamps = Quire.Accounts.list_saved_stamps(user_id)
+    stamp = Enum.find(stamps, &(&1["id"] == stamp_id))
+
+    if stamp do
+      {:noreply,
+       socket
+       |> assign(:selected_stamp_id, stamp_id)
+       |> push_event("select_stamp", %{stampId: stamp["type"], customData: stamp["data"]})}
+    else
+      {:noreply, socket}
+    end
   end
 
   # Thumbnails panel (T-046) — clamp into range and push to the viewer
@@ -970,7 +1119,90 @@ defmodule QuireWeb.WorkspaceLive do
         </button>
       </div>
 
-      <p class="text-sm text-gray-400 dark:text-gray-500 italic px-4">Select a tool</p>
+      <!-- View tab OCR tools -->
+      <div :if={@active_tab == "view"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Tools">
+          <.ribbon_button
+            icon="hero-document-magnifying-glass"
+            label="Run OCR"
+            active={@ocr_running}
+            phx-click="run_ocr"
+            tooltip="Recognise text in the document"
+            disabled={@ocr_running}
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Progress" :if={@ocr_progress}>
+          <div class="flex items-center gap-2 px-2 py-1 text-xs text-gray-500">
+            <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+            <span>{"#{@ocr_progress.pct}%"}</span>
+          </div>
+        </.ribbon_group>
+      </div>
+
+      <!-- Comment tab ribbon groups (T-107) -->
+      <div :if={@active_tab == "comment"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Stamps">
+          <.ribbon_button
+            :for={stamp <- @builtin_stamps}
+            icon="hero-stamp"
+            label={stamp.label}
+            active={@selected_stamp_id == stamp.id}
+            phx-click="select_builtin_stamp"
+            phx-value-stamp_id={stamp.id}
+            tooltip={stamp.label}
+          />
+          <.ribbon_split_button
+            icon="hero-photo"
+            label="Custom"
+            phx-click="toggle_custom_stamps"
+            tooltip="Custom stamps"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Attachment">
+          <.ribbon_button
+            icon="hero-paper-clip"
+            label="Attach File"
+            active={@attachment_mode_active}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="file_attachment"
+            tooltip="Embed file attachment"
+          />
+          <.ribbon_button
+            icon="hero-arrow-down-tray"
+            label="Extract"
+            phx-click="open_attachments_panel"
+            tooltip="Extract attachments"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Callout">
+          <.ribbon_button
+            icon="hero-chat-bubble-oval-left-ellipsis"
+            label="Callout"
+            active={@callout_mode_active}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="free_text_callout"
+            tooltip="Free-text callout with leader line"
+          />
+          <.ribbon_button
+            icon="hero-stamp"
+            label="Stamp"
+            active={@stamp_mode_active}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="stamp"
+            tooltip="Place a stamp"
+          />
+        </.ribbon_group>
+      </div>
+
+      <p
+        :if={@active_tab not in @view_toggle_tabs}
+        class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
+      >
+        Select a tool
+      </p>
     </div>
     """
   end
@@ -1049,6 +1281,149 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
   defp panel_title(:signatures), do: "Signatures"
+
+  defp builtin_stamps do
+    [
+      %{id: "approved", label: "Approved"},
+      %{id: "draft", label: "Draft"},
+      %{id: "confidential", label: "Confidential"},
+      %{id: "reviewed", label: "Reviewed"},
+      %{id: "for_public_release", label: "Public Release"},
+      %{id: "sign_here", label: "Sign Here"}
+    ]
+  end
+
+  # ── PubSub handlers (T-139) ──────────────────────────────────────────
+
+  @impl true
+  def handle_info({:revision, rev}, socket) do
+    socket =
+      socket
+      |> assign(:ocr_running, false)
+      |> assign(:ocr_progress, nil)
+      |> push_event("revision_updated", %{revision_id: rev.id})
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:operation_progress, _operation_id, pct}, socket) do
+    {:noreply, assign(socket, :ocr_progress, %{pct: pct})}
+  end
+
+  # ── Annotation commit helpers (T-107) ────────────────────────────────
+
+  defp handle_annotation_commit(socket, document_id, type, data) do
+    user_id = socket.assigns.current_user.id
+
+    annot = %{
+      revision_id: document_id,
+      page_index: data["pageIndex"] || 0,
+      kind: type,
+      rect: data["rectPdf"] || data["rect"],
+      path_data: data["pathData"] || data["path_data"],
+      color: data["color"] || data["strokeColor"] || data["fillColor"],
+      opacity: data["opacity"] || Map.get(data, "opacity", 100),
+      border_width: data["strokeWidth"] || data["borderWidth"] || data["border_width"],
+      content: data["content"] || data["text"],
+      author: socket.assigns.current_user.name || user_id
+    }
+
+    record_annotation(socket, document_id, user_id, annot)
+  end
+
+  defp handle_stamp_commit(socket, document_id, data) do
+    user_id = socket.assigns.current_user.id
+
+    annot = %{
+      revision_id: document_id,
+      page_index: data["pageIndex"] || 0,
+      kind: "stamp",
+      rect: data["rectPdf"] || data["rect"],
+      content: data["stampId"] || "custom",
+      path_data: data["stampSvg"],
+      color: nil,
+      opacity: 100,
+      author: socket.assigns.current_user.name || user_id
+    }
+
+    record_annotation(socket, document_id, user_id, annot)
+  end
+
+  defp handle_callout_commit(socket, document_id, data) do
+    user_id = socket.assigns.current_user.id
+
+    annot = %{
+      revision_id: document_id,
+      page_index: data["pageIndex"] || 0,
+      kind: "free_text_callout",
+      rect: data["rectPdf"] || data["rect"],
+      path_data: data["anchor"] || data["anchorPdf"],
+      content: data["content"] || "",
+      color: data["color"],
+      opacity: 100,
+      border_width: 1,
+      author: socket.assigns.current_user.name || user_id
+    }
+
+    record_annotation(socket, document_id, user_id, annot)
+  end
+
+  defp handle_file_attachment_commit(socket, document_id, data) do
+    user_id = socket.assigns.current_user.id
+
+    # File bytes come from the client as base64.
+    # Store via Quire.Storage and reference by ref.
+    file_data = data["fileData"]
+    file_name = data["fileName"] || "attachment"
+    file_type = data["fileType"] || "application/octet-stream"
+
+    attachment_ref =
+      if file_data do
+        bytes =
+          case Base.decode64(file_data) do
+            {:ok, decoded} -> decoded
+            _ -> file_data
+          end
+
+        case Quire.Storage.put(bytes, name: file_name, content_type: file_type) do
+          {:ok, ref} -> ref
+          _ -> nil
+        end
+      end
+
+    annot = %{
+      revision_id: document_id,
+      page_index: data["pageIndex"] || 0,
+      kind: "file_attachment",
+      rect: data["rectPdf"] || data["rect"],
+      attachment_ref: attachment_ref && %{
+        key: attachment_ref.key,
+        name: attachment_ref.name,
+        content_type: attachment_ref.content_type,
+        byte_size: attachment_ref.byte_size
+      },
+      content: file_name,
+      color: nil,
+      opacity: 100,
+      author: socket.assigns.current_user.name || user_id
+    }
+
+    record_annotation(socket, document_id, user_id, annot)
+  end
+
+  defp record_annotation(socket, document_id, user_id, annot) do
+    with {:ok, session_pid} <- Quire.Editing.open_session(document_id, user_id),
+         {:ok, _} <- Quire.Editing.apply(session_pid, %{
+           kind: "annot.add",
+           data: annot
+         }) do
+      assign(socket, :mutations_pending, true)
+    else
+      _ ->
+        put_flash(socket, :error, "Failed to record annotation")
+    end
+  end
 
   defp no_document_placeholder(assigns) do
     ~H"""

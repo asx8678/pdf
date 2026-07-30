@@ -20,6 +20,7 @@ defmodule Quire.Accounts.UserSetting do
 
     field :qat_items, :map
     field :signatures, :map
+    field :stamps, :map
 
     field :recent_limit, :integer, default: 20
     field :ocr_default_lang, :string, default: "eng"
@@ -40,6 +41,7 @@ defmodule Quire.Accounts.UserSetting do
       :grid_visible,
       :qat_items,
       :signatures,
+      :stamps,
       :recent_limit,
       :ocr_default_lang,
       :measurement_unit,

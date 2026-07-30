@@ -47,6 +47,9 @@ defmodule Quire.Office.Reader do
       :ods ->
         Quire.Office.Reader.Ods.read(bytes)
 
+      :docx ->
+        Quire.Office.Reader.Docx.read(bytes)
+
       :odt ->
         Quire.Office.Reader.Odt.read(bytes)
 

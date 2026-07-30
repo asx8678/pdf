@@ -40,6 +40,29 @@ const SHAPE_MODES = new Set([
   "polyline",
 ]);
 
+// Stamp modes — custom SVG stamp placement (built-in SVG + custom image/text)
+const STAMP_MODES = new Set([
+  "stamp",
+]);
+
+// File attachment mode — custom SVG pin icon placement
+const FILE_ATTACHMENT_MODES = new Set([
+  "file_attachment",
+]);
+
+// Free-text callout mode — custom free text with leader line
+const FREE_TEXT_CALLOUT_MODES = new Set([
+  "free_text_callout",
+]);
+
+// All custom (non-native) modes combined for dispatch
+const CUSTOM_MODES = new Set([
+  ...SHAPE_MODES,
+  ...STAMP_MODES,
+  ...FILE_ATTACHMENT_MODES,
+  ...FREE_TEXT_CALLOUT_MODES,
+]);
+
 // AnnotationEditorType constants used for comparison
 const TYPE_NONE = 0;
 
@@ -59,6 +82,59 @@ const STICKY_ICONS = {
   help: "hero-question-mark-circle",
   paragraph: "hero-document-text",
 };
+
+// Built-in stamp definitions (SVG rendered in the browser).
+// Each stamp has an id, label, and SVG content.
+const BUILTIN_STAMPS = [
+  {
+    id: "approved",
+    label: "Approved",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+      <rect width="120" height="40" rx="4" fill="#16a34a" fill-opacity="0.12" stroke="#16a34a" stroke-width="1.5"/>
+      <text x="60" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#16a34a">APPROVED</text>
+    </svg>`,
+  },
+  {
+    id: "draft",
+    label: "Draft",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+      <rect width="120" height="40" rx="4" fill="#ca8a04" fill-opacity="0.12" stroke="#ca8a04" stroke-width="1.5"/>
+      <text x="60" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#ca8a04">DRAFT</text>
+    </svg>`,
+  },
+  {
+    id: "confidential",
+    label: "Confidential",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 40">
+      <rect width="140" height="40" rx="4" fill="#dc2626" fill-opacity="0.12" stroke="#dc2626" stroke-width="1.5"/>
+      <text x="70" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#dc2626">CONFIDENTIAL</text>
+    </svg>`,
+  },
+  {
+    id: "reviewed",
+    label: "Reviewed",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+      <rect width="120" height="40" rx="4" fill="#2563eb" fill-opacity="0.12" stroke="#2563eb" stroke-width="1.5"/>
+      <text x="60" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2563eb">REVIEWED</text>
+    </svg>`,
+  },
+  {
+    id: "for_public_release",
+    label: "For Public Release",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 170 40">
+      <rect width="170" height="40" rx="4" fill="#059669" fill-opacity="0.12" stroke="#059669" stroke-width="1.5"/>
+      <text x="85" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#059669">FOR PUBLIC RELEASE</text>
+    </svg>`,
+  },
+  {
+    id: "sign_here",
+    label: "Sign Here",
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 40">
+      <rect width="120" height="40" rx="4" fill="#7c3aed" fill-opacity="0.12" stroke="#7c3aed" stroke-width="1.5"/>
+      <text x="60" y="26" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#7c3aed">SIGN HERE</text>
+    </svg>`,
+  },
+];
 
 const AnnotEditHook = {
   mounted() {
@@ -95,6 +171,33 @@ const AnnotEditHook = {
     this._strokeColor = "#000000";
     this._strokeWidth = 2;
     this._shapeOpacity = 1.0;
+
+    // Stamp state (T-107)
+    this._stampMode = null;           // current stamp mode string, or null
+    this._stampSvg = null;            // SVG overlay element for stamps
+    this._stampSelectedId = null;     // currently selected built-in stamp id
+    this._stampCustomData = null;     // custom stamp data (image/text SVG)
+    this._stampBind = null;           // bound event handlers
+
+    // File attachment state (T-107)
+    this._attachmentMode = false;
+    this._attachmentPinSvg = null;    // SVG overlay element for pin
+    this._attachmentBind = null;
+
+    // Free-text callout state (T-107)
+    this._calloutMode = null;         // current callout mode string
+    this._calloutState = "idle";      // "idle" | "placing_anchor" | "sizing" | "editing"
+    this._calloutAnchor = null;       // {x, y} leader line anchor point
+    this._calloutRect = null;         // {x, y, w, h} text box rect
+    this._calloutSvg = null;          // SVG overlay element
+    this._calloutBind = null;         // bound event handlers
+    this._calloutPageIndex = null;
+    this._calloutTextDiv = null;      // contenteditable div for text entry
+    this._calloutColor = "#000000";
+    this._calloutFontSize = 12;
+
+    // Common SVG overlay reference shared by stamp/attachment/callout
+    this._customSvg = null;
 
     // Defer wiring until PdfViewerHook has initialised and stored
     // viewer/eventBus references on the shared element.
@@ -161,11 +264,30 @@ const AnnotEditHook = {
     this.handleEvent("set_shape_opacity", ({ opacity }) => {
       this._shapeOpacity = opacity / 100;
     });
+
+    // Server-driven stamp selection (T-107)
+    this.handleEvent("select_stamp", ({ stampId, customData }) => {
+      this._stampSelectedId = stampId || null;
+      this._stampCustomData = customData || null;
+    });
+
+    // Server-driven callout color/size changes (T-107)
+    this.handleEvent("set_callout_color", ({ color }) => {
+      this._calloutColor = color;
+    });
+
+    this.handleEvent("set_callout_font_size", ({ size }) => {
+      this._calloutFontSize = size;
+    });
   },
 
   destroyed() {
     this._cleanupEraser();
     this._teardownShape();
+    this._teardownStamp();
+    this._teardownAttachment();
+    this._teardownCallout();
+    this._cleanupCustomSvg();
     if (this._eventBus && this._onModeChanged) {
       try {
         this._eventBus.off("annotationeditormodechanged", this._onModeChanged);
@@ -246,13 +368,29 @@ const AnnotEditHook = {
   _switchMode(modeStr) {
     if (!this._viewer) return;
 
-    // Handle shape modes separately from pdf.js native modes.
-    if (SHAPE_MODES.has(modeStr)) {
-      this._activateShapeMode(modeStr);
+    // Teardown any active custom modes before switching.
+    this._deactivateStampMode();
+    this._deactivateAttachmentMode();
+    this._deactivateCalloutMode();
+
+    // Handle custom (non-native) modes: shapes, stamps, attachment, callout.
+    if (CUSTOM_MODES.has(modeStr)) {
+      if (SHAPE_MODES.has(modeStr)) {
+        this._activateShapeMode(modeStr);
+      } else if (STAMP_MODES.has(modeStr)) {
+        this._activateStampMode();
+      } else if (FILE_ATTACHMENT_MODES.has(modeStr)) {
+        this._activateAttachmentMode();
+      } else if (FREE_TEXT_CALLOUT_MODES.has(modeStr)) {
+        this._activateCalloutMode();
+      }
       return;
     }
 
-    // Non-shape modes: use pdf.js annotation editor.
+    // Tear down shape mode when switching to native.
+    this._teardownShape();
+
+    // Non-custom modes: use pdf.js annotation editor.
     const mode = MODE_MAP[modeStr];
     if (mode === undefined) {
       console.warn(`AnnotEditHook: unknown annotation mode "${modeStr}"`);
@@ -1036,6 +1174,648 @@ const AnnotEditHook = {
   /** Clean up eraser click listeners. */
   _cleanupEraser() {
     this._eraserActive = false;
+  },
+
+  /* ── stamp mode (T-107) ──────────────────────────────────────────── */
+
+  /**
+   * Activate stamp placement mode. Click on the page to place
+   * the currently selected built-in or custom stamp.
+   */
+  _activateStampMode() {
+    // Toggle off if already in stamp mode.
+    if (this._stampMode === "stamp") {
+      this._deactivateStampMode();
+      return;
+    }
+
+    // Exit pdf.js annotation editor mode.
+    try {
+      this._viewer.annotationEditorMode = { mode: TYPE_NONE };
+    } catch (_) { /* ignore */ }
+
+    this._stampMode = "stamp";
+
+    // Ensure custom SVG overlay.
+    this._ensureCustomSvg();
+
+    // Bind click handler.
+    this._bindStampEvents();
+
+    this.pushEvent("annot_mode_changed", { mode: 0 });
+  },
+
+  _deactivateStampMode() {
+    this._unbindStampEvents();
+    this._stampMode = null;
+  },
+
+  _bindStampEvents() {
+    this._unbindStampEvents();
+
+    const container = this.el.querySelector("#pdf-viewer-container") ||
+                      this.el;
+
+    const handler = (e) => this._onStampClick(e);
+    container.addEventListener("click", handler);
+    this._stampBind = { container, handler };
+  },
+
+  _unbindStampEvents() {
+    if (!this._stampBind) return;
+    const { container, handler } = this._stampBind;
+    container.removeEventListener("click", handler);
+    this._stampBind = null;
+  },
+
+  _teardownStamp() {
+    this._unbindStampEvents();
+    this._stampMode = null;
+  },
+
+  /**
+   * Handle click to place a stamp.
+   */
+  _onStampClick(e) {
+    if (!this._stampMode) return;
+    e.preventDefault();
+
+    const pos = this._shapePointerPos(e);
+    const pageIndex = pos.pageIndex;
+
+    // Determine stamp SVG content.
+    let stampSvgContent;
+    let stampId;
+
+    if (this._stampCustomData) {
+      // Custom stamp (image/text from user settings)
+      stampSvgContent = this._stampCustomData;
+      stampId = "custom";
+    } else {
+      // Built-in stamp
+      const stampDef = BUILTIN_STAMPS.find(s => s.id === this._stampSelectedId) || BUILTIN_STAMPS[0];
+      stampSvgContent = stampDef.svg;
+      stampId = stampDef.id;
+    }
+
+    // Render stamp preview at click location.
+    this._clearCustomSvg();
+    if (!this._customSvg) return;
+
+    const ns = "http://www.w3.org/2000/svg";
+    const wrapper = document.createElementNS(ns, "g");
+    wrapper.setAttribute("transform", `translate(${pos.x - 60}, ${pos.y - 20})`);
+
+    // Parse the stamp SVG and embed it.
+    const tempContainer = document.createElement("div");
+    tempContainer.innerHTML = stampSvgContent;
+    const srcSvg = tempContainer.querySelector("svg");
+    if (srcSvg) {
+      for (let i = 0; i < srcSvg.childNodes.length; i++) {
+        const child = srcSvg.childNodes[i].cloneNode(true);
+        wrapper.appendChild(child);
+      }
+    }
+
+    this._customSvg.appendChild(wrapper);
+
+    // Compute bounding rect.
+    const w = 120;
+    const h = 40;
+    const rect = [pos.x - 60, pos.y - 20, w, h];
+
+    // Convert coordinates and push to server.
+    const pageViews = this._buildPageViews();
+    const data = {
+      id: `stamp_${Date.now()}`,
+      pageIndex,
+      stampId,
+      stampSvg: stampSvgContent,
+      rect,
+    };
+    const converted = this._convertCoordinates(data.id, data, pageViews);
+    data.rectPdf = converted.rectPdf;
+
+    this.pushEvent("annot_committed", { type: "stamp", data });
+
+    // Fade out preview after a brief display.
+    setTimeout(() => this._clearCustomSvg(), 1500);
+  },
+
+  /* ── file attachment mode (T-107) ─────────────────────────────────── */
+
+  /**
+   * Activate file attachment placement mode. Click on the page to
+   * place a pin icon, then a file picker opens.
+   */
+  _activateAttachmentMode() {
+    if (this._attachmentMode) {
+      this._deactivateAttachmentMode();
+      return;
+    }
+
+    try {
+      this._viewer.annotationEditorMode = { mode: TYPE_NONE };
+    } catch (_) { /* ignore */ }
+
+    this._attachmentMode = true;
+    this._ensureCustomSvg();
+    this._bindAttachmentEvents();
+
+    this.pushEvent("annot_mode_changed", { mode: 0 });
+  },
+
+  _deactivateAttachmentMode() {
+    this._unbindAttachmentEvents();
+    this._attachmentMode = false;
+  },
+
+  _bindAttachmentEvents() {
+    this._unbindAttachmentEvents();
+
+    const container = this.el.querySelector("#pdf-viewer-container") ||
+                      this.el;
+
+    const handler = (e) => this._onAttachmentClick(e);
+    container.addEventListener("click", handler);
+    this._attachmentBind = { container, handler };
+  },
+
+  _unbindAttachmentEvents() {
+    if (!this._attachmentBind) return;
+    const { container, handler } = this._attachmentBind;
+    container.removeEventListener("click", handler);
+    this._attachmentBind = null;
+  },
+
+  _teardownAttachment() {
+    this._unbindAttachmentEvents();
+    this._attachmentMode = false;
+  },
+
+  /**
+   * Handle click to place a file attachment pin, then trigger file upload.
+   */
+  _onAttachmentClick(e) {
+    if (!this._attachmentMode) return;
+    e.preventDefault();
+
+    const pos = this._shapePointerPos(e);
+    const pageIndex = pos.pageIndex;
+
+    // Render pin icon at click location.
+    this._clearCustomSvg();
+    if (!this._customSvg) return;
+
+    const ns = "http://www.w3.org/2000/svg";
+    const pinSize = 20;
+
+    const pin = document.createElementNS(ns, "g");
+    pin.setAttribute("transform", `translate(${pos.x - pinSize / 2}, ${pos.y - pinSize})`);
+
+    // Pin circle
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", pinSize / 2);
+    circle.setAttribute("cy", pinSize / 2);
+    circle.setAttribute("r", pinSize / 2);
+    circle.setAttribute("fill", "#dc2626");
+    circle.setAttribute("stroke", "#fff");
+    circle.setAttribute("stroke-width", "1.5");
+    pin.appendChild(circle);
+
+    // Pin inner dot
+    const dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("cx", pinSize / 2);
+    dot.setAttribute("cy", pinSize / 2);
+    dot.setAttribute("r", 3);
+    dot.setAttribute("fill", "#fff");
+    pin.appendChild(dot);
+
+    this._customSvg.appendChild(pin);
+
+    // Create a hidden file input and trigger upload.
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.style.display = "none";
+    document.body.appendChild(fileInput);
+
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {
+        this._clearCustomSvg();
+        document.body.removeChild(fileInput);
+        return;
+      }
+
+      // Read file bytes.
+      const reader = new FileReader();
+      reader.onload = () => {
+        const bytes = reader.result;
+        // Remove base64 prefix if present
+        const base64Data = typeof bytes === "string" && bytes.includes(",")
+          ? bytes.split(",")[1]
+          : bytes;
+
+        const pageViews = this._buildPageViews();
+        const data = {
+          id: `attachment_${Date.now()}`,
+          pageIndex,
+          rect: [pos.x - 10, pos.y - 10, 20, 20],
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type,
+          fileData: base64Data,
+        };
+        const converted = this._convertCoordinates(data.id, data, pageViews);
+        data.rectPdf = converted.rectPdf;
+
+        this.pushEvent("annot_committed", { type: "file_attachment", data });
+        this._clearCustomSvg();
+        document.body.removeChild(fileInput);
+      };
+      reader.onerror = () => {
+        this._clearCustomSvg();
+        document.body.removeChild(fileInput);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    fileInput.click();
+  },
+
+  /* ── free-text callout mode (T-107) ───────────────────────────────── */
+
+  /**
+   * Activate free-text callout mode. Mousedown places the leader line
+   * anchor point, drag sets the text box size, then text entry begins.
+   */
+  _activateCalloutMode() {
+    if (this._calloutMode === "free_text_callout") {
+      this._deactivateCalloutMode();
+      return;
+    }
+
+    try {
+      this._viewer.annotationEditorMode = { mode: TYPE_NONE };
+    } catch (_) { /* ignore */ }
+
+    this._calloutMode = "free_text_callout";
+    this._calloutState = "idle";
+    this._ensureCustomSvg();
+    this._bindCalloutEvents();
+
+    this.pushEvent("annot_mode_changed", { mode: 0 });
+  },
+
+  _deactivateCalloutMode() {
+    this._cancelCallout();
+    this._unbindCalloutEvents();
+    this._calloutMode = null;
+  },
+
+  _cancelCallout() {
+    this._clearCustomSvg();
+    this._removeCalloutTextDiv();
+    this._calloutState = "idle";
+    this._calloutAnchor = null;
+    this._calloutRect = null;
+    this._calloutPageIndex = null;
+  },
+
+  _removeCalloutTextDiv() {
+    if (this._calloutTextDiv && this._calloutTextDiv.parentNode) {
+      this._calloutTextDiv.parentNode.removeChild(this._calloutTextDiv);
+    }
+    this._calloutTextDiv = null;
+  },
+
+  _bindCalloutEvents() {
+    this._unbindCalloutEvents();
+
+    const container = this.el.querySelector("#pdf-viewer-container") ||
+                      this.el;
+
+    const handlers = {
+      mousedown: (e) => this._onCalloutPointerDown(e),
+      mousemove: (e) => this._onCalloutPointerMove(e),
+      mouseup: (e) => this._onCalloutPointerUp(e),
+      touchstart: (e) => this._onCalloutTouchStart(e),
+      touchmove: (e) => this._onCalloutTouchMove(e),
+      touchend: (e) => this._onCalloutTouchEnd(e),
+    };
+
+    for (const [event, handler] of Object.entries(handlers)) {
+      container.addEventListener(event, handler, { passive: false });
+    }
+
+    this._calloutBind = { container, handlers };
+  },
+
+  _unbindCalloutEvents() {
+    if (!this._calloutBind) return;
+    const { container, handlers } = this._calloutBind;
+    for (const [event, handler] of Object.entries(handlers)) {
+      container.removeEventListener(event, handler);
+    }
+    this._calloutBind = null;
+  },
+
+  _teardownCallout() {
+    this._unbindCalloutEvents();
+    this._cancelCallout();
+    this._calloutMode = null;
+  },
+
+  _onCalloutPointerDown(e) {
+    if (!this._calloutMode) return;
+    e.preventDefault();
+
+    const pos = this._shapePointerPos(e);
+    this._calloutPageIndex = pos.pageIndex;
+    this._calloutAnchor = { x: pos.x, y: pos.y };
+    this._calloutRect = { x: pos.x, y: pos.y, w: 0, h: 0 };
+    this._calloutState = "sizing";
+  },
+
+  _onCalloutPointerMove(e) {
+    if (this._calloutState !== "sizing") return;
+    if (!this._calloutAnchor || !this._calloutRect) return;
+    e.preventDefault();
+
+    const pos = this._shapePointerPos(e);
+    const x = Math.min(this._calloutAnchor.x, pos.x);
+    const y = Math.min(this._calloutAnchor.y, pos.y);
+    const w = Math.abs(pos.x - this._calloutAnchor.x);
+    const h = Math.abs(pos.y - this._calloutAnchor.y);
+
+    this._calloutRect = { x, y, w, h };
+    this._renderCalloutPreview();
+  },
+
+  _onCalloutPointerUp(e) {
+    if (this._calloutState !== "sizing") return;
+    if (!this._calloutAnchor || !this._calloutRect) return;
+    e.preventDefault();
+
+    // Minimum size check.
+    if (this._calloutRect.w < 30 || this._calloutRect.h < 20) {
+      this._cancelCallout();
+      return;
+    }
+
+    this._calloutState = "editing";
+    this._renderCalloutFinal();
+    this._showCalloutTextInput();
+  },
+
+  _onCalloutTouchStart(e) {
+    if (!this._calloutMode) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (!touch) return;
+    this._onCalloutPointerDown(touch);
+  },
+
+  _onCalloutTouchMove(e) {
+    if (this._calloutState !== "sizing") return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (!touch) return;
+    this._onCalloutPointerMove(touch);
+  },
+
+  _onCalloutTouchEnd(e) {
+    if (this._calloutState !== "sizing") return;
+    e.preventDefault();
+    this._onCalloutPointerUp(e);
+  },
+
+  /** Render the callout preview during sizing (leader line + text box outline). */
+  _renderCalloutPreview() {
+    this._clearCustomSvg();
+    if (!this._customSvg || !this._calloutAnchor || !this._calloutRect) return;
+
+    const svg = this._customSvg;
+    const ns = "http://www.w3.org/2000/svg";
+    const rect = this._calloutRect;
+    const anchor = this._calloutAnchor;
+    const color = this._calloutColor;
+
+    // Leader line: from text box top-left to anchor point
+    const leaderX = rect.x;
+    const leaderY = rect.y;
+
+    const leader = document.createElementNS(ns, "line");
+    leader.setAttribute("x1", leaderX);
+    leader.setAttribute("y1", leaderY);
+    leader.setAttribute("x2", anchor.x);
+    leader.setAttribute("y2", anchor.y);
+    leader.setAttribute("stroke", color);
+    leader.setAttribute("stroke-width", "1.5");
+    leader.setAttribute("stroke-dasharray", "4,2");
+    svg.appendChild(leader);
+
+    // Anchor dot (circle at the leader line endpoint)
+    const dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("cx", anchor.x);
+    dot.setAttribute("cy", anchor.y);
+    dot.setAttribute("r", 3);
+    dot.setAttribute("fill", color);
+    svg.appendChild(dot);
+
+    // Text box outline
+    const box = document.createElementNS(ns, "rect");
+    box.setAttribute("x", rect.x);
+    box.setAttribute("y", rect.y);
+    box.setAttribute("width", rect.w);
+    box.setAttribute("height", rect.h);
+    box.setAttribute("fill", "rgba(255,255,255,0.9)");
+    box.setAttribute("stroke", color);
+    box.setAttribute("stroke-width", "1");
+    box.setAttribute("rx", "2");
+    svg.appendChild(box);
+  },
+
+  /** Render the final callout without dashed preview lines. */
+  _renderCalloutFinal() {
+    this._clearCustomSvg();
+    if (!this._customSvg || !this._calloutAnchor || !this._calloutRect) return;
+
+    const svg = this._customSvg;
+    const ns = "http://www.w3.org/2000/svg";
+    const rect = this._calloutRect;
+    const anchor = this._calloutAnchor;
+    const color = this._calloutColor;
+
+    // Leader line (solid)
+    const leaderX = rect.x;
+    const leaderY = rect.y;
+
+    const leader = document.createElementNS(ns, "line");
+    leader.setAttribute("x1", leaderX);
+    leader.setAttribute("y1", leaderY);
+    leader.setAttribute("x2", anchor.x);
+    leader.setAttribute("y2", anchor.y);
+    leader.setAttribute("stroke", color);
+    leader.setAttribute("stroke-width", "1.5");
+    svg.appendChild(leader);
+
+    // Anchor dot
+    const dot = document.createElementNS(ns, "circle");
+    dot.setAttribute("cx", anchor.x);
+    dot.setAttribute("cy", anchor.y);
+    dot.setAttribute("r", 3);
+    dot.setAttribute("fill", color);
+    svg.appendChild(dot);
+
+    // Text box (white fill, colored border)
+    const box = document.createElementNS(ns, "rect");
+    box.setAttribute("x", rect.x);
+    box.setAttribute("y", rect.y);
+    box.setAttribute("width", rect.w);
+    box.setAttribute("height", rect.h);
+    box.setAttribute("fill", "rgba(255,255,255,0.95)");
+    box.setAttribute("stroke", color);
+    box.setAttribute("stroke-width", "1");
+    box.setAttribute("rx", "2");
+    svg.appendChild(box);
+  },
+
+  /** Show a contenteditable div for text entry in the callout text box. */
+  _showCalloutTextInput() {
+    this._removeCalloutTextDiv();
+    if (!this._calloutRect) return;
+
+    const container = this.el.querySelector("#pdf-viewer-container") ||
+                      this.el;
+    const rect = this._calloutRect;
+    const containerRect = container.getBoundingClientRect();
+
+    const div = document.createElement("div");
+    div.contentEditable = "true";
+    div.style.cssText = `
+      position: absolute;
+      left: ${rect.x}px;
+      top: ${rect.y}px;
+      width: ${rect.w}px;
+      height: ${rect.h}px;
+      font-size: ${this._calloutFontSize}px;
+      color: ${this._calloutColor};
+      background: transparent;
+      border: none;
+      outline: none;
+      padding: 4px 6px;
+      box-sizing: border-box;
+      overflow: hidden;
+      word-wrap: break-word;
+      font-family: Arial, sans-serif;
+      line-height: 1.3;
+      z-index: 20;
+      cursor: text;
+    `;
+    div.textContent = "Type here…";
+
+    // Handle Enter to commit.
+    div.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        this._commitCallout(div.textContent);
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        this._cancelCallout();
+      }
+    });
+
+    // Handle blur to commit.
+    div.addEventListener("blur", () => {
+      this._commitCallout(div.textContent);
+    });
+
+    // Focus after adding to DOM.
+    container.style.position = "relative";
+    container.appendChild(div);
+    this._calloutTextDiv = div;
+    setTimeout(() => div.focus(), 50);
+  },
+
+  /** Commit the free-text callout annotation. */
+  _commitCallout(text) {
+    if (!this._calloutAnchor || !this._calloutRect) {
+      this._cancelCallout();
+      return;
+    }
+
+    const content = (text && text.trim() !== "Type here…") ? text.trim() : "";
+
+    const pageViews = this._buildPageViews();
+    const rect = [
+      this._calloutRect.x,
+      this._calloutRect.y,
+      this._calloutRect.x + this._calloutRect.w,
+      this._calloutRect.y + this._calloutRect.h,
+    ];
+
+    const data = {
+      id: `callout_${Date.now()}`,
+      pageIndex: this._calloutPageIndex || 0,
+      rect,
+      content,
+      anchor: [this._calloutAnchor.x, this._calloutAnchor.y],
+      color: this._calloutColor,
+      fontSize: this._calloutFontSize,
+    };
+
+    const converted = this._convertCoordinates(data.id, data, pageViews);
+    data.rectPdf = converted.rectPdf;
+    if (data.anchor) {
+      const pt = converted.rectPdf
+        ? null
+        : pageViews.get(data.pageIndex)?.viewport?.convertToPdfPoint(data.anchor[0], data.anchor[1]);
+      if (pt) data.anchorPdf = [pt[0], pt[1]];
+    }
+
+    this.pushEvent("annot_committed", { type: "free_text_callout", data });
+
+    this._removeCalloutTextDiv();
+    this._clearCustomSvg();
+    this._calloutState = "idle";
+  },
+
+  /* ── custom SVG helpers (T-107) ───────────────────────────────────── */
+
+  /** Ensure the shared custom SVG overlay exists. */
+  _ensureCustomSvg() {
+    if (this._customSvg && this._customSvg.parentNode) return;
+
+    const wrapper = this.el.querySelector("#pdf-viewer-container") ||
+                    this.el.querySelector("#pdf-viewer-container-left") ||
+                    this.el;
+
+    if (!wrapper) return;
+
+    const old = wrapper.querySelector(".custom-overlay-svg");
+    if (old) old.remove();
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "custom-overlay-svg");
+    svg.style.cssText = "position:absolute;top:0;left:0;width:100%;height:100%;overflow:visible;z-index:11;pointer-events:none;";
+    wrapper.appendChild(svg);
+    this._customSvg = svg;
+  },
+
+  _clearCustomSvg() {
+    if (!this._customSvg) return;
+    while (this._customSvg.firstChild) {
+      this._customSvg.removeChild(this._customSvg.firstChild);
+    }
+  },
+
+  _cleanupCustomSvg() {
+    if (this._customSvg && this._customSvg.parentNode) {
+      this._customSvg.parentNode.removeChild(this._customSvg);
+    }
+    this._customSvg = null;
   },
 
   /* ── ink config ───────────────────────────────────────────────────── */

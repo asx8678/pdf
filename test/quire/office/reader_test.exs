@@ -714,6 +714,540 @@ defmodule Quire.Office.ReaderTest do
   end
 
   # ═════════════════════════════════════════════════════════════════════════════
+  # .docx tests
+  # ═════════════════════════════════════════════════════════════════════════════
+
+  describe ".docx" do
+    test "returns {:error, _} for empty input" do
+      assert {:error, _} = Reader.read(<<>>, "test.docx")
+    end
+
+    test "parses a minimal docx with a paragraph" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:r>
+                   <w:t>Hello World</w:t>
+                 </w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{type: :page, blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:paragraph, "Hello World"}]
+    end
+
+    test "parses multiple paragraphs" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:r><w:t>First para</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:r><w:t>Second para</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:r><w:t>Third para</w:t></w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [
+               {:paragraph, "First para"},
+               {:paragraph, "Second para"},
+               {:paragraph, "Third para"}
+             ]
+    end
+
+    test "combines multiple runs within a paragraph" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:r><w:t>Hello </w:t></w:r>
+                 <w:r><w:t>World</w:t></w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:paragraph, "Hello World"}]
+    end
+
+    test "parses headings via style names" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+             <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/styles.xml",
+           ~S"""
+           <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:style w:type="paragraph" w:styleId="Heading1">
+               <w:name w:val="heading 1"/>
+             </w:style>
+             <w:style w:type="paragraph" w:styleId="Heading2">
+               <w:name w:val="heading 2"/>
+             </w:style>
+           </w:styles>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:pPr>
+                   <w:pStyle w:val="Heading1"/>
+                 </w:pPr>
+                 <w:r><w:t>Title</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:pPr>
+                   <w:pStyle w:val="Heading2"/>
+                 </w:pPr>
+                 <w:r><w:t>Subtitle</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:r><w:t>A paragraph</w:t></w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [
+               {:heading, "Title", 1},
+               {:heading, "Subtitle", 2},
+               {:paragraph, "A paragraph"}
+             ]
+    end
+
+    test "parses unordered lists" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+             <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+             <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/styles.xml",
+           ~S"""
+           <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:style w:type="paragraph" w:styleId="ListParagraph">
+               <w:name w:val="List Paragraph"/>
+             </w:style>
+           </w:styles>
+           """},
+          {"word/numbering.xml",
+           ~S"""
+           <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:abstractNum w:abstractNumId="0">
+               <w:lvl w:ilvl="0">
+                 <w:numFmt w:val="bullet"/>
+               </w:lvl>
+             </w:abstractNum>
+             <w:num w:numId="1">
+               <w:abstractNumId w:val="0"/>
+             </w:num>
+           </w:numbering>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:pPr>
+                   <w:numPr>
+                     <w:numId w:val="1"/>
+                   </w:numPr>
+                 </w:pPr>
+                 <w:r><w:t>Item A</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:pPr>
+                   <w:numPr>
+                     <w:numId w:val="1"/>
+                   </w:numPr>
+                 </w:pPr>
+                 <w:r><w:t>Item B</w:t></w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:list, ["Item A", "Item B"], false}]
+    end
+
+    test "parses ordered lists" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+             <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/numbering.xml",
+           ~S"""
+           <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:abstractNum w:abstractNumId="0">
+               <w:lvl w:ilvl="0">
+                 <w:numFmt w:val="decimal"/>
+               </w:lvl>
+             </w:abstractNum>
+             <w:num w:numId="2">
+               <w:abstractNumId w:val="0"/>
+             </w:num>
+           </w:numbering>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:pPr>
+                   <w:numPr>
+                     <w:numId w:val="2"/>
+                   </w:numPr>
+                 </w:pPr>
+                 <w:r><w:t>First</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:pPr>
+                   <w:numPr>
+                     <w:numId w:val="2"/>
+                   </w:numPr>
+                 </w:pPr>
+                 <w:r><w:t>Second</w:t></w:r>
+               </w:p>
+               <w:p>
+                 <w:pPr>
+                   <w:numPr>
+                     <w:numId w:val="2"/>
+                   </w:numPr>
+                 </w:pPr>
+                 <w:r><w:t>Third</w:t></w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:list, ["First", "Second", "Third"], true}]
+    end
+
+    test "parses a table" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:tbl>
+                 <w:tblGrid>
+                   <w:gridCol w:w="3000"/>
+                   <w:gridCol w:w="3000"/>
+                 </w:tblGrid>
+                 <w:tr>
+                   <w:tc><w:p><w:r><w:t>Name</w:t></w:r></w:p></w:tc>
+                   <w:tc><w:p><w:r><w:t>Age</w:t></w:r></w:p></w:tc>
+                 </w:tr>
+                 <w:tr>
+                   <w:tc><w:p><w:r><w:t>Alice</w:t></w:r></w:p></w:tc>
+                   <w:tc><w:p><w:r><w:t>30</w:t></w:r></w:p></w:tc>
+                 </w:tr>
+               </w:tbl>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:table, ["Name", "Age"], [["Alice", "30"]]}]
+    end
+
+    test "extracts title from docProps" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"docProps/core.xml",
+           ~S"""
+           <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+                              xmlns:dc="http://purl.org/dc/elements/1.1/">
+             <dc:title>Report</dc:title>
+           </cp:coreProperties>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p><w:r><w:t>Content</w:t></w:r></w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{title: "Report", sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:paragraph, "Content"}]
+    end
+
+    test "handles text with hyperlinks" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+             <w:body>
+               <w:p>
+                 <w:r><w:t>Visit </w:t></w:r>
+                 <w:hyperlink r:id="rId1">
+                   <w:r><w:t>our site</w:t></w:r>
+                 </w:hyperlink>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:paragraph, "Visit our site"}]
+    end
+
+    test "extracts an image from media" do
+      image_bytes = "fake-png-bytes"
+
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/_rels/document.xml.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>
+           </Relationships>
+           """},
+          {"word/media/image1.png", image_bytes},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+                       xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                       xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                       xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"
+                       xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+             <w:body>
+               <w:p>
+                 <w:r>
+                   <w:drawing>
+                     <wp:inline>
+                       <wp:docPr id="1" name="Picture 1" descr="A test image"/>
+                       <a:graphic>
+                         <a:graphicData>
+                           <pic:pic>
+                             <pic:blipFill>
+                               <a:blip r:embed="rId2"/>
+                             </pic:blipFill>
+                           </pic:pic>
+                         </a:graphicData>
+                       </a:graphic>
+                     </wp:inline>
+                   </w:drawing>
+                 </w:r>
+               </w:p>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:image, image_bytes, "A test image", "png"}]
+    end
+
+    test "empty paragraphs produce no blocks" do
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+           </Relationships>
+           """},
+          {"word/document.xml",
+           ~S"""
+           <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+             <w:body>
+               <w:p/>
+               <w:p><w:r><w:t>Real text</w:t></w:r></w:p>
+               <w:p/>
+             </w:body>
+           </w:document>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.docx")
+
+      assert blocks == [{:paragraph, "Real text"}]
+    end
+  end
+
+  # ═════════════════════════════════════════════════════════════════════════════
   # dispatch tests
   # ═════════════════════════════════════════════════════════════════════════════
 

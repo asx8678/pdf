@@ -430,6 +430,70 @@ defmodule Quire.Accounts do
     update_user_settings(user_id, %{signatures: updated})
   end
 
+  ## Saved stamps
+
+  @doc """
+  Returns saved custom stamps for the given `user_id`.
+
+  Stamps are stored as a list of maps under the `stamps` key in
+  user_settings. Each entry has:
+    `id` — UUID for identification
+    `label` — user-given name
+    `type` — "image" | "text"
+    `data` — mode-specific payload (SVG/image data, or text+font)
+    `created_at` — ISO8601 timestamp
+  """
+  def list_saved_stamps(user_id) do
+    settings = get_user_settings(user_id)
+    Map.get(settings, :stamps) || []
+  end
+
+  @doc """
+  Saves a custom stamp for the given `user_id`.
+
+  Returns `{:ok, stamp}` or `{:error, reason}`.
+  """
+  def save_stamp(user_id, attrs) do
+    current = list_saved_stamps(user_id)
+
+    stamp = %{
+      "id" => Ecto.UUID.generate(),
+      "label" => attrs["label"] || attrs[:label] || "Custom stamp",
+      "type" => attrs["type"] || attrs[:type],
+      "data" => attrs["data"] || attrs[:data],
+      "created_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    case update_user_settings(user_id, %{stamps: [stamp | current]}) do
+      {:ok, _setting} -> {:ok, stamp}
+      error -> error
+    end
+  end
+
+  @doc """
+  Deletes a saved stamp by `id` for the given `user_id`.
+  """
+  def delete_saved_stamp(user_id, stamp_id) do
+    current = list_saved_stamps(user_id)
+    updated = Enum.reject(current, &(&1["id"] == stamp_id))
+    update_user_settings(user_id, %{stamps: updated})
+  end
+
+  @doc """
+  Updates a saved stamp's label for the given `user_id`.
+  """
+  def update_stamp_label(user_id, stamp_id, new_label) do
+    current = list_saved_stamps(user_id)
+
+    updated =
+      Enum.map(current, fn
+        %{"id" => ^stamp_id} = stamp -> Map.put(stamp, "label", new_label)
+        stamp -> stamp
+      end)
+
+    update_user_settings(user_id, %{stamps: updated})
+  end
+
   ## Token helper
 
   defp update_user_and_delete_all_tokens(changeset) do

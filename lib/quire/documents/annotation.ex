@@ -7,7 +7,7 @@ defmodule Quire.Documents.Annotation do
   """
   use Quire.Schema
 
-  @kind_values ~w(highlight underline strikethrough squiggly sticky_note free_text ink stamp signature line arrow double_arrow dimension oval rectangle polygon cloud polyline)
+  @kind_values ~w(highlight underline strikethrough squiggly sticky_note free_text free_text_callout ink stamp signature line arrow double_arrow dimension oval rectangle polygon cloud polyline file_attachment)
 
   schema "annotations" do
     field :revision_id, :binary_id
@@ -18,9 +18,10 @@ defmodule Quire.Documents.Annotation do
     field :path_data, :map
     field :color, :map
     field :opacity, :float
-    field :border_width, :float
-    field :content, :string
-    field :author, :string
+  field :border_width, :float
+  field :content, :string
+  field :author, :string
+  field :attachment_ref, :map
 
     timestamps(type: :utc_datetime)
   end
@@ -39,7 +40,8 @@ defmodule Quire.Documents.Annotation do
       :opacity,
       :border_width,
       :content,
-      :author
+      :author,
+      :attachment_ref
     ])
     |> Ecto.Changeset.validate_required([:revision_id, :page_index, :kind])
     |> Ecto.Changeset.validate_inclusion(:kind, @kind_values)
