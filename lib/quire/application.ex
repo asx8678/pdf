@@ -11,9 +11,11 @@ defmodule Quire.Application do
       QuireWeb.Telemetry,
       Quire.Repo,
       Quire.Vault,
+      {Registry, keys: :duplicate, name: Quire.Editing.EditSessionRegistry},
       {Oban, Application.fetch_env!(:quire, Oban)},
       {DNSCluster, query: Application.get_env(:quire, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Quire.PubSub},
+      {Quire.Editing.EditSessionSupervisor, []},
       # Start a worker by calling: Quire.Worker.start_link(arg)
       # {Quire.Worker, arg},
       # Start to serve requests, typically the last entry
