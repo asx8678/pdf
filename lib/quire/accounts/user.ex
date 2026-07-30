@@ -13,6 +13,7 @@ defmodule Quire.Accounts.User do
     field :totp_enabled, :boolean, default: false
 
     has_one :user_settings, Quire.Accounts.UserSetting
+    has_one :license, Quire.Accounts.License
 
     timestamps(type: :utc_datetime)
   end

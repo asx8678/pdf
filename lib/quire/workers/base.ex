@@ -73,4 +73,45 @@ defmodule Quire.Workers.Base do
       _ -> {:error, :already_completed}
     end
   end
+
+  @doc """
+  Guards the worker against running when the user's license doesn't allow
+  the given feature.  Returns `{:error, :license_denied}` when denied — the
+  worker SHOULD return this from `perform/1` so Oban discards (not retries)
+  the job with a permanent failure.
+
+  ## Example
+
+      use Quire.Workers.Base
+
+      @impl Oban.Worker
+      def perform(%{args: %{"user_id" => user_id}} = job) do
+        with :ok <- Workers.Base.license_guard(user_id, :ocr) do
+          # … real work …
+        end
+      end
+  """
+  @spec license_guard(String.t() | nil, Quire.Licensing.feature()) ::
+          :ok | {:error, :license_denied}
+  def license_guard(nil, _feature), do: {:error, :license_denied}
+
+  def license_guard(user_id, feature) do
+    import Ecto.Query
+
+    tier =
+      Repo.one(
+        from(l in Quire.Accounts.License,
+          where: l.user_id == ^user_id,
+          order_by: [desc: l.inserted_at],
+          limit: 1,
+          select: l.tier
+        )
+      )
+
+    if Quire.Licensing.allows?(tier || "trial", feature) do
+      :ok
+    else
+      {:error, :license_denied}
+    end
+  end
 end

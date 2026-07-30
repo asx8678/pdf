@@ -529,4 +529,61 @@ defmodule QuireWeb.CoreComponents do
   def translate_errors(errors, field) when is_list(errors) do
     for {^field, {msg, opts}} <- errors, do: translate_error({msg, opts})
   end
+
+  @doc """
+  Renders children only when the user's tier allows the given feature.
+
+  When the feature is denied an upsell overlay is shown instead, directing
+  the user to upgrade.
+
+  ## Examples
+
+      <.gated feature={:ocr} current_scope={@current_scope}>
+        <.button phx-click="run_ocr">Run OCR</.button>
+      </.gated>
+  """
+  attr :feature, :atom, required: true,
+    doc: "feature key passed to Quire.Licensing.allows?/2"
+
+  attr :current_scope, :any, required: true,
+    doc: "current_scope assign containing the user"
+
+  slot :inner_block, required: true
+
+  def gated(assigns) do
+    allowed =
+      Quire.Licensing.allows?(assigns.current_scope, assigns.feature)
+
+    if allowed do
+      ~H"""
+      {render_slot(@inner_block)}
+      """
+    else
+      ~H"""
+      <div class="relative group">
+        <!-- Inner content is blurred and pointer-events removed -->
+        <div class="blur-sm pointer-events-none select-none" aria-hidden="true">
+          {render_slot(@inner_block)}
+        </div>
+        <!-- Upsell overlay -->
+        <div class="absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-900/80 rounded-lg z-10">
+          <div class="text-center p-4">
+            <p class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+              Upgrade to access this feature
+            </p>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              {Quire.Licensing.refusal_message(@feature)}
+            </p>
+            <.link
+              href="/users/settings"
+              class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+            >
+              View Plans
+            </.link>
+          </div>
+        </div>
+      </div>
+      """
+    end
+  end
 end

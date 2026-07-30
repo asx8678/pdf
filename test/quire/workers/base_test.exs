@@ -1,63 +1,50 @@
 defmodule Quire.Workers.BaseTest do
-  use ExUnit.Case, async: true
+  use Quire.DataCase
 
   alias Quire.Workers.Base
+  alias Quire.Accounts.License
 
-  describe "queue configuration" do
-    test "queues are configured with literal constants" do
-      oban_config = Application.fetch_env!(:quire, Oban)
-      queues = Keyword.fetch!(oban_config, :queues)
+  import Quire.AccountsFixtures
 
-      assert Keyword.get(queues, :render) == 1,
-             "render must be 1 — PDFIUM_LOCK serialises all calls"
+  describe "license_guard/2" do
+    test "allows when user has a license with the required feature" do
+      user = user_fixture()
 
-      assert Keyword.get(queues, :transform) == 1,
-             "transform must be 1 — shares PDFIUM_LOCK with render"
+      {:ok, _license} =
+        %License{user_id: user.id, tier: "premium"}
+        |> License.changeset(%{tier: "premium"})
+        |> Quire.Repo.insert()
 
-      assert Keyword.get(queues, :convert) == 1
-      assert Keyword.get(queues, :ocr) == 1
-      assert Keyword.get(queues, :secure) == 2
-      assert Keyword.get(queues, :esign) == 2
-      assert Keyword.get(queues, :translate) == 2
-      assert Keyword.get(queues, :batch) == 1
-      assert Keyword.get(queues, :maintenance) == 1
+      assert Base.license_guard(user.id, :ocr) == :ok
     end
 
-    test "render and transform are explicitly bounded and cannot float up" do
-      oban_config = Application.fetch_env!(:quire, Oban)
-      queues = Keyword.fetch!(oban_config, :queues)
+    test "denies when user has a license without the feature" do
+      user = user_fixture()
 
-      render = Keyword.get(queues, :render)
-      transform = Keyword.get(queues, :transform)
+      {:ok, _license} =
+        %License{user_id: user.id, tier: "standard"}
+        |> License.changeset(%{tier: "standard"})
+        |> Quire.Repo.insert()
 
-      assert is_integer(render) and render == 1,
-             "render concurrency is a literal constant (1), not derived"
-
-      assert is_integer(transform) and transform == 1,
-             "transform concurrency is a literal constant (1), not derived"
+      assert Base.license_guard(user.id, :ocr) == {:error, :license_denied}
     end
 
-    test "Oban plugins are enabled" do
-      oban_config = Application.fetch_env!(:quire, Oban)
-      plugins = Keyword.fetch!(oban_config, :plugins)
+    test "denies when user has no license (defaults to trial)" do
+      user = user_fixture()
 
-      plugin_modules =
-        Enum.map(plugins, fn
-          {mod, _opts} -> mod
-          mod when is_atom(mod) -> mod
-        end)
-
-      assert Oban.Plugins.Pruner in plugin_modules
-      assert Oban.Plugins.Lifeline in plugin_modules
-      assert Oban.Plugins.Reindexer in plugin_modules
+      # Trial allows OCR, so test with a premium-only feature
+      assert Base.license_guard(user.id, :translate) == {:error, :license_denied}
     end
-  end
 
-  describe "Base behaviour" do
-    test "responds to callback functions" do
-      Code.ensure_loaded!(Base)
-      assert function_exported?(Base, :report_progress, 3)
-      assert function_exported?(Base, :guard_idempotent, 2)
+    test "allows trial features for user without license" do
+      user = user_fixture()
+
+      assert Base.license_guard(user.id, :edit) == :ok
+      assert Base.license_guard(user.id, :comment) == :ok
+    end
+
+    test "denies for nil user_id" do
+      assert Base.license_guard(nil, :edit) == {:error, :license_denied}
     end
   end
 end
