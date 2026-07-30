@@ -6,7 +6,7 @@ defmodule Quire.Accounts do
   import Ecto.Query, warn: false
   alias Quire.Repo
 
-  alias Quire.Accounts.{User, UserToken, UserNotifier, SigningCredential}
+  alias Quire.Accounts.{User, UserSetting, UserToken, UserNotifier, SigningCredential}
 
   ## Database getters
 
@@ -333,6 +333,37 @@ defmodule Quire.Accounts do
   """
   def change_signing_credential(credential, attrs \\ %{}) do
     SigningCredential.changeset(credential, attrs)
+  end
+
+  ## User settings
+
+  @doc """
+  Gets user settings for the given `user_id`.
+
+  Returns a `%UserSetting{}` with defaults if no row exists yet.
+  """
+  def get_user_settings(user_id) do
+    case Repo.get_by(UserSetting, user_id: user_id) do
+      nil -> %UserSetting{user_id: user_id}
+      setting -> setting
+    end
+  end
+
+  @doc """
+  Creates or updates user settings for the given `user_id`.
+
+  `user_id` is set programmatically — it is never taken from `attrs`.
+  """
+  def update_user_settings(user_id, attrs) do
+    setting = Repo.get_by(UserSetting, user_id: user_id) || %UserSetting{user_id: user_id}
+    UserSetting.upsert(setting, attrs, user_id)
+  end
+
+  @doc """
+  Updates only the QAT items (toolbar customisation) for the given `user_id`.
+  """
+  def update_qat_items(user_id, items) do
+    update_user_settings(user_id, %{qat_items: items})
   end
 
   ## Token helper
