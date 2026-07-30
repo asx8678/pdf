@@ -28,7 +28,7 @@ defmodule QuireWeb.UserLive.Settings do
         <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
       </.form>
 
-      <div class="divider" />
+      <hr class="my-8 border-chrome-border dark:border-gray-700" />
 
       <.form
         for={@password_form}

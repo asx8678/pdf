@@ -17,7 +17,7 @@ defmodule QuireWeb.UserLive.Login do
               <% else %>
                 Don't have an account? <.link
                   navigate={~p"/users/register"}
-                  class="font-semibold text-brand hover:underline"
+                  class="font-semibold text-accent hover:underline"
                   phx-no-format
                 >Sign up</.link> for an account now.
               <% end %>
@@ -25,7 +25,10 @@ defmodule QuireWeb.UserLive.Login do
           </.header>
         </div>
 
-        <div :if={local_mail_adapter?()} class="alert alert-info">
+        <div
+          :if={local_mail_adapter?()}
+          class="flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200"
+        >
           <.icon name="hero-information-circle" class="size-6 shrink-0" />
           <div>
             <p>You are running the local mail adapter.</p>
@@ -52,12 +55,16 @@ defmodule QuireWeb.UserLive.Login do
             required
             phx-mounted={JS.focus()}
           />
-          <.button class="btn btn-primary w-full">
+          <.button class="w-full">
             Log in with email <span aria-hidden="true">→</span>
           </.button>
         </.form>
 
-        <div class="divider">or</div>
+        <div class="my-4 flex items-center gap-4" aria-hidden="true">
+          <span class="h-px flex-1 bg-chrome-border dark:bg-gray-700" />
+          <span class="text-xs font-medium uppercase text-gray-400 dark:text-gray-500">or</span>
+          <span class="h-px flex-1 bg-chrome-border dark:bg-gray-700" />
+        </div>
 
         <.form
           :let={f}
@@ -83,10 +90,10 @@ defmodule QuireWeb.UserLive.Login do
             autocomplete="current-password"
             spellcheck="false"
           />
-          <.button class="btn btn-primary w-full" name={@form[:remember_me].name} value="true">
+          <.button class="w-full" name={@form[:remember_me].name} value="true">
             Log in and stay logged in <span aria-hidden="true">→</span>
           </.button>
-          <.button class="btn btn-primary btn-soft w-full mt-2">
+          <.button variant="outline" class="mt-2 w-full">
             Log in only this time
           </.button>
         </.form>

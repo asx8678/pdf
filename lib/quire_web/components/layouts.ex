@@ -35,7 +35,7 @@ defmodule QuireWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
+    <header class="flex items-center justify-between px-4 py-2 sm:px-6 lg:px-8">
       <div class="flex-1">
         <a href="/" class="flex-1 flex w-fit items-center gap-2">
           <img src={~p"/images/logo.svg"} width="36" />
@@ -45,18 +45,18 @@ defmodule QuireWeb.Layouts do
       <div class="flex-none">
         <ul class="flex flex-column px-1 space-x-4 items-center">
           <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
+            <.button href="https://phoenixframework.org/" variant="ghost">Website</.button>
           </li>
           <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
+            <.button href="https://github.com/phoenixframework/phoenix" variant="ghost">GitHub</.button>
           </li>
           <li>
             <.theme_toggle />
           </li>
           <li>
-            <a href="https://phoenix.hexdocs.pm/overview.html" class="btn btn-primary">
+            <.button href="https://phoenix.hexdocs.pm/overview.html" variant="primary">
               Get Started <span aria-hidden="true">&rarr;</span>
-            </a>
+            </.button>
           </li>
         </ul>
       </div>
@@ -128,11 +128,11 @@ defmodule QuireWeb.Layouts do
   """
   def theme_toggle(assigns) do
     ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 [[data-theme-source=system]_&]:!left-0 transition-[left]" />
+    <div class="relative flex flex-row items-center rounded-full border border-chrome-border bg-gray-100 p-0.5 dark:border-gray-700 dark:bg-gray-800">
+      <div class="absolute inset-y-0.5 left-0.5 w-1/3 rounded-full border border-chrome-border bg-white transition-[left] [[data-mode=light]_&]:left-1/3 [[data-mode=dark]_&]:left-2/3 [[data-mode-source=system]_&]:!left-0.5 dark:border-gray-600 dark:bg-gray-600" />
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="flex w-1/3 cursor-pointer justify-center p-2"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="system"
       >
@@ -140,7 +140,7 @@ defmodule QuireWeb.Layouts do
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="flex w-1/3 cursor-pointer justify-center p-2"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="light"
       >
@@ -148,7 +148,7 @@ defmodule QuireWeb.Layouts do
       </button>
 
       <button
-        class="flex p-2 cursor-pointer w-1/3"
+        class="flex w-1/3 cursor-pointer justify-center p-2"
         phx-click={JS.dispatch("phx:set-theme")}
         data-phx-theme="dark"
       >

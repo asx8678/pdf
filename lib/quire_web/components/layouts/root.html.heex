@@ -15,30 +15,30 @@
         const setTheme = (theme) => {
           if (theme === "system") {
             localStorage.removeItem("phx:theme");
-            document.documentElement.setAttribute("data-theme", systemTheme());
-            document.documentElement.setAttribute("data-theme-source", "system");
+            document.documentElement.setAttribute("data-mode", systemTheme());
+            document.documentElement.setAttribute("data-mode-source", "system");
           } else {
             localStorage.setItem("phx:theme", theme);
-            document.documentElement.setAttribute("data-theme", theme);
-            document.documentElement.setAttribute("data-theme-source", "user");
+            document.documentElement.setAttribute("data-mode", theme);
+            document.documentElement.setAttribute("data-mode-source", "user");
           }
         };
-        if (!document.documentElement.hasAttribute("data-theme")) {
+        if (!document.documentElement.hasAttribute("data-mode")) {
           setTheme(localStorage.getItem("phx:theme") || "system");
         }
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
 
         matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
-          if (document.documentElement.getAttribute("data-theme-source") === "system") {
-            document.documentElement.setAttribute("data-theme", systemTheme());
+          if (document.documentElement.getAttribute("data-mode-source") === "system") {
+            document.documentElement.setAttribute("data-mode", systemTheme());
           }
         });
       })();
     </script>
   </head>
   <body>
-    <ul class="menu menu-horizontal w-full relative z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-end">
+    <ul class="w-full relative z-10 flex items-center gap-4 px-4 sm:px-6 lg:px-8 justify-end">
       <%= if @current_scope do %>
         <li>
           {@current_scope.user.email}

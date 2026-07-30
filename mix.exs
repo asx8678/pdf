@@ -77,17 +77,6 @@ defmodule Quire.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      # Appendix A lists daisyUI under "Deliberately absent". T-025 owns deleting
-      # the dep, the `@plugin` blocks in assets/css/app.css and every
-      # daisyUI-classed element in one pass. It stays until then; MIT, so it is
-      # not an Appendix E problem while it lingers.
-      {:daisyui,
-       github: "saadeghi/daisyui",
-       tag: "v5.5.20",
-       sparse: "packages/bundle",
-       app: false,
-       compile: false,
-       depth: 1},
 
       # --- Platform -----------------------------------------------------------
       {:swoosh, "~> 1.26"},
