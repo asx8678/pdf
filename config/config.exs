@@ -76,7 +76,16 @@ config :esbuild,
   version: "0.25.4",
   quire: [
     args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+      ~w(js/app.js --bundle --format=esm --splitting --target=es2022 --outdir=../priv/static/assets/js --external:/vendor/* --external:/fonts/* --external:/images/* --alias:@=.),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ],
+  # Lazy-loaded by PdfViewerHook (T-042). pdf.js vendor files are served as
+  # static assets from /vendor/pdfjs/ and loaded at runtime via dynamic
+  # import(), so esbuild externalizes the vendor paths.
+  pdf_viewer: [
+    args:
+      ~w(js/pdf_viewer.js --bundle --format=esm --splitting --target=es2022 --outdir=../priv/static/assets/js --external:/vendor/* --external:/fonts/* --external:/images/* --external:*.wasm --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]

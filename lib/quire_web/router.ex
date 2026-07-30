@@ -70,6 +70,13 @@ defmodule QuireWeb.Router do
     end
   end
 
+  # Document PDF serving — range-request controller (§10.3, T-041)
+  scope "/documents", QuireWeb do
+    pipe_through [:browser, :require_authenticated_user]
+
+    get "/:id/pdf", DocumentController, :show
+  end
+
   scope "/", QuireWeb do
     pipe_through [:browser]
 

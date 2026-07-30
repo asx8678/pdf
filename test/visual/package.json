@@ -1,0 +1,13 @@
+{
+  "name": "quire-visual-regression",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npx playwright test",
+    "update": "npx playwright test --update-snapshots",
+    "capture": "node capture.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.0"
+  }
+}

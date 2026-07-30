@@ -110,15 +110,24 @@ echo "check: all blocking checks passed"
 """
 
 [tasks.e2e]
-description = "Playwright end-to-end suite"
+description = "Playwright end-to-end suite (T-199)"
 run = """
 echo "mise run e2e is implemented in T-199." >&2
 exit 1
 """
 
-[tasks."assets:vendor"]
-description = "Copy the pdf.js runtime assets into priv/static"
+[tasks.visual]
+description = "Capture visual regression baselines (T-039 — app must be running)"
 run = """
-echo "mise run assets:vendor is implemented in T-040." >&2
-exit 1
+set -euo pipefail
+cd test/visual
+npm install --no-audit --no-fund
+node capture.mjs
+"""
+
+[tasks."assets:vendor"]
+description = "Copy pdfjs-dist runtime assets (cmaps, fonts, wasm, iccs, viewer) into priv/static/vendor/pdfjs/"
+run = """
+set -euo pipefail
+bash assets/vendor/pdfjs-copy.sh
 """

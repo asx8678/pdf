@@ -1,0 +1,9 @@
+{
+  "name": "quire-assets",
+  "private": true,
+  "dependencies": {
+    "pdfjs-dist": "6.1.200",
+    "@cantoo/pdf-lib": "2.7.4",
+    "idb-keyval": "6.2.2"
+  }
+}

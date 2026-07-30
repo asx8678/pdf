@@ -26,6 +26,7 @@ config :quire, QuireWeb.Endpoint,
   secret_key_base: "ZadAoaNfsY+o/PFmtE5rKVFJ/PqVhSEpcLU1YYNGK0pJTUNHRgCtZGEtt5e1IB36",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:quire, ~w(--sourcemap=inline --watch)]},
+    esbuild_pdf: {Esbuild, :install_and_run, [:pdf_viewer, ~w(--sourcemap=inline --watch)]},
     tailwind: {Tailwind, :install_and_run, [:quire, ~w(--watch)]}
   ]
 
