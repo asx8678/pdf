@@ -6,10 +6,11 @@ defmodule QuireWeb.WorkspaceLive do
   state stay in lockstep without PubSub round trips.
 
   Mounted at `/workspace/:id` for authenticated users. Wired here: menu
-  bar tab selection, rail panel toggles, and page navigation. Document
-  loading and the multi-document tab strip (T-032), the per-tab ribbon
-  LiveComponents (§9), and the backstage overlay (T-036) build on this
-  shell — their controls render as inert placeholders until then.
+  bar tab selection, rail panel toggles, page navigation, and the
+  multi-document tab strip (T-032) — open, switch, close, reorder
+  tabs, and an unsaved-changes confirmation modal. Document loading
+  and the per-tab ribbon LiveComponents (§9), and the backstage
+  overlay (T-036) build on this shell.
   """
   use QuireWeb, :live_view
 
@@ -18,6 +19,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.Rail, only: [rail: 1]
   import QuireWeb.Chrome.StatusBar, only: [status_bar: 1]
   import QuireWeb.Chrome.TitleBar, only: [title_bar: 1]
+  import QuireWeb.Shared.Modal, only: [modal: 1]
 
   @left_rail_items [
     %{id: :thumbnails, icon: "hero-squares-2x2", label: "Thumbnails"},
@@ -32,14 +34,18 @@ defmodule QuireWeb.WorkspaceLive do
   @panels [:thumbnails, :bookmarks, :search, :attachments]
 
   @impl true
-  def mount(%{"id" => _id}, _session, socket) do
+  def mount(%{"id" => id}, _session, socket) do
+    initial_doc = %{id: id, title: "Document #{id}", dirty: false, path: nil}
+
     socket =
       socket
       |> assign(:page_title, "Workspace")
-      |> assign(:document_title, nil)
-      |> assign(:documents, [])
-      |> assign(:active_document_id, nil)
+      |> assign(:document_title, "Document #{id}")
+      |> assign(:documents, [initial_doc])
+      |> assign(:active_document_id, id)
+      |> assign(:confirm_close_doc, nil)
       |> assign(:active_tab, "view")
+      |> assign(:view_mode, :edit)
       |> assign(:left_panel, nil)
       |> assign(:right_panel, nil)
       |> assign(:page, 1)
@@ -62,7 +68,7 @@ defmodule QuireWeb.WorkspaceLive do
     <Layouts.workspace flash={@flash}>
       <.title_bar document_title={@document_title} />
       <.menu_bar active_tab={@active_tab} on_tab_click="select_tab" />
-      <.ribbon_strip />
+      <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
       <.document_tabs documents={@documents} active_id={@active_document_id} />
 
       <div class="flex flex-1 min-h-0">
@@ -89,13 +95,176 @@ defmodule QuireWeb.WorkspaceLive do
         on_prev_page="prev_page"
         on_next_page="next_page"
       />
+
+      <.confirm_close_modal :if={@confirm_close_doc} confirm_close_doc={@confirm_close_doc} />
     </Layouts.workspace>
     """
   end
 
+  # ── Document tab event handlers ──────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_document", %{"id" => id}, socket) do
+    id = coerce_id(id)
+
+    socket =
+      if doc = Enum.find(socket.assigns.documents, &(&1.id == id)) do
+        # Already open — just switch to it
+        socket
+        |> assign(:active_document_id, doc.id)
+        |> assign(:document_title, doc.title)
+      else
+        # New document — add to list, set active, navigate
+        new_doc = %{id: id, title: "Document #{id}", dirty: false, path: nil}
+
+        socket
+        |> assign(:documents, socket.assigns.documents ++ [new_doc])
+        |> assign(:active_document_id, id)
+        |> assign(:document_title, "Document #{id}")
+        |> push_navigate(to: ~p"/workspace/#{id}")
+      end
+
+    {:noreply, socket}
+  end
+
+  def handle_event("switch_tab", %{"id" => id}, socket) do
+    id = coerce_id(id)
+
+    if doc = Enum.find(socket.assigns.documents, &(&1.id == id)) do
+      socket =
+        socket
+        |> assign(:active_document_id, doc.id)
+        |> assign(:document_title, doc.title)
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("close_tab", %{"id" => id}, socket) do
+    id = coerce_id(id)
+
+    with %{dirty: true} = doc <- Enum.find(socket.assigns.documents, &(&1.id == id)) do
+      socket =
+        socket
+        |> assign(:confirm_close_doc, {doc.id, doc.title})
+
+      {:noreply, socket}
+    else
+      _ ->
+        socket = remove_doc(socket, id)
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("confirm_close", _params, socket) do
+    case socket.assigns.confirm_close_doc do
+      {id, _title} ->
+        socket =
+          socket
+          |> assign(:confirm_close_doc, nil)
+          |> remove_doc(id)
+
+        {:noreply, socket}
+
+      nil ->
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("cancel_close", _params, socket) do
+    {:noreply, assign(socket, :confirm_close_doc, nil)}
+  end
+
+  def handle_event("reorder_tabs", %{"from" => from, "to" => to}, socket) do
+    from_id = coerce_id(from)
+    to_id = coerce_id(to)
+
+    docs = socket.assigns.documents
+    from_idx = Enum.find_index(docs, &(&1.id == from_id))
+    to_idx = Enum.find_index(docs, &(&1.id == to_id))
+
+    if from_idx && to_idx do
+      # Remove from original position, insert at target
+      {moved, rest} = List.pop_at(docs, from_idx)
+      reordered = List.insert_at(rest, if(to_idx > from_idx, do: to_idx - 1, else: to_idx), moved)
+
+      {:noreply, assign(socket, :documents, reordered)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # ── Keyboard handler ─────────────────────────────────────────────────────
+
+  def handle_event("keydown", %{"key" => "w"} = params, socket) do
+    if params["ctrlKey"] || params["metaKey"] do
+      # Ctrl/⌘+W — close current tab
+      socket =
+        if active_id = socket.assigns.active_document_id do
+          doc = Enum.find(socket.assigns.documents, &(&1.id == active_id))
+
+          case doc do
+            %{dirty: true} -> assign(socket, :confirm_close_doc, {doc.id, doc.title})
+            %{id: _} -> remove_doc(socket, active_id)
+            nil -> socket
+          end
+        else
+          socket
+        end
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("keydown", %{"key" => "Tab"} = params, socket) do
+    if params["ctrlKey"] || params["metaKey"] do
+      docs = socket.assigns.documents
+
+      if length(docs) > 0 do
+        current_id = socket.assigns.active_document_id
+        current_idx = Enum.find_index(docs, &(&1.id == current_id)) || 0
+
+        next_idx =
+          if params["shiftKey"] do
+            rem(current_idx - 1 + length(docs), length(docs))
+          else
+            rem(current_idx + 1, length(docs))
+          end
+
+        next = Enum.at(docs, next_idx)
+
+        socket =
+          socket
+          |> assign(:active_document_id, next.id)
+          |> assign(:document_title, next.title)
+
+        {:noreply, socket}
+      else
+        {:noreply, socket}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("keydown", _params, socket), do: {:noreply, socket}
+
+  def handle_event("keyup", _params, socket), do: {:noreply, socket}
+
+  # ── Pre-existing event handlers ──────────────────────────────────────────
+
   @impl true
   def handle_event("select_tab", %{"tab" => tab}, socket) do
     {:noreply, assign(socket, :active_tab, tab)}
+  end
+
+  def handle_event("toggle_view_mode", _params, socket) do
+    new_mode = if socket.assigns.view_mode == :edit, do: :preview, else: :edit
+    {:noreply, assign(socket, :view_mode, new_mode)}
   end
 
   def handle_event("toggle_panel", %{"side" => side, "item" => item}, socket)
@@ -121,20 +290,111 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :page, min(socket.assigns.page + 1, socket.assigns.total_pages))}
   end
 
+  # ── Private helpers ──────────────────────────────────────────────────────
+
   defp rail_items(items, active_panel) do
     Enum.map(items, &Map.put(&1, :active, &1.id == active_panel))
   end
 
+  # Removes a document from the list and adjusts active_document_id.
+  defp remove_doc(socket, id) do
+    docs = socket.assigns.documents
+    remaining = Enum.reject(docs, &(&1.id == id))
+
+    new_active =
+      cond do
+        # If we removed the active doc, pick the nearest neighbour
+        socket.assigns.active_document_id == id ->
+          case remaining do
+            [] -> nil
+            list -> Enum.at(list, min(length(docs) - 2, 0)).id
+          end
+
+        # Active doc unchanged
+        true ->
+          socket.assigns.active_document_id
+      end
+
+    new_title =
+      if doc = Enum.find(remaining, &(&1.id == new_active)) do
+        doc.title
+      else
+        nil
+      end
+
+    socket
+    |> assign(:documents, remaining)
+    |> assign(:active_document_id, new_active)
+    |> assign(:document_title, new_title)
+  end
+
+  defp coerce_id(id) when is_binary(id), do: id
+  defp coerce_id(id) when is_integer(id), do: Integer.to_string(id)
+
+  defp confirm_close_modal(assigns) do
+    {doc_id, doc_title} = assigns.confirm_close_doc
+
+    assigns = assign(assigns, :doc_id, doc_id) |> assign(:doc_title, doc_title)
+
+    ~H"""
+    <.modal title="Unsaved changes" on_close="cancel_close" open={true}>
+      <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+        "{@doc_title}" has unsaved changes. Close without saving?
+      </p>
+      <div class="flex justify-end gap-2">
+        <.button phx-click="cancel_close" variant="outline">Cancel</.button>
+        <.button phx-click="confirm_close" variant="primary" class="bg-red-500 hover:bg-red-600">
+          Close anyway
+        </.button>
+      </div>
+    </.modal>
+    """
+  end
+
   # The ribbon renders the active tab's LiveComponent (plan3.md §8.1);
   # those land with the §9 feature tickets. Until then the strip holds
-  # its 84 px (`chrome-ribbon` token) with a hint.
+  # its 84 px (`chrome-ribbon` token) with a hint. The view toggle pill
+  # is chrome, not a ribbon tool, so it lives here directly: it flips
+  # the whole document between :edit and :preview on tabs whose tools
+  # mutate the document.
+  attr :active_tab, :string, required: true
+  attr :view_mode, :atom, values: [:edit, :preview], required: true
+
+  @view_toggle_tabs ~w(edit comment secure forms esign ocr)
+
   defp ribbon_strip(assigns) do
+    assigns = assign(assigns, :view_toggle_tabs, @view_toggle_tabs)
+
     ~H"""
     <div
       class="chrome-ribbon flex items-center px-4 bg-chrome-white dark:bg-gray-800 border-b border-chrome-border dark:border-gray-600"
       role="toolbar"
       aria-label="Ribbon"
     >
+      <div
+        :if={@active_tab in @view_toggle_tabs}
+        class="flex items-center gap-2 pr-3 mr-3 border-r border-chrome-border dark:border-gray-600"
+      >
+        <button
+          type="button"
+          phx-click="toggle_view_mode"
+          aria-label={
+            if @view_mode == :preview, do: "Switch to edit mode", else: "Switch to preview mode"
+          }
+          class={[
+            "flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer",
+            if(@view_mode == :preview,
+              do: "bg-gray-900 text-white dark:bg-gray-100 dark:text-gray-900",
+              else:
+                "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600"
+            )
+          ]}
+        >
+          <.icon name="hero-eye" class="size-3.5" />
+          <span>{if @view_mode == :preview, do: "Edit", else: "Preview"}</span>
+        </button>
+      </div>
+
       <p class="text-sm text-gray-400 dark:text-gray-500 italic px-4">Select a tool</p>
     </div>
     """

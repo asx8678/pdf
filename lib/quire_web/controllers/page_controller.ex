@@ -2,6 +2,6 @@ defmodule QuireWeb.PageController do
   use QuireWeb, :controller
 
   def home(conn, _params) do
-    render(conn, :home)
+    redirect(conn, to: ~p"/users/log-in")
   end
 end
