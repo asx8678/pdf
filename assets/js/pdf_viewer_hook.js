@@ -61,6 +61,21 @@ const PdfViewerHook = {
     this.handleEvent("close_document", () => {
       this._closeDocument();
     });
+
+    // Search panel (T-048) — run the find controller with the panel's
+    // query and options; matches are highlighted in the text layer.
+    this.handleEvent("find", ({ query, match_case, whole_word }) => {
+      if (!this._eventBus) return;
+      this._eventBus.dispatch("find", {
+        type: "",
+        query,
+        phraseSearch: true,
+        caseSensitive: !!match_case,
+        entireWord: !!whole_word,
+        highlightAll: true,
+        findPrevious: false,
+      });
+    });
   },
 
   destroyed() {
@@ -93,6 +108,37 @@ const PdfViewerHook = {
     this._eventBus.on("scalechanging", ({ scale }) => {
       this.pushEvent("zoom_changed", { zoom: Math.round(scale * 100) });
     });
+
+    // FindState: 0=FOUND, 1=NOT_FOUND — the search has settled, so
+    // report the flattened match list to the search panel.
+    this._eventBus.on("updatefindcontrolstate", ({ state }) => {
+      if (state === 0 || state === 1) this._pushSearchResults();
+    });
+  },
+
+  // Flattens the find controller's per-page matches into
+  // [%{page, text}] rows with a short context snippet for the panel.
+  _pushSearchResults() {
+    const fc = this._findController;
+    if (!fc) return;
+
+    const results = [];
+    const pageMatches = fc._pageMatches || [];
+    const pageContents = fc._pageContents || [];
+
+    pageMatches.forEach((matches, pageIdx) => {
+      const text = pageContents[pageIdx] || "";
+      (matches || []).forEach((idx) => {
+        const start = Math.max(0, idx - 40);
+        const end = Math.min(text.length, idx + 60);
+        results.push({
+          page: pageIdx + 1,
+          text: text.slice(start, end).replace(/\s+/g, " ").trim(),
+        });
+      });
+    });
+
+    this.pushEvent("search_results", { results, total: results.length });
   },
 
   _openDocument(url, password) {

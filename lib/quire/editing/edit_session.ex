@@ -78,6 +78,28 @@ defmodule Quire.Editing.EditSession do
   end
 
   @doc """
+  Returns `true` if the session has unpersisted operations (dirty).
+  """
+  @spec is_dirty?(GenServer.server()) :: boolean()
+  def is_dirty?(session) do
+    GenServer.call(session, {:is_dirty?})
+  end
+
+  @doc """
+  Flushes pending client ops to an intermediate revision.
+
+  Stores `pdf_bytes`, creates a new `document_revisions` row and
+  `document_pages` rows, updates the document's `current_revision_id`,
+  clears `dirty?`, and journals the flush in the undo stack.
+
+  Returns `{:ok, %{revision_id: rev_id}}` or `{:error, reason}`.
+  """
+  @spec flush(GenServer.server(), binary(), String.t()) :: {:ok, map()} | {:error, term()}
+  def flush(session, pdf_bytes, label \\ "Auto-save before server op") do
+    GenServer.call(session, {:flush, pdf_bytes, label})
+  end
+
+  @doc """
   Registers the calling process as a subscriber for session broadcasts.
   """
   @spec subscribe(GenServer.server()) :: :ok
@@ -211,6 +233,40 @@ defmodule Quire.Editing.EditSession do
   end
 
   @impl true
+  def handle_call({:is_dirty?}, _from, state) do
+    {:reply, state.dirty?, state}
+  end
+
+  @impl true
+  def handle_call({:flush, pdf_bytes, label}, _from, state) do
+    case do_flush(pdf_bytes, label, state) do
+      {:ok, rev_id} ->
+        # Journal the flush so undo can restore the prior revision.
+        flush_op = %Quire.Editing.Operation{
+          kind: "doc.flush",
+          data: %{revision_id: rev_id, label: label},
+          inverse: {:restore_revision, state.base_revision_id},
+          metadata: %{applied_by: self(), applied_at: DateTime.utc_now()},
+          timestamp: System.monotonic_time()
+        }
+
+        new_state = %{
+          state
+          | base_revision_id: rev_id,
+            dirty?: false,
+            journal: [flush_op | state.journal],
+            redo_stack: []
+        }
+
+        {reply_state, _timers} = schedule_timers(new_state)
+        {:reply, {:ok, %{revision_id: rev_id}}, reply_state}
+
+      {:error, _} = err ->
+        {:reply, err, state}
+    end
+  end
+
+  @impl true
   def handle_call({:subscribe}, {pid, _}, state) do
     new_state = %{state | subscribers: MapSet.put(state.subscribers, pid)}
     {:reply, :ok, new_state}
@@ -264,6 +320,103 @@ defmodule Quire.Editing.EditSession do
     target = Map.get(op, :target) || op["target"]
     ts = Map.get(op, :timestamp, 0)
     {kind, target, ts}
+  end
+
+  # ── Flush (intermediate revision) ─────────────────────────────────────────
+
+  defp do_flush(pdf_bytes, label, state) do
+    with {:ok, ref} <-
+           Quire.Storage.put(pdf_bytes, name: label, content_type: "application/pdf"),
+         {:ok, doc} <- fetch_document(state.document_id, state.user_id) do
+      # Query page metrics
+      {page_count, page_geometries} = query_page_metrics(ref)
+
+      now = DateTime.utc_now()
+
+      # Build revision source map pointing to the stored bytes
+      ref_map = %{
+        "storage_ref" => %{
+          "adapter" => to_string(ref.adapter),
+          "key" => ref.key,
+          "name" => ref.name,
+          "content_type" => ref.content_type,
+          "byte_size" => ref.byte_size
+        },
+        "filename" => label,
+        "flush_of" => state.base_revision_id
+      }
+
+      # Insert the new revision
+      {:ok, rev} =
+        Quire.Repo.insert(%Quire.Documents.Revision{
+          document_id: state.document_id,
+          label: label,
+          source: ref_map
+        })
+
+      # Link document → this revision becomes the current one
+      {:ok, _doc} =
+        doc
+        |> Ecto.Changeset.change(%{
+          current_revision_id: rev.id,
+          page_count: page_count,
+          updated_at: now
+        })
+        |> Quire.Repo.update()
+
+      # Insert document_pages for the new revision
+      if page_geometries != [] do
+        insert_page_rows(rev.id, page_geometries)
+      end
+
+      {:ok, rev.id}
+    end
+  end
+
+  defp fetch_document(document_id, user_id) do
+    doc = Quire.Repo.get(Quire.Documents.Document, document_id)
+
+    cond do
+      is_nil(doc) -> {:error, :not_found}
+      doc.user_id != user_id -> {:error, :forbidden}
+      true -> {:ok, doc}
+    end
+  end
+
+  defp query_page_metrics(ref) do
+    count =
+      case Quire.Render.page_count(ref) do
+        {:ok, n} -> n
+        _ -> 0
+      end
+
+    geometries =
+      case Quire.Render.page_geometry(ref) do
+        {:ok, geoms} -> geoms
+        _ -> []
+      end
+
+    {count, geometries}
+  end
+
+  defp insert_page_rows(revision_id, geometries) do
+    now = DateTime.utc_now()
+
+    rows =
+      geometries
+      |> Enum.with_index()
+      |> Enum.map(fn {geom, idx} ->
+        %{
+          revision_id: revision_id,
+          page_index: idx,
+          width: geom.width,
+          height: geom.height,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    Quire.Repo.insert_all(Quire.Documents.Page, rows)
   end
 
   # ── Private helpers ─────────────────────────────────────────────────────

@@ -33,12 +33,61 @@ defmodule Quire.Editing do
   end
 
   @doc """
-  Applies an operation to the session identified by `session_pid`.
+  Applies a client-side operation to the session identified by `session_pid`.
   Delegates to `EditSession.apply/2`.
   """
   @spec apply(pid(), map()) :: {:ok, map()} | {:error, term()}
   def apply(session_pid, op) do
     EditSession.apply(session_pid, op)
+  end
+
+  @doc """
+  Applies a server-side operation.
+
+  Before applying, checks whether the session has unpersisted client edits.
+
+  ## Returns
+
+    * `{:ok, result}` — no pending client edits; the op was journaled normally.
+    * `{:flush_required, pid}` — there are unpersisted client edits.
+      The caller MUST flush via `flush/3` before retrying.
+    * `{:error, reason}` — the op could not be applied.
+  """
+  @spec apply_for_server(pid(), map()) ::
+          {:ok, map()} | {:flush_required, pid()} | {:error, term()}
+  def apply_for_server(session_pid, op) do
+    if EditSession.is_dirty?(session_pid) do
+      {:flush_required, session_pid}
+    else
+      EditSession.apply(session_pid, Map.put(op, "applied_side", :server))
+    end
+  end
+
+  @doc """
+  Returns `true` if the session has unpersisted client edits (dirty).
+  """
+  @spec dirty?(pid()) :: boolean()
+  def dirty?(session_pid) do
+    EditSession.is_dirty?(session_pid)
+  end
+
+  @doc """
+  Flushes pending client edits to an intermediate revision.
+
+  Stores `pdf_bytes` as a new revision, updates the document's
+  `current_revision_id`, and clears the session's dirty flag.
+  Journals the flush so undo can restore the prior revision.
+
+  Returns `{:ok, %{revision_id: id}}` or `{:error, reason}`.
+  """
+  @spec flush(pid(), binary(), String.t()) :: {:ok, map()} | {:error, term()}
+  def flush(session_pid, pdf_bytes, label \\ "Auto-save before server op") do
+    # Quick header validation — reject non-PDF bytes early.
+    if binary_part(pdf_bytes, 0, 5) == <<37, 80, 68, 70, 45>> do
+      EditSession.flush(session_pid, pdf_bytes, label)
+    else
+      {:error, :invalid_pdf}
+    end
   end
 
   @doc """

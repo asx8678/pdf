@@ -33,6 +33,13 @@
         pages={@thumbnails}
         page={@page}
         bookmarks={@bookmarks}
+        search_query={@search_query}
+        search_results={@search_results}
+        search_total={@search_total}
+        search_current={@search_current}
+        search_match_case={@search_match_case}
+        search_whole_word={@search_whole_word}
+        searching={@searching}
       />
 
       <main
@@ -63,6 +70,13 @@
         pages={@thumbnails}
         page={@page}
         bookmarks={@bookmarks}
+        search_query={@search_query}
+        search_results={@search_results}
+        search_total={@search_total}
+        search_current={@search_current}
+        search_match_case={@search_match_case}
+        search_whole_word={@search_whole_word}
+        searching={@searching}
       />
       <.rail side="right" items={@right_items} on_item_click="toggle_panel" />
     </div>

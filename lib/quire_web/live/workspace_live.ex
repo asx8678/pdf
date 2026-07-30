@@ -21,6 +21,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.EmailCompose, only: [email_compose: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
+  import QuireWeb.Chrome.SearchPanel, only: [search_panel: 1]
   import QuireWeb.Chrome.ShortcutsModal, only: [shortcuts_modal: 1]
   import QuireWeb.Chrome.StatusBar, only: [status_bar: 1]
   import QuireWeb.Chrome.ThumbnailsPanel, only: [thumbnails_panel: 1]
@@ -75,6 +76,13 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:total_pages, doc_page_count)
       |> assign(:thumbnails, [])
       |> assign(:bookmarks, [])
+      |> assign(:search_query, "")
+      |> assign(:search_results, [])
+      |> assign(:search_total, 0)
+      |> assign(:search_current, 0)
+      |> assign(:search_match_case, false)
+      |> assign(:search_whole_word, false)
+      |> assign(:searching, false)
       |> assign(:zoom, 100)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
@@ -450,6 +458,69 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, put_flash(socket, :error, "An unknown document error occurred")}
   end
 
+  # ── Search panel event handlers (T-048) ──────────────────────────────────
+
+  # Debounced keydown from the search input. A non-empty query is pushed
+  # to the PdfViewerHook, which runs pdf.js's find controller and answers
+  # with "search_results"; an empty query clears the panel locally.
+  def handle_event("search", %{"value" => query}, socket) do
+    {:noreply, socket |> assign(:search_query, query) |> run_search()}
+  end
+
+  def handle_event("toggle_search_option", %{"option" => option}, socket) do
+    key =
+      case option do
+        "match_case" -> :search_match_case
+        "whole_word" -> :search_whole_word
+        _ -> nil
+      end
+
+    socket =
+      if key do
+        socket |> assign(key, !socket.assigns[key]) |> run_search()
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  # The viewer hook's answer to "find": a flat list of matches across
+  # pages, each %{"page" => n, "text" => snippet}.
+  def handle_event("search_results", %{"results" => results, "total" => total}, socket) do
+    results = Enum.map(results, &%{page: &1["page"], text: &1["text"]})
+
+    {:noreply,
+     socket
+     |> assign(:search_results, results)
+     |> assign(:search_total, total)
+     |> assign(:search_current, 0)
+     |> assign(:searching, false)}
+  end
+
+  def handle_event("search_navigate", %{"page" => page, "index" => index}, socket) do
+    with {page, _} <- Integer.parse(to_string(page)),
+         {index, _} <- Integer.parse(to_string(index)) do
+      page = page |> max(1) |> min(socket.assigns.total_pages)
+
+      {:noreply,
+       socket
+       |> assign(:page, page)
+       |> assign(:search_current, index)
+       |> push_event("navigate_page", %{page: page})}
+    else
+      :error -> {:noreply, socket}
+    end
+  end
+
+  def handle_event("search_next", _params, socket) do
+    {:noreply, step_search(socket, 1)}
+  end
+
+  def handle_event("search_prev", _params, socket) do
+    {:noreply, step_search(socket, -1)}
+  end
+
   # ── Pre-existing event handlers ──────────────────────────────────────────
 
   @impl true
@@ -489,6 +560,44 @@ defmodule QuireWeb.WorkspaceLive do
 
   defp rail_items(items, active_panel) do
     Enum.map(items, &Map.put(&1, :active, &1.id == active_panel))
+  end
+
+  # Pushes the current query plus options to the viewer hook, or clears
+  # the panel locally when the query is emptied.
+  defp run_search(socket) do
+    if socket.assigns.search_query == "" do
+      socket
+      |> assign(:search_results, [])
+      |> assign(:search_total, 0)
+      |> assign(:search_current, 0)
+      |> assign(:searching, false)
+    else
+      socket
+      |> assign(:searching, true)
+      |> push_event("find", %{
+        query: socket.assigns.search_query,
+        match_case: socket.assigns.search_match_case,
+        whole_word: socket.assigns.search_whole_word
+      })
+    end
+  end
+
+  # Moves the current result by `delta`, wrapping at both ends, and
+  # scrolls the viewer to the newly selected match's page.
+  defp step_search(socket, delta) do
+    results = socket.assigns.search_results
+
+    if results == [] do
+      socket
+    else
+      index = rem(socket.assigns.search_current + delta + length(results), length(results))
+      page = results |> Enum.at(index) |> Map.get(:page) |> max(1) |> min(socket.assigns.total_pages)
+
+      socket
+      |> assign(:search_current, index)
+      |> assign(:page, page)
+      |> push_event("navigate_page", %{page: page})
+    end
   end
 
   defp page_for_key("PageUp", assigns), do: max(assigns.page - 1, 1)
@@ -626,6 +735,13 @@ defmodule QuireWeb.WorkspaceLive do
   attr :pages, :list, default: []
   attr :page, :integer, default: 1
   attr :bookmarks, :list, default: []
+  attr :search_query, :string, default: ""
+  attr :search_results, :list, default: []
+  attr :search_total, :integer, default: 0
+  attr :search_current, :integer, default: 0
+  attr :search_match_case, :boolean, default: false
+  attr :search_whole_word, :boolean, default: false
+  attr :searching, :boolean, default: false
 
   defp side_panel(assigns) do
     ~H"""
@@ -654,6 +770,16 @@ defmodule QuireWeb.WorkspaceLive do
           <.thumbnails_panel pages={@pages} current_page={@page} />
         <% @panel == :bookmarks -> %>
           <.bookmarks_panel bookmarks={@bookmarks} current_page={@page} />
+        <% @panel == :search -> %>
+          <.search_panel
+            query={@search_query}
+            results={@search_results}
+            total_results={@search_total}
+            current_result={@search_current}
+            match_case={@search_match_case}
+            whole_word={@search_whole_word}
+            searching={@searching}
+          />
         <% true -> %>
           <div class="flex-1 overflow-y-auto p-4">
             <p class="text-sm text-gray-400 dark:text-gray-500">{panel_hint(@panel)}</p>
@@ -668,7 +794,6 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
 
-  defp panel_hint(:search), do: "Open a document to search its text."
   defp panel_hint(:attachments), do: "Open a document to list its embedded attachments."
 
   defp no_document_placeholder(assigns) do
