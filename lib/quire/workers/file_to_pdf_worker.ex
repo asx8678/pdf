@@ -35,6 +35,22 @@ defmodule Quire.Workers.FileToPdfWorker do
   @office_extensions ~w(.docx .xlsx .pptx .odt .ods .odp .rtf)
   @text_extensions ~w(.txt .csv .md)
 
+  # ── Public API ─────────────────────────────────────────────────────────
+
+  @doc """
+  Classifies a file extension into a format category.
+
+  Returns one of `:text`, `:image`, `:office`, or `:unknown`.
+  """
+  def classify_ext(ext) do
+    cond do
+      ext in @text_extensions -> :text
+      ext in @image_extensions -> :image
+      ext in @office_extensions -> :office
+      true -> :unknown
+    end
+  end
+
   @doc false
   @impl true
   def perform(%Oban.Job{args: args}) do
@@ -160,12 +176,16 @@ defmodule Quire.Workers.FileToPdfWorker do
   # ── Text → HTML → PDF ────────────────────────────────────────────────
 
   defp convert_text(bytes, _title) do
-    text = String.trim(bytes)
-
-    html =
-      ~s[<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/></head><body><pre>#{escape_html(text)}</pre></body></html>]
-
+    html = text_to_html(String.trim(bytes))
     html_to_pdf(html, nil)
+  end
+
+  @doc """
+  Wraps plain text in an HTML document suitable for ChromicPDF.
+  Exposed for testing; the pre tag preserves whitespace and line breaks.
+  """
+  def text_to_html(text) do
+    ~s[<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/><style>body{font-family:monospace;padding:2em}pre{white-space:pre-wrap;word-wrap:break-word}</style></head><body><pre>#{escape_html(text)}</pre></body></html>]
   end
 
   # ── HTML → PDF via ChromicPDF ────────────────────────────────────────
