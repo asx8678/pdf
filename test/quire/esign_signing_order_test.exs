@@ -12,14 +12,18 @@ defmodule Quire.EsignSigningOrderTest do
     end
 
     test "parallel mode allows all signers", %{user: user, doc: doc} do
-      envelope = insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :parallel})
+      envelope =
+        insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :parallel})
+
       signer = insert_signer(envelope, %{order: 1})
 
       assert Esign.can_signer_access?(envelope, signer)
     end
 
     test "sequential mode blocks out-of-order signers", %{user: user, doc: doc} do
-      envelope = insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :sequential})
+      envelope =
+        insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :sequential})
+
       signer1 = insert_signer(envelope, %{order: 1, status: :pending})
       signer2 = insert_signer(envelope, %{order: 2, status: :pending})
 
@@ -28,7 +32,9 @@ defmodule Quire.EsignSigningOrderTest do
     end
 
     test "sequential mode allows next signer after previous signs", %{user: user, doc: doc} do
-      envelope = insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :sequential})
+      envelope =
+        insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :sequential})
+
       signer1 = insert_signer(envelope, %{order: 1, status: :pending})
       signer2 = insert_signer(envelope, %{order: 2, status: :pending})
 
@@ -37,14 +43,18 @@ defmodule Quire.EsignSigningOrderTest do
         |> Signer.changeset(%{})
         |> Signer.put_status(:viewed)
         |> Quire.Repo.update!()
-        |> then(fn s -> Signer.changeset(s, %{}) |> Signer.put_status(:signed) |> Quire.Repo.update() end)
+        |> then(fn s ->
+          Signer.changeset(s, %{}) |> Signer.put_status(:signed) |> Quire.Repo.update()
+        end)
 
       refute Esign.can_signer_access?(envelope, signer1)
       assert Esign.can_signer_access?(envelope, signer2)
     end
 
     test "sequential mode with 3 signers: progressive access", %{user: user, doc: doc} do
-      envelope = insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :sequential})
+      envelope =
+        insert_envelope(%{owner_id: user.id, document_id: doc.id, signing_mode: :sequential})
+
       s1 = insert_signer(envelope, %{order: 1, status: :pending})
       s2 = insert_signer(envelope, %{order: 2, status: :pending})
       _s3 = insert_signer(envelope, %{order: 3, status: :pending})
@@ -57,7 +67,9 @@ defmodule Quire.EsignSigningOrderTest do
         |> Signer.changeset(%{})
         |> Signer.put_status(:viewed)
         |> Quire.Repo.update!()
-        |> then(fn s -> Signer.changeset(s, %{}) |> Signer.put_status(:signed) |> Quire.Repo.update() end)
+        |> then(fn s ->
+          Signer.changeset(s, %{}) |> Signer.put_status(:signed) |> Quire.Repo.update()
+        end)
 
       assert Esign.can_signer_access?(envelope, s2)
     end

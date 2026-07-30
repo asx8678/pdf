@@ -55,10 +55,15 @@ defmodule Quire.Esign do
                  |> Signer.changeset(%{})
                  |> Ecto.Changeset.put_change(:access_token, token)
                  |> Repo.update() do
-              {:ok, _} -> :ok
+              {:ok, _} ->
+                :ok
+
               {:error, changeset} ->
                 require Logger
-                Logger.warning("Failed to generate access token for signer #{signer.id}: #{inspect(changeset.errors)}")
+
+                Logger.warning(
+                  "Failed to generate access token for signer #{signer.id}: #{inspect(changeset.errors)}"
+                )
             end
           end
         end)
@@ -101,7 +106,12 @@ defmodule Quire.Esign do
   """
   def sign_envelope(%Envelope{status: status} = envelope, %Signer{} = signer, attrs \\ %{}) do
     with :ok <- verify_signing_state(status, signer.status),
-         :ok <- verify_signing_order(signer, list_signers(envelope), envelope.signing_mode || :sequential),
+         :ok <-
+           verify_signing_order(
+             signer,
+             list_signers(envelope),
+             envelope.signing_mode || :sequential
+           ),
          {:ok, updated_signer} <- do_sign_signer(signer, attrs),
          :ok <- maybe_complete_envelope(envelope, updated_signer) do
       {:ok, updated_signer}
@@ -144,6 +154,7 @@ defmodule Quire.Esign do
   def verify_signing_order(signer, signers, mode)
 
   def verify_signing_order(_signer, _signers, :parallel), do: :ok
+
   def verify_signing_order(signer, signers, :sequential) do
     if is_next_signer?(signer, signers) do
       :ok
@@ -222,7 +233,11 @@ defmodule Quire.Esign do
   @doc """
   Declines the envelope on behalf of a signer.
   """
-  def decline_envelope(%Envelope{status: :sent} = envelope, %Signer{status: :pending} = signer, attrs \\ %{}) do
+  def decline_envelope(
+        %Envelope{status: :sent} = envelope,
+        %Signer{status: :pending} = signer,
+        attrs \\ %{}
+      ) do
     result =
       signer
       |> Signer.changeset(attrs)
@@ -250,7 +265,8 @@ defmodule Quire.Esign do
   Voids an envelope.  Only envelopes in `:sent` or `:partially_signed` status
   can be voided.
   """
-  def void_envelope(%Envelope{status: status} = envelope) when status in [:sent, :partially_signed] do
+  def void_envelope(%Envelope{status: status} = envelope)
+      when status in [:sent, :partially_signed] do
     result =
       envelope
       |> Envelope.changeset(%{})
@@ -271,7 +287,8 @@ defmodule Quire.Esign do
   @doc """
   Marks an expired envelope.  Called by a periodic job.
   """
-  def expire_envelope(%Envelope{status: status} = envelope) when status in [:sent, :partially_signed] do
+  def expire_envelope(%Envelope{status: status} = envelope)
+      when status in [:sent, :partially_signed] do
     result =
       envelope
       |> Envelope.changeset(%{})
@@ -391,7 +408,9 @@ defmodule Quire.Esign do
     |> AuditEvent.changeset(attrs)
     |> Repo.insert()
     |> case do
-      {:ok, _} = ok -> ok
+      {:ok, _} = ok ->
+        ok
+
       {:error, changeset} ->
         require Logger
         Logger.warning("Failed to record audit event #{event}: #{inspect(changeset.errors)}")

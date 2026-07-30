@@ -116,7 +116,9 @@ defmodule Quire.EsignTest do
     test "sequential mode rejects out-of-order signer" do
       s1 = %Signer{id: "a", status: :pending}
       s2 = %Signer{id: "b", status: :pending}
-      assert {:error, :signer_out_of_order} = Esign.verify_signing_order(s2, [s1, s2], :sequential)
+
+      assert {:error, :signer_out_of_order} =
+               Esign.verify_signing_order(s2, [s1, s2], :sequential)
     end
 
     test "sequential mode allows next after preceding signed" do

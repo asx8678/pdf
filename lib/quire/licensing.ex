@@ -196,14 +196,14 @@ defmodule Quire.Licensing do
     seven_days = DateTime.add(now, 7 * 24 * 60 * 60, :second)
 
     case Quire.Repo.one(
-      from(l in Quire.Accounts.License,
-        where:
-          l.user_id == ^user_id and
-            l.expires_at > ^now and
-            l.expires_at < ^seven_days,
-        select: count(l.id)
-      )
-    ) do
+           from(l in Quire.Accounts.License,
+             where:
+               l.user_id == ^user_id and
+                 l.expires_at > ^now and
+                 l.expires_at < ^seven_days,
+             select: count(l.id)
+           )
+         ) do
       0 -> false
       _ -> true
     end

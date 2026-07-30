@@ -38,7 +38,9 @@ defmodule Quire.Workers.RetentionWorkerTest do
         id: Ecto.UUID.generate(),
         document_id: document.id,
         label: "Revision #{days_ago}d ago",
-        source: %{"storage_ref" => %{"byte_size" => 1024, "key" => "test/#{Ecto.UUID.generate()}"}}
+        source: %{
+          "storage_ref" => %{"byte_size" => 1024, "key" => "test/#{Ecto.UUID.generate()}"}
+        }
       }
       |> Repo.insert!()
 
@@ -99,6 +101,7 @@ defmodule Quire.Workers.RetentionWorkerTest do
     doc |> Ecto.Changeset.change(%{current_revision_id: current_rev.id}) |> Repo.update!()
 
     test_ref = make_ref()
+
     :telemetry.attach_many(
       test_ref,
       [[:quire, :retention, :pruned]],
@@ -107,6 +110,7 @@ defmodule Quire.Workers.RetentionWorkerTest do
       end,
       nil
     )
+
     on_exit(fn -> :telemetry.detach(test_ref) end)
 
     assert :ok = RetentionWorker.perform(%Oban.Job{args: %{}})

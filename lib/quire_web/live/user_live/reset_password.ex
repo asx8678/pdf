@@ -22,8 +22,7 @@ defmodule QuireWeb.UserLive.ResetPassword do
           class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400"
         >
           <p>
-            This reset link is invalid or has expired.
-            <.link
+            This reset link is invalid or has expired. <.link
               navigate={~p"/users/forgot-password"}
               class="font-semibold underline"
               phx-no-format
@@ -76,7 +75,10 @@ defmodule QuireWeb.UserLive.ResetPassword do
   def handle_event("reset_password", %{"user" => attrs}, socket) do
     user = socket.assigns.user
 
-    case Accounts.reset_user_password(user, %{password: attrs["password"], password_confirmation: attrs["password_confirmation"]}) do
+    case Accounts.reset_user_password(user, %{
+           password: attrs["password"],
+           password_confirmation: attrs["password_confirmation"]
+         }) do
       {:ok, _user} ->
         {:noreply,
          socket

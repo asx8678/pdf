@@ -39,7 +39,8 @@ defmodule QuireWeb.Chrome.EsignWizard do
             <div class={[
               "w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
               step_completed?(@step, s) && "bg-accent text-white",
-              @step == s && "ring-2 ring-accent ring-offset-2 dark:ring-offset-gray-800 bg-accent text-white",
+              @step == s &&
+                "ring-2 ring-accent ring-offset-2 dark:ring-offset-gray-800 bg-accent text-white",
               !step_completed?(@step, s) && @step != s && "bg-gray-200 dark:bg-gray-700 text-gray-500"
             ]}>
               {step_number(s)}
@@ -237,8 +238,7 @@ defmodule QuireWeb.Chrome.EsignWizard do
         phx-click="esign_wizard_add_signer"
         class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/5 rounded-lg transition-colors"
       >
-        <.icon name="hero-plus" class="size-4" />
-        Add Signer
+        <.icon name="hero-plus" class="size-4" /> Add Signer
       </button>
     </div>
     """
@@ -257,7 +257,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
         Select a signer, then add fields where they need to sign.
       </p>
 
-      <div :for={s <- @signers} class="border border-chrome-border dark:border-gray-600 rounded-lg p-3">
+      <div
+        :for={s <- @signers}
+        class="border border-chrome-border dark:border-gray-600 rounded-lg p-3"
+      >
         <div class="flex items-center gap-2 mb-2">
           <div
             class="w-3 h-3 rounded-full"
@@ -270,7 +273,7 @@ defmodule QuireWeb.Chrome.EsignWizard do
         <!-- Fields for this signer -->
         <div class="ml-5 space-y-1">
           <div
-            :for={f <- Enum.filter(@fields, & &1.signer_index == s.order - 1)}
+            :for={f <- Enum.filter(@fields, &(&1.signer_index == s.order - 1))}
             class="flex items-center gap-2 p-2 bg-gray-50 dark:bg-gray-700/50 rounded text-sm"
           >
             <.icon name={field_icon(f.kind)} class="size-3.5 text-gray-500" />
@@ -285,7 +288,13 @@ defmodule QuireWeb.Chrome.EsignWizard do
               phx-value-field="kind"
               class="ml-2 px-2 py-0.5 text-xs border border-chrome-border dark:border-gray-600 rounded bg-chrome-white dark:bg-gray-700 text-gray-700 dark:text-gray-300"
             >
-              <option :for={kt <- ~w(signature initials name date text checkbox)} value={kt} selected={Atom.to_string(f.kind) == kt}>{field_label(String.to_existing_atom(kt))}</option>
+              <option
+                :for={kt <- ~w(signature initials name date text checkbox)}
+                value={kt}
+                selected={Atom.to_string(f.kind) == kt}
+              >
+                {field_label(String.to_existing_atom(kt))}
+              </option>
             </select>
 
             <button
@@ -298,7 +307,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
               <.icon name="hero-x-mark" class="size-3.5" />
             </button>
           </div>
-          <p :if={length(Enum.filter(@fields, & &1.signer_index == s.order - 1)) == 0} class="text-xs text-gray-400 italic">
+          <p
+            :if={length(Enum.filter(@fields, &(&1.signer_index == s.order - 1))) == 0}
+            class="text-xs text-gray-400 italic"
+          >
             No fields placed
           </p>
         </div>
@@ -309,8 +321,7 @@ defmodule QuireWeb.Chrome.EsignWizard do
           phx-value-signer_index={s.order - 1}
           class="ml-5 mt-1 flex items-center gap-1 text-xs text-accent hover:text-accent/80"
         >
-          <.icon name="hero-plus-circle" class="size-3.5" />
-          Add field
+          <.icon name="hero-plus-circle" class="size-3.5" /> Add field
         </button>
       </div>
 
@@ -334,7 +345,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
       </p>
 
       <div>
-        <label for="esign-subject" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label
+          for="esign-subject"
+          class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+        >
           Subject
         </label>
         <input
@@ -350,7 +364,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
       </div>
 
       <div>
-        <label for="esign-message" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label
+          for="esign-message"
+          class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+        >
           Message
         </label>
         <textarea
@@ -380,7 +397,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
       </p>
 
       <div>
-        <label for="esign-expires" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label
+          for="esign-expires"
+          class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
+        >
           Expires at
         </label>
         <input
@@ -418,7 +438,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
       </p>
 
       <!-- Error -->
-      <div :if={@error} class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400">
+      <div
+        :if={@error}
+        class="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400"
+      >
         {@error}
       </div>
 
@@ -427,7 +450,10 @@ defmodule QuireWeb.Chrome.EsignWizard do
         <div>
           <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Signers</h4>
           <ul class="mt-1 space-y-1">
-            <li :for={s <- @signers} class="text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2">
+            <li
+              :for={s <- @signers}
+              class="text-sm text-gray-700 dark:text-gray-300 flex items-center gap-2"
+            >
               <span class="w-2 h-2 rounded-full" style={"background-color: #{signer_color(s.order)}"} />
               {s.name} <span class="text-xs text-gray-400">({s.email})</span>
             </li>
@@ -484,11 +510,13 @@ defmodule QuireWeb.Chrome.EsignWizard do
   defp field_label(:checkbox), do: "Checkbox"
 
   defp format_datetime_local(nil), do: ""
+
   defp format_datetime_local(%DateTime{} = dt) do
     dt |> DateTime.to_naive() |> NaiveDateTime.truncate(:second) |> NaiveDateTime.to_string()
   end
 
   defp format_datetime(nil), do: ""
+
   defp format_datetime(%DateTime{} = dt) do
     dt |> DateTime.to_naive() |> NaiveDateTime.to_string()
   end

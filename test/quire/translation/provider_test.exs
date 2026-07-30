@@ -57,7 +57,13 @@ defmodule Quire.Translation.ProviderTest do
     end
 
     test "accepts banner field" do
-      result = %Result{translated_text: "hola", source_lang: "en", target_lang: "es", banner: "disabled"}
+      result = %Result{
+        translated_text: "hola",
+        source_lang: "en",
+        target_lang: "es",
+        banner: "disabled"
+      }
+
       assert result.banner == "disabled"
     end
   end

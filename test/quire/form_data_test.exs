@@ -26,7 +26,9 @@ defmodule Quire.FormDataTest do
     end
 
     test "import handles simple FDF text" do
-      fdf = ~s'%FDF-1.2\n1 0 obj\n<< /FDF << /Fields [\n  /T (name) /V (Ada)\n] >> >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n'
+      fdf =
+        ~s'%FDF-1.2\n1 0 obj\n<< /FDF << /Fields [\n  /T (name) /V (Ada)\n] >> >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n'
+
       assert {:ok, data} = FormData.import(fdf, :fdf)
       assert data == %{"name" => "Ada"}
     end

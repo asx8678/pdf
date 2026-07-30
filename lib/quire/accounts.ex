@@ -6,7 +6,15 @@ defmodule Quire.Accounts do
   import Ecto.Query, warn: false
   alias Quire.Repo
 
-  alias Quire.Accounts.{User, UserSetting, UserToken, UserNotifier, SigningCredential, License, Totp}
+  alias Quire.Accounts.{
+    User,
+    UserSetting,
+    UserToken,
+    UserNotifier,
+    SigningCredential,
+    License,
+    Totp
+  }
 
   ## Database getters
 
@@ -547,6 +555,7 @@ defmodule Quire.Accounts do
   """
   def generate_totp_secret(user) do
     secret = NimbleTOTP.secret()
+
     {:ok, user} =
       user
       |> Ecto.Changeset.change(%{totp_secret: secret})
@@ -608,7 +617,8 @@ defmodule Quire.Accounts do
   and returns `{:ok, %License{}}`.  On failure returns `{:error, reason}`.
   """
   @spec validate_activation_key(User.t(), String.t()) :: {:ok, License.t()} | {:error, String.t()}
-  def validate_activation_key(_user, key) when key in ["", nil], do: {:error, "Please enter an activation key."}
+  def validate_activation_key(_user, key) when key in ["", nil],
+    do: {:error, "Please enter an activation key."}
 
   def validate_activation_key(user, key) do
     key = String.trim(key)
@@ -630,7 +640,9 @@ defmodule Quire.Accounts do
         now = DateTime.utc_now()
 
         case existing_license.expires_at && DateTime.compare(existing_license.expires_at, now) do
-          :lt -> {:error, "This activation key has expired."}
+          :lt ->
+            {:error, "This activation key has expired."}
+
           _ ->
             # Upsert the user's license
             changeset =
@@ -646,11 +658,13 @@ defmodule Quire.Accounts do
 
             {:ok, _} =
               Quire.Repo.insert(changeset,
-                on_conflict: [set: [
-                  tier: existing_license.tier,
-                  activated_at: now,
-                  activation_key: key
-                ]],
+                on_conflict: [
+                  set: [
+                    tier: existing_license.tier,
+                    activated_at: now,
+                    activation_key: key
+                  ]
+                ],
                 conflict_target: :user_id
               )
 

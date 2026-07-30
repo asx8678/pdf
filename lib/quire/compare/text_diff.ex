@@ -140,6 +140,7 @@ defmodule Quire.Compare.TextDiff do
     m = length(b)
 
     table = build_table(a, b, n, m)
+
     backtrack(table, a, b, n, m, [])
     |> Enum.reverse()
   end

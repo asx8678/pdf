@@ -10,13 +10,17 @@ defmodule QuireWeb.WorkspaceLive.EsignWizardTest do
 
     # Simulate what the handle_event does
     last = List.last(fields)
-    updated = if last do
-      List.replace_at(fields, length(fields) - 1,
-        Map.merge(last, %{page_index: 2, rect: [10, 20, 130, 44]})
-      )
-    else
-      fields
-    end
+
+    updated =
+      if last do
+        List.replace_at(
+          fields,
+          length(fields) - 1,
+          Map.merge(last, %{page_index: 2, rect: [10, 20, 130, 44]})
+        )
+      else
+        fields
+      end
 
     assert length(updated) == 1
     assert hd(updated)[:page_index] == 2
@@ -32,13 +36,17 @@ defmodule QuireWeb.WorkspaceLive.EsignWizardTest do
 
     # Place it (simulate what handle_event does)
     last = List.last(fields)
-    updated = if last do
-      List.replace_at(fields, length(fields) - 1,
-        Map.merge(last, %{page_index: 1, rect: [50, 100, 170, 124]})
-      )
-    else
-      fields
-    end
+
+    updated =
+      if last do
+        List.replace_at(
+          fields,
+          length(fields) - 1,
+          Map.merge(last, %{page_index: 1, rect: [50, 100, 170, 124]})
+        )
+      else
+        fields
+      end
 
     field = List.last(updated)
     assert field[:page_index] == 1
@@ -48,11 +56,17 @@ defmodule QuireWeb.WorkspaceLive.EsignWizardTest do
   test "place field with no existing fields is a no-op" do
     fields = []
     last = List.last(fields)
-    updated = if last do
-      List.replace_at(fields, length(fields) - 1, Map.merge(last, %{page_index: 0, rect: [0, 0, 1, 1]}))
-    else
-      fields
-    end
+
+    updated =
+      if last do
+        List.replace_at(
+          fields,
+          length(fields) - 1,
+          Map.merge(last, %{page_index: 0, rect: [0, 0, 1, 1]})
+        )
+      else
+        fields
+      end
 
     assert updated == []
   end

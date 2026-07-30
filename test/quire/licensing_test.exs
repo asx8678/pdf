@@ -44,8 +44,18 @@ defmodule Quire.LicensingTest do
 
     test "business tier allows all features" do
       all_features = [
-        :edit, :comment, :fill_sign, :secure, :esign,
-        :ocr, :translate, :desktop, :cloud_sync, :sso, :audit, :export
+        :edit,
+        :comment,
+        :fill_sign,
+        :secure,
+        :esign,
+        :ocr,
+        :translate,
+        :desktop,
+        :cloud_sync,
+        :sso,
+        :audit,
+        :export
       ]
 
       for feature <- all_features do
@@ -118,7 +128,10 @@ defmodule Quire.LicensingTest do
 
       {:ok, _license} =
         %License{user_id: user.id, tier: "trial"}
-        |> License.changeset(%{tier: "trial", expires_at: DateTime.add(DateTime.utc_now(), 3, :day)})
+        |> License.changeset(%{
+          tier: "trial",
+          expires_at: DateTime.add(DateTime.utc_now(), 3, :day)
+        })
         |> Quire.Repo.insert()
 
       assert Licensing.expiring_soon?(user)
@@ -129,7 +142,10 @@ defmodule Quire.LicensingTest do
 
       {:ok, _license} =
         %License{user_id: user.id, tier: "trial"}
-        |> License.changeset(%{tier: "trial", expires_at: DateTime.add(DateTime.utc_now(), 30, :day)})
+        |> License.changeset(%{
+          tier: "trial",
+          expires_at: DateTime.add(DateTime.utc_now(), 30, :day)
+        })
         |> Quire.Repo.insert()
 
       refute Licensing.expiring_soon?(user)
@@ -160,7 +176,10 @@ defmodule Quire.LicensingTest do
 
       {:ok, _license} =
         %License{user_id: user.id, tier: "trial"}
-        |> License.changeset(%{tier: "trial", expires_at: DateTime.add(DateTime.utc_now(), 3, :day)})
+        |> License.changeset(%{
+          tier: "trial",
+          expires_at: DateTime.add(DateTime.utc_now(), 3, :day)
+        })
         |> Quire.Repo.insert()
 
       assert Licensing.expiring_soon?(%{user: user})

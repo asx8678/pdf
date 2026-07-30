@@ -4,10 +4,10 @@ ExUnit.start()
 # Elixir 1.20 parallel compilation can otherwise race and fail to load
 # CaseTemplate-based modules at compile time.
 for path <- [
-  "test/support/data_case.ex",
-  "test/support/conn_case.ex",
-  "test/support/fixtures/accounts_fixtures.ex"
-] do
+      "test/support/data_case.ex",
+      "test/support/conn_case.ex",
+      "test/support/fixtures/accounts_fixtures.ex"
+    ] do
   Code.compile_file(path)
 end
 

@@ -27,7 +27,10 @@ defmodule Quire.Workers.RetentionWorker do
 
   @impl Oban.Worker
   def perform(_job) do
-    retention_days = Application.get_env(:quire, __MODULE__, []) |> Keyword.get(:retention_days, @default_retention_days)
+    retention_days =
+      Application.get_env(:quire, __MODULE__, [])
+      |> Keyword.get(:retention_days, @default_retention_days)
+
     cutoff = DateTime.add(DateTime.utc_now(), -retention_days * 86_400, :second)
 
     # Find revisions older than cutoff that are NOT the current revision of any document
@@ -46,7 +49,10 @@ defmodule Quire.Workers.RetentionWorker do
 
     if pruned_count > 0 do
       require Logger
-      Logger.info("RetentionWorker: pruned #{pruned_count} revisions, reclaimed #{format_bytes(reclaimed_bytes)}")
+
+      Logger.info(
+        "RetentionWorker: pruned #{pruned_count} revisions, reclaimed #{format_bytes(reclaimed_bytes)}"
+      )
     end
 
     :ok

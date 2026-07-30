@@ -11,7 +11,7 @@ defmodule Quire.Accounts.ActivationTest do
 
     %License{}
     |> License.changeset(attrs)
- |> put_change(:user_id, owner.id)
+    |> put_change(:user_id, owner.id)
     |> Quire.Repo.insert!()
 
     owner
@@ -20,13 +20,19 @@ defmodule Quire.Accounts.ActivationTest do
   describe "validate_activation_key/2" do
     test "rejects empty key" do
       user = user_fixture()
-      assert Accounts.validate_activation_key(user, "") == {:error, "Please enter an activation key."}
-      assert Accounts.validate_activation_key(user, nil) == {:error, "Please enter an activation key."}
+
+      assert Accounts.validate_activation_key(user, "") ==
+               {:error, "Please enter an activation key."}
+
+      assert Accounts.validate_activation_key(user, nil) ==
+               {:error, "Please enter an activation key."}
     end
 
     test "rejects unknown key" do
       user = user_fixture()
-      assert Accounts.validate_activation_key(user, "INVALID-KEY") == {:error, "Invalid activation key. Please check the key and try again."}
+
+      assert Accounts.validate_activation_key(user, "INVALID-KEY") ==
+               {:error, "Invalid activation key. Please check the key and try again."}
     end
 
     test "rejects expired key" do
@@ -37,7 +43,9 @@ defmodule Quire.Accounts.ActivationTest do
       })
 
       user = user_fixture()
-      assert Accounts.validate_activation_key(user, "EXPIRED-KEY") == {:error, "This activation key has expired."}
+
+      assert Accounts.validate_activation_key(user, "EXPIRED-KEY") ==
+               {:error, "This activation key has expired."}
     end
 
     test "activates the user's license with a valid key" do

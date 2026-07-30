@@ -48,7 +48,10 @@ defmodule QuireWeb.UserLive.Settings do
       <div class="mt-6 border-b border-chrome-border dark:border-gray-700">
         <nav class="-mb-px flex space-x-6 overflow-x-auto" role="tablist" aria-label="Settings tabs">
           <button
-            :for={tab <- ~w(general editing ocr security privacy_translation connected_accounts keyboard_shortcuts about)}
+            :for={
+              tab <-
+                ~w(general editing ocr security privacy_translation connected_accounts keyboard_shortcuts about)
+            }
             role="tab"
             type="button"
             phx-click="switch_tab"
@@ -58,7 +61,8 @@ defmodule QuireWeb.UserLive.Settings do
               "whitespace-nowrap pb-3 px-1 text-sm font-medium border-b-2 transition-colors cursor-pointer",
               if(@active_tab == String.to_existing_atom(tab),
                 do: "border-accent text-accent",
-                else: "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600"
+                else:
+                  "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600"
               )
             ]}
           >
@@ -76,55 +80,55 @@ defmodule QuireWeb.UserLive.Settings do
           </.header>
         </div>
 
-      <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
-        <.input
-          field={@email_form[:email]}
-          type="email"
-          label="Email"
-          autocomplete="username"
-          spellcheck="false"
-          required
-        />
-        <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
-      </.form>
+        <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
+          <.input
+            field={@email_form[:email]}
+            type="email"
+            label="Email"
+            autocomplete="username"
+            spellcheck="false"
+            required
+          />
+          <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
+        </.form>
 
-      <hr class="my-8 border-chrome-border dark:border-gray-700" />
+        <hr class="my-8 border-chrome-border dark:border-gray-700" />
 
-      <.form
-        for={@password_form}
-        id="password_form"
-        action={~p"/users/update-password"}
-        method="post"
-        phx-change="validate_password"
-        phx-submit="update_password"
-        phx-trigger-action={@trigger_submit}
-      >
-        <input
-          name={@password_form[:email].name}
-          type="hidden"
-          id="hidden_user_email"
-          spellcheck="false"
-          value={@current_email}
-        />
-        <.input
-          field={@password_form[:password]}
-          type="password"
-          label="New password"
-          autocomplete="new-password"
-          spellcheck="false"
-          required
-        />
-        <.input
-          field={@password_form[:password_confirmation]}
-          type="password"
-          label="Confirm new password"
-          autocomplete="new-password"
-          spellcheck="false"
-        />
-        <.button variant="primary" phx-disable-with="Saving...">
-          Save Password
-        </.button>
-      </.form>
+        <.form
+          for={@password_form}
+          id="password_form"
+          action={~p"/users/update-password"}
+          method="post"
+          phx-change="validate_password"
+          phx-submit="update_password"
+          phx-trigger-action={@trigger_submit}
+        >
+          <input
+            name={@password_form[:email].name}
+            type="hidden"
+            id="hidden_user_email"
+            spellcheck="false"
+            value={@current_email}
+          />
+          <.input
+            field={@password_form[:password]}
+            type="password"
+            label="New password"
+            autocomplete="new-password"
+            spellcheck="false"
+            required
+          />
+          <.input
+            field={@password_form[:password_confirmation]}
+            type="password"
+            label="Confirm new password"
+            autocomplete="new-password"
+            spellcheck="false"
+          />
+          <.button variant="primary" phx-disable-with="Saving...">
+            Save Password
+          </.button>
+        </.form>
       </div>
 
       <!-- Editing tab -->
@@ -156,10 +160,13 @@ defmodule QuireWeb.UserLive.Settings do
                 if(@highlight_fields, do: "bg-indigo-600", else: "bg-gray-200 dark:bg-gray-700")
               ]}
             >
-              <span aria-hidden="true" class={[
-                "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
-                if(@highlight_fields, do: "translate-x-5", else: "translate-x-0")
-              ]}></span>
+              <span
+                aria-hidden="true"
+                class={[
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out",
+                  if(@highlight_fields, do: "translate-x-5", else: "translate-x-0")
+                ]}
+              ></span>
             </button>
           </div>
         </div>
@@ -333,9 +340,12 @@ defmodule QuireWeb.UserLive.Settings do
 
         <div class="mt-4 space-y-6">
           <div class="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Translation Provider</h3>
+            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">
+              Translation Provider
+            </h3>
             <p class="text-sm text-gray-500 dark:text-gray-400">
-              Translation is powered by <strong>Provider.Null</strong> — no document content leaves your machine.
+              Translation is powered by <strong>Provider.Null</strong>
+              — no document content leaves your machine.
               When a real provider is configured, this tab will show which provider is active, what data
               is transmitted, and the retention policy for translated content.
             </p>
@@ -343,8 +353,10 @@ defmodule QuireWeb.UserLive.Settings do
 
           <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/40 rounded-lg">
             <p class="text-sm text-blue-700 dark:text-blue-300">
-              <strong>Note:</strong> Translation is the only feature that sends document content to a third party.
-              The default provider is <strong>Provider.Null</strong> (no data sent). Change the provider above
+              <strong>Note:</strong>
+              Translation is the only feature that sends document content to a third party.
+              The default provider is <strong>Provider.Null</strong>
+              (no data sent). Change the provider above
               to enable real translations. Review our privacy policy for details on data handling.
             </p>
           </div>
@@ -390,7 +402,9 @@ defmodule QuireWeb.UserLive.Settings do
           <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
             <div>
               <p class="text-sm font-medium text-gray-700 dark:text-gray-200">S3 / WebDAV</p>
-              <p class="text-xs text-gray-500 mt-1">Manual configuration for custom storage backends</p>
+              <p class="text-xs text-gray-500 mt-1">
+                Manual configuration for custom storage backends
+              </p>
             </div>
             <span class="text-xs text-gray-400 dark:text-gray-500 italic">Coming soon</span>
           </div>
@@ -408,57 +422,87 @@ defmodule QuireWeb.UserLive.Settings do
           <table class="min-w-full divide-y divide-chrome-border dark:divide-gray-700">
             <thead class="bg-gray-50 dark:bg-gray-800/50">
               <tr>
-                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Shortcut</th>
-                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</th>
+                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Shortcut
+                </th>
+                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                  Action
+                </th>
               </tr>
             </thead>
             <tbody class="bg-white dark:bg-gray-800/30 divide-y divide-chrome-border dark:divide-gray-700">
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘N</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘N</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">New document</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘O</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘O</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Open file</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘S</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘S</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Save</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘⇧S</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘⇧S</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Save as</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘P</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘P</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Print</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘Z</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘Z</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Undo</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘⇧Z</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘⇧Z</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Redo</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘F</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘F</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Find in document</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘+ / ⌘-</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘+ / ⌘-</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Zoom in / out</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘0</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘0</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Reset zoom</td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">Esc</kbd></td>
-                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel current tool / close modal</td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">Esc</kbd>
+                </td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">
+                  Cancel current tool / close modal
+                </td>
               </tr>
               <tr>
-                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘K</kbd></td>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300">
+                  <kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘K</kbd>
+                </td>
                 <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Toggle side panel</td>
               </tr>
             </tbody>
@@ -488,10 +532,18 @@ defmodule QuireWeb.UserLive.Settings do
               <table class="min-w-full divide-y divide-chrome-border dark:divide-gray-700">
                 <thead class="bg-gray-50 dark:bg-gray-800/50">
                   <tr>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Engine</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Version</th>
-                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Detail</th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Engine
+                    </th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Version
+                    </th>
+                    <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                      Detail
+                    </th>
                   </tr>
                 </thead>
                 <tbody class="bg-white dark:bg-gray-800/30 divide-y divide-chrome-border dark:divide-gray-700">
@@ -538,8 +590,13 @@ defmodule QuireWeb.UserLive.Settings do
           <div>
             <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">System</h3>
             <div class="grid grid-cols-2 gap-3">
-              <div :for={{name, ver} <- @engine_check.system} class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
-                <span class="text-sm text-gray-600 dark:text-gray-400 capitalize">{Atom.to_string(name)}</span>
+              <div
+                :for={{name, ver} <- @engine_check.system}
+                class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/30 rounded-lg"
+              >
+                <span class="text-sm text-gray-600 dark:text-gray-400 capitalize">{Atom.to_string(
+                  name
+                )}</span>
                 <span class="text-sm font-mono text-gray-900 dark:text-gray-100">{ver || "—"}</span>
               </div>
             </div>
@@ -549,11 +606,20 @@ defmodule QuireWeb.UserLive.Settings do
           <div>
             <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-3">Smoke Tests</h3>
             <div class="space-y-2">
-              <div :for={{name, result} <- @engine_check.smoke_tests} class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/30 rounded-lg">
-                <span class="text-sm text-gray-600 dark:text-gray-400 capitalize">{Atom.to_string(name) |> String.replace("_", " ")}</span>
+              <div
+                :for={{name, result} <- @engine_check.smoke_tests}
+                class="flex items-center justify-between px-4 py-2.5 bg-gray-50 dark:bg-gray-800/30 rounded-lg"
+              >
+                <span class="text-sm text-gray-600 dark:text-gray-400 capitalize">{Atom.to_string(
+                  name
+                )
+                |> String.replace("_", " ")}</span>
                 <span class={[
                   "text-sm font-medium",
-                  if(result == :ok, do: "text-green-600 dark:text-green-400", else: "text-red-600 dark:text-red-400")
+                  if(result == :ok,
+                    do: "text-green-600 dark:text-green-400",
+                    else: "text-red-600 dark:text-red-400"
+                  )
                 ]}>
                   {if(result == :ok, do: "Pass", else: "Fail")}
                 </span>
@@ -564,8 +630,12 @@ defmodule QuireWeb.UserLive.Settings do
           <!-- LGPL notice (libvips) -->
           <div class="px-4 py-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700/40 rounded-lg">
             <p class="text-xs text-yellow-800 dark:text-yellow-200">
-              This application uses libvips, which is licensed under the
-              <a href="https://www.gnu.org/licenses/lgpl-3.0.html" target="_blank" rel="noopener" class="underline hover:no-underline">GNU Lesser General Public License v3.0 or later</a>.
+              This application uses libvips, which is licensed under the <a
+                href="https://www.gnu.org/licenses/lgpl-3.0.html"
+                target="_blank"
+                rel="noopener"
+                class="underline hover:no-underline"
+              >GNU Lesser General Public License v3.0 or later</a>.
             </p>
           </div>
         </div>
@@ -592,6 +662,7 @@ defmodule QuireWeb.UserLive.Settings do
     user = socket.assigns.current_scope.user
     email_changeset = Accounts.change_user_email(user, %{}, validate_unique: false)
     password_changeset = Accounts.change_user_password(user, %{}, hash_password: false)
+
     socket =
       socket
       |> assign(:current_email, user.email)
@@ -601,7 +672,8 @@ defmodule QuireWeb.UserLive.Settings do
       |> assign(:active_tab, :general)
       |> assign_tessdata_state()
       |> assign_totp_state()
-      |> assign(:highlight_fields,
+      |> assign(
+        :highlight_fields,
         case Quire.Repo.get_by(Quire.Accounts.UserSetting, user_id: user.id) do
           nil -> false
           setting -> setting.highlight_fields
@@ -610,6 +682,7 @@ defmodule QuireWeb.UserLive.Settings do
       |> assign(:engine_check, nil)
 
     self = self()
+
     Task.start(fn ->
       result = Quire.Engine.check()
       send(self, {:engine_check, result})

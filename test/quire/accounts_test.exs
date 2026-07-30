@@ -453,10 +453,11 @@ defmodule Quire.AccountsTest do
       user = set_password(user)
       assert User.valid_password?(user, valid_user_password())
 
-      {:ok, {user, _}} = Accounts.reset_user_password(user, %{
-        password: "new-valid-password-123",
-        password_confirmation: "new-valid-password-123"
-      })
+      {:ok, {user, _}} =
+        Accounts.reset_user_password(user, %{
+          password: "new-valid-password-123",
+          password_confirmation: "new-valid-password-123"
+        })
 
       refute User.valid_password?(user, valid_user_password())
       assert User.valid_password?(user, "new-valid-password-123")
@@ -466,10 +467,11 @@ defmodule Quire.AccountsTest do
       user = user_fixture()
       user = set_password(user)
 
-      assert {:error, changeset} = Accounts.reset_user_password(user, %{
-        password: "new-valid-password-123",
-        password_confirmation: "different-password"
-      })
+      assert {:error, changeset} =
+               Accounts.reset_user_password(user, %{
+                 password: "new-valid-password-123",
+                 password_confirmation: "different-password"
+               })
 
       assert changeset.errors[:password_confirmation]
     end

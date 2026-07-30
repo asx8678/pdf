@@ -16,12 +16,20 @@ defmodule Quire.Workers.EnvelopeReminderWorkerTest do
         expires_at: DateTime.add(DateTime.utc_now(), 3 * 24 * 3600, :second)
       })
 
-    signer = signer_fixture(%{envelope_id: envelope.id, status: :pending, access_token: Ecto.UUID.generate()})
+    signer =
+      signer_fixture(%{
+        envelope_id: envelope.id,
+        status: :pending,
+        access_token: Ecto.UUID.generate()
+      })
 
     %{user: user, doc: doc, envelope: envelope, signer: signer}
   end
 
-  test "sends reminders for pending signers on expiring envelopes", %{envelope: envelope, signer: _signer} do
+  test "sends reminders for pending signers on expiring envelopes", %{
+    envelope: envelope,
+    signer: _signer
+  } do
     assert :ok = EnvelopeReminderWorker.perform(%Oban.Job{args: %{}})
 
     updated = Quire.Repo.reload!(envelope)
@@ -30,6 +38,7 @@ defmodule Quire.Workers.EnvelopeReminderWorkerTest do
 
   test "does not send if already reminded recently", %{envelope: envelope, signer: _signer} do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
+
     envelope
     |> Ecto.Changeset.change(last_reminded_at: now)
     |> Quire.Repo.update!()
@@ -49,7 +58,11 @@ defmodule Quire.Workers.EnvelopeReminderWorkerTest do
         expires_at: DateTime.add(DateTime.utc_now(), 30 * 24 * 3600, :second)
       })
 
-    signer_fixture(%{envelope_id: far_future.id, status: :pending, access_token: Ecto.UUID.generate()})
+    signer_fixture(%{
+      envelope_id: far_future.id,
+      status: :pending,
+      access_token: Ecto.UUID.generate()
+    })
 
     assert :ok = EnvelopeReminderWorker.perform(%Oban.Job{args: %{}})
 

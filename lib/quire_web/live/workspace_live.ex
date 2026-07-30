@@ -619,18 +619,29 @@ defmodule QuireWeb.WorkspaceLive do
     value = Map.get(params, params["_target"] |> List.last() || "name", "")
     signers = socket.assigns.esign_wizard_signers
 
-    updated = Enum.with_index(signers) |> Enum.map(fn
-      {s, i} when i == index -> Map.put(s, String.to_existing_atom(field), value)
-      {s, _} -> s
-    end)
+    updated =
+      Enum.with_index(signers)
+      |> Enum.map(fn
+        {s, i} when i == index -> Map.put(s, String.to_existing_atom(field), value)
+        {s, _} -> s
+      end)
 
     {:noreply, assign(socket, :esign_wizard_signers, updated)}
   end
 
   def handle_event("esign_wizard_add_field", %{"signer_index" => idx}, socket) do
     signer_index = String.to_integer(idx)
-    new_field = %{id: Ecto.UUID.generate(), signer_index: signer_index, kind: :signature, page_index: 0}
-    socket = assign(socket, :esign_wizard_fields, socket.assigns.esign_wizard_fields ++ [new_field])
+
+    new_field = %{
+      id: Ecto.UUID.generate(),
+      signer_index: signer_index,
+      kind: :signature,
+      page_index: 0
+    }
+
+    socket =
+      assign(socket, :esign_wizard_fields, socket.assigns.esign_wizard_fields ++ [new_field])
+
     {:noreply, push_event(socket, "enable_esign_placement", %{})}
   end
 
@@ -639,19 +650,29 @@ defmodule QuireWeb.WorkspaceLive do
     fields = socket.assigns.esign_wizard_fields
 
     # Update the last added field with coordinates
-    updated = case List.last(fields) do
-      nil -> fields
-      last ->
-        List.replace_at(fields, length(fields) - 1,
-          Map.merge(last, %{page_index: pi, rect: rect})
-        )
-    end
+    updated =
+      case List.last(fields) do
+        nil ->
+          fields
+
+        last ->
+          List.replace_at(
+            fields,
+            length(fields) - 1,
+            Map.merge(last, %{page_index: pi, rect: rect})
+          )
+      end
 
     {:noreply, assign(socket, :esign_wizard_fields, updated)}
   end
 
   def handle_event("esign_wizard_remove_field", %{"id" => field_id}, socket) do
-    {:noreply, assign(socket, :esign_wizard_fields, Enum.reject(socket.assigns.esign_wizard_fields, &(&1.id == field_id)))}
+    {:noreply,
+     assign(
+       socket,
+       :esign_wizard_fields,
+       Enum.reject(socket.assigns.esign_wizard_fields, &(&1.id == field_id))
+     )}
   end
 
   def handle_event("esign_wizard_update_field", params, socket) do
@@ -665,10 +686,11 @@ defmodule QuireWeb.WorkspaceLive do
         _ -> value_raw
       end
 
-    fields = Enum.map(socket.assigns.esign_wizard_fields, fn
-      f when f.id == field_id -> Map.put(f, String.to_existing_atom(field_key), kind)
-      f -> f
-    end)
+    fields =
+      Enum.map(socket.assigns.esign_wizard_fields, fn
+        f when f.id == field_id -> Map.put(f, String.to_existing_atom(field_key), kind)
+        f -> f
+      end)
 
     {:noreply, assign(socket, :esign_wizard_fields, fields)}
   end
@@ -681,6 +703,7 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("esign_wizard_update_expiry", params, socket) do
     value = Map.get(params, "expires_at", "")
+
     expires_at =
       case value do
         "" -> nil
@@ -712,22 +735,23 @@ defmodule QuireWeb.WorkspaceLive do
 
       # Create envelope via Esign context
       case Quire.Esign.create_envelope(%{
-        document_id: doc_id,
-        owner_id: owner.user.id,
-        subject: subject,
-        message: message,
-        expires_at: expires_at
-      }) do
+             document_id: doc_id,
+             owner_id: owner.user.id,
+             subject: subject,
+             message: message,
+             expires_at: expires_at
+           }) do
         {:ok, envelope} ->
           # Add signers
-          results = Enum.map(signers, fn s ->
-            Quire.Esign.add_signer(envelope, %{
-              name: s.name,
-              email: s.email,
-              role: s.role,
-              order: s.order
-            })
-          end)
+          results =
+            Enum.map(signers, fn s ->
+              Quire.Esign.add_signer(envelope, %{
+                name: s.name,
+                email: s.email,
+                role: s.role,
+                order: s.order
+              })
+            end)
 
           errors = Enum.filter(results, &match?({:error, _}, &1))
 
@@ -756,7 +780,10 @@ defmodule QuireWeb.WorkspaceLive do
         {:error, changeset} ->
           {:noreply,
            socket
-           |> assign(:esign_wizard_error, "Failed to create envelope: #{inspect(changeset.errors)}")
+           |> assign(
+             :esign_wizard_error,
+             "Failed to create envelope: #{inspect(changeset.errors)}"
+           )
            |> assign(:esign_wizard_sending, false)}
       end
     end
@@ -2142,7 +2169,8 @@ defmodule QuireWeb.WorkspaceLive do
                 "px-2.5 py-1 rounded text-xs font-medium transition-colors",
                 if(@translate_mode == "overlay",
                   do: "bg-accent text-white",
-                  else: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  else:
+                    "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
                 )
               ]}
             >
@@ -2156,7 +2184,8 @@ defmodule QuireWeb.WorkspaceLive do
                 "px-2.5 py-1 rounded text-xs font-medium transition-colors",
                 if(@translate_mode == "sidecar",
                   do: "bg-accent text-white",
-                  else: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  else:
+                    "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
                 )
               ]}
             >
@@ -2170,7 +2199,8 @@ defmodule QuireWeb.WorkspaceLive do
                 "px-2.5 py-1 rounded text-xs font-medium transition-colors",
                 if(@translate_mode == "replace",
                   do: "bg-accent text-white",
-                  else: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
+                  else:
+                    "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"
                 )
               ]}
             >
@@ -2208,10 +2238,11 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
-      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and @active_tab != "page" and @active_tab != "esign" and @active_tab != "translate"}>
-        <p
-          class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
-        >
+      <div :if={
+        @active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and
+          @active_tab != "page" and @active_tab != "esign" and @active_tab != "translate"
+      }>
+        <p class="text-sm text-gray-400 dark:text-gray-500 italic px-4">
           Select a tool
         </p>
       </div>
@@ -2302,11 +2333,14 @@ defmodule QuireWeb.WorkspaceLive do
                     <% else %>
                       <div class="p-3 space-y-2">
                         <div class="text-xs text-gray-400 dark:text-gray-500">
-                          {String.slice(result.original, 0, 200)}<%= if String.length(result.original) > 200, do: "…" %>
+                          {String.slice(result.original, 0, 200)}{if String.length(result.original) >
+                                                                       200, do: "…"}
                         </div>
                         <%= if result.translated do %>
                           <div class="text-xs text-gray-900 dark:text-gray-100 font-medium border-t border-gray-100 dark:border-gray-700 pt-2">
-                            {String.slice(result.translated, 0, 200)}<%= if String.length(result.translated) > 200, do: "…" %>
+                            {String.slice(result.translated, 0, 200)}{if String.length(
+                                                                           result.translated
+                                                                         ) > 200, do: "…"}
                           </div>
                         <% end %>
                         <%= if result.banner do %>
@@ -2585,9 +2619,20 @@ defmodule QuireWeb.WorkspaceLive do
                 if text != "" do
                   case provider.translate(text, source, target) do
                     {:ok, result} ->
-                      %{page: page_result.page + 1, original: text, translated: result.translated_text, banner: result.banner}
+                      %{
+                        page: page_result.page + 1,
+                        original: text,
+                        translated: result.translated_text,
+                        banner: result.banner
+                      }
+
                     {:error, reason} ->
-                      %{page: page_result.page + 1, original: text, translated: nil, error: reason}
+                      %{
+                        page: page_result.page + 1,
+                        original: text,
+                        translated: nil,
+                        error: reason
+                      }
                   end
                 else
                   %{page: page_result.page + 1, original: "", translated: "", error: nil}
@@ -2598,7 +2643,8 @@ defmodule QuireWeb.WorkspaceLive do
             ok = Enum.count(translations, &(not is_nil(&1.translated)))
             errors = Enum.count(translations, &(not is_nil(&1.error)))
 
-            socket = socket
+            socket =
+              socket
               |> assign(:translate_provider_label, provider_label())
               |> assign(:translate_results, translations)
               |> assign(:right_panel, :translate)
@@ -2614,17 +2660,19 @@ defmodule QuireWeb.WorkspaceLive do
                 }
 
                 with {:ok, doc_bytes} <- Quire.Storage.get(ref),
-                     {:ok, new_ref} <- Quire.Storage.put(doc_bytes,
-                       name: doc.title,
-                       content_type: "application/pdf"
-                     ) do
-                  source_map = Map.put(source_map, "storage_ref", %{
-                    "adapter" => to_string(new_ref.adapter),
-                    "key" => new_ref.key,
-                    "name" => new_ref.name,
-                    "content_type" => new_ref.content_type,
-                    "byte_size" => new_ref.byte_size
-                  })
+                     {:ok, new_ref} <-
+                       Quire.Storage.put(doc_bytes,
+                         name: doc.title,
+                         content_type: "application/pdf"
+                       ) do
+                  source_map =
+                    Map.put(source_map, "storage_ref", %{
+                      "adapter" => to_string(new_ref.adapter),
+                      "key" => new_ref.key,
+                      "name" => new_ref.name,
+                      "content_type" => new_ref.content_type,
+                      "byte_size" => new_ref.byte_size
+                    })
 
                   {:ok, _new_rev} =
                     Quire.Documents.create_revision(doc,
@@ -2644,13 +2692,19 @@ defmodule QuireWeb.WorkspaceLive do
                 end
 
               "overlay" ->
-                overlay_data = Enum.map(translations, fn t ->
-                  %{page: t.page, translated: t.translated, error: t.error}
-                end)
+                overlay_data =
+                  Enum.map(translations, fn t ->
+                    %{page: t.page, translated: t.translated, error: t.error}
+                  end)
+
                 push_event(socket, "translate_overlay", %{pages: overlay_data})
 
               "sidecar" ->
-                put_flash(socket, :info, "Sidecar mode coming soon — results in the Translate panel")
+                put_flash(
+                  socket,
+                  :info,
+                  "Sidecar mode coming soon — results in the Translate panel"
+                )
 
               _ ->
                 socket

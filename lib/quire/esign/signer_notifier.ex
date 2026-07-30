@@ -15,7 +15,13 @@ defmodule Quire.Esign.SignerNotifier do
   @doc """
   Sends an envelope invitation to a signer.
   """
-  def deliver_invitation(recipient_email, recipient_name, envelope_subject, owner_name, signing_url) do
+  def deliver_invitation(
+        recipient_email,
+        recipient_name,
+        envelope_subject,
+        owner_name,
+        signing_url
+      ) do
     subject = "Please sign: #{envelope_subject || "Document"}"
 
     body = """

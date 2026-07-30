@@ -24,7 +24,16 @@ defmodule Quire.Esign.Signer do
   @doc false
   def changeset(signer, attrs) do
     signer
-    |> cast(attrs, [:envelope_id, :name, :email, :order, :role, :access_token, :ip_address, :user_agent])
+    |> cast(attrs, [
+      :envelope_id,
+      :name,
+      :email,
+      :order,
+      :role,
+      :access_token,
+      :ip_address,
+      :user_agent
+    ])
     |> validate_required([:envelope_id, :name, :email])
     |> validate_length(:name, max: 255)
     |> validate_format(:email, ~r/^[^@,;\s]+@[^@,;\s]+$/,

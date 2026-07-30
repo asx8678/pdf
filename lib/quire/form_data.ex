@@ -393,6 +393,7 @@ defmodule Quire.FormData do
         result =
           if Map.has_key?(field, "/FT") and Map.has_key?(field, "/T") do
             name = Map.get(field, "/T")
+
             if Map.has_key?(values, name) do
               Pdf.set_object(qdoc, {num, gen}, Map.put(field, "/V", values[name]))
             else

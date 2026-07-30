@@ -542,10 +542,12 @@ defmodule QuireWeb.CoreComponents do
         <.button phx-click="run_ocr">Run OCR</.button>
       </.gated>
   """
-  attr :feature, :atom, required: true,
+  attr :feature, :atom,
+    required: true,
     doc: "feature key passed to Quire.Licensing.allows?/2"
 
-  attr :current_scope, :any, required: true,
+  attr :current_scope, :any,
+    required: true,
     doc: "current_scope assign containing the user"
 
   slot :inner_block, required: true

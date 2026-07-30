@@ -23,7 +23,15 @@ defmodule Quire.Esign.SignerNotifierTest do
     end
 
     test "uses default subject when envelope subject is nil" do
-      {:ok, email} = SignerNotifier.deliver_invitation("a@b.com", "Alice", nil, "Bob", "https://quire.app/sign/x")
+      {:ok, email} =
+        SignerNotifier.deliver_invitation(
+          "a@b.com",
+          "Alice",
+          nil,
+          "Bob",
+          "https://quire.app/sign/x"
+        )
+
       assert email.subject == "Please sign: Document"
     end
   end
@@ -53,7 +61,9 @@ defmodule Quire.Esign.SignerNotifierTest do
 
   describe "deliver_decline/4" do
     test "sends decline notification to owner" do
-      {:ok, email} = SignerNotifier.deliver_decline("owner@example.com", "Bob", "Contract v2", "Alice")
+      {:ok, email} =
+        SignerNotifier.deliver_decline("owner@example.com", "Bob", "Contract v2", "Alice")
+
       assert email.subject == "Alice declined: Contract v2"
     end
   end

@@ -15,7 +15,10 @@ defmodule Quire.Esign.Envelope do
     field :owner_id, :binary_id
     field :subject, :string
     field :message, :string
-    field :status, Ecto.Enum, values: [:draft, :sent, :partially_signed, :completed, :declined, :voided, :expired]
+
+    field :status, Ecto.Enum,
+      values: [:draft, :sent, :partially_signed, :completed, :declined, :voided, :expired]
+
     field :signing_mode, Ecto.Enum, values: [:sequential, :parallel], default: :sequential
     field :expires_at, :utc_datetime
     field :sent_at, :utc_datetime

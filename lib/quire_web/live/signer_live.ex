@@ -14,6 +14,7 @@ defmodule QuireWeb.SignerLive do
       {:ok, signer} ->
         if signer.status in [:pending, :viewed] do
           envelope = Esign.get_envelope!(signer.envelope_id)
+
           if envelope.status in [:sent, :partially_signed] do
             fields = Esign.list_fields(envelope)
             signers = Esign.list_signers(envelope)
@@ -30,6 +31,7 @@ defmodule QuireWeb.SignerLive do
               |> assign(:token, token)
               |> assign(:signing_successful, false)
               |> assign(:declined, false)
+
             {:ok, socket}
           else
             {:ok, assign_error(socket, "This signing request has expired or been completed.")}
@@ -37,6 +39,7 @@ defmodule QuireWeb.SignerLive do
         else
           {:ok, assign_error(socket, "This signing link has already been used.")}
         end
+
       {:error, :not_found} ->
         {:ok, assign_error(socket, "Invalid signing link. Please check the link and try again.")}
     end
@@ -65,7 +68,9 @@ defmodule QuireWeb.SignerLive do
             <%= case @step do %>
               <% :confirm -> %>
                 <h2 class="text-lg font-semibold mb-4">Confirm Your Identity</h2>
-                <p class="text-sm text-gray-500 mb-6">Please confirm your details before proceeding</p>
+                <p class="text-sm text-gray-500 mb-6">
+                  Please confirm your details before proceeding
+                </p>
 
                 <div class="space-y-4 mb-6">
                   <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
@@ -78,7 +83,8 @@ defmodule QuireWeb.SignerLive do
                   </div>
                   <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <span class="text-sm text-gray-500 dark:text-gray-400">Document</span>
-                    <span class="font-medium text-gray-900 dark:text-gray-100">{@envelope.subject || "Untitled"}</span>
+                    <span class="font-medium text-gray-900 dark:text-gray-100">{@envelope.subject ||
+                      "Untitled"}</span>
                   </div>
                   <%= if @envelope.message do %>
                     <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
@@ -88,19 +94,26 @@ defmodule QuireWeb.SignerLive do
                 </div>
 
                 <div class="flex gap-3">
-                  <button type="button" phx-click="go_to_consent"
-                    class="flex-1 justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer">
+                  <button
+                    type="button"
+                    phx-click="go_to_consent"
+                    class="flex-1 justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer"
+                  >
                     Confirm and Continue
                   </button>
-                  <button type="button" phx-click="decline"
-                    class="flex-1 justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer">
+                  <button
+                    type="button"
+                    phx-click="decline"
+                    class="flex-1 justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer"
+                  >
                     This isn't me
                   </button>
                 </div>
-
               <% :consent -> %>
                 <h2 class="text-lg font-semibold mb-4">Consent to Electronic Signature</h2>
-                <p class="text-sm text-gray-500 mb-6">Please read the following disclosure before proceeding</p>
+                <p class="text-sm text-gray-500 mb-6">
+                  Please read the following disclosure before proceeding
+                </p>
 
                 <div class="mb-6 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-gray-600 dark:text-gray-400 space-y-3">
                   <p>
@@ -119,23 +132,33 @@ defmodule QuireWeb.SignerLive do
                 </div>
 
                 <div class="flex gap-3">
-                  <button type="button" phx-click="consent_and_review"
-                    class="flex-1 justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer">
+                  <button
+                    type="button"
+                    phx-click="consent_and_review"
+                    class="flex-1 justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer"
+                  >
                     I Consent &mdash; Review Document
                   </button>
-                  <button type="button" phx-click="decline"
-                    class="flex-1 justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer">
+                  <button
+                    type="button"
+                    phx-click="decline"
+                    class="flex-1 justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer"
+                  >
                     I Do Not Consent
                   </button>
                 </div>
-
               <% :review -> %>
                 <h2 class="text-lg font-semibold mb-4">Review Document</h2>
-                <p class="text-sm text-gray-500 mb-6">Review the document and required fields before signing</p>
+                <p class="text-sm text-gray-500 mb-6">
+                  Review the document and required fields before signing
+                </p>
 
                 <div class="mb-6">
-                  <a href={"/sign/#{@token}/document"} target="_blank"
-                    class="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors text-sm font-medium">
+                  <a
+                    href={"/sign/#{@token}/document"}
+                    target="_blank"
+                    class="inline-flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors text-sm font-medium"
+                  >
                     Open Document
                   </a>
                 </div>
@@ -143,12 +166,12 @@ defmodule QuireWeb.SignerLive do
                 <%= if @fields != [] do %>
                   <div class="mb-6">
                     <h4 class="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
-                      Required Fields (<%= Enum.count(@fields) %>)
+                      Required Fields ({Enum.count(@fields)})
                     </h4>
                     <div class="space-y-2">
                       <%= for field <- @fields do %>
                         <div class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                          <span>{field.type || "Signature"} &mdash; Page <%= field.page_index + 1 %></span>
+                          <span>{field.type || "Signature"} &mdash; Page {field.page_index + 1}</span>
                         </div>
                       <% end %>
                     </div>
@@ -156,27 +179,39 @@ defmodule QuireWeb.SignerLive do
                 <% end %>
 
                 <div class="flex gap-3">
-                  <button type="button" phx-click="proceed_to_sign"
-                    class="flex-1 justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer">
+                  <button
+                    type="button"
+                    phx-click="proceed_to_sign"
+                    class="flex-1 justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer"
+                  >
                     Proceed to Sign
                   </button>
-                  <button type="button" phx-click="decline"
-                    class="flex-1 justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer">
+                  <button
+                    type="button"
+                    phx-click="decline"
+                    class="flex-1 justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer"
+                  >
                     Decline to Sign
                   </button>
                 </div>
-
               <% :sign -> %>
                 <h2 class="text-lg font-semibold mb-4">Sign Document</h2>
 
                 <%= if @signing_successful do %>
-                  <p class="text-sm text-green-600 mb-4">Your signature has been applied successfully.</p>
-                  <button type="button" phx-click="view_receipt"
-                    class="w-full justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer">
+                  <p class="text-sm text-green-600 mb-4">
+                    Your signature has been applied successfully.
+                  </p>
+                  <button
+                    type="button"
+                    phx-click="view_receipt"
+                    class="w-full justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer"
+                  >
                     View Receipt
                   </button>
                 <% else %>
-                  <p class="text-sm text-gray-500 mb-6">Click below to apply your electronic signature.</p>
+                  <p class="text-sm text-gray-500 mb-6">
+                    Click below to apply your electronic signature.
+                  </p>
                   <div class="mb-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
                     <p class="text-sm text-amber-800 dark:text-amber-200">
                       By clicking "Sign", you agree that your electronic signature
@@ -184,21 +219,29 @@ defmodule QuireWeb.SignerLive do
                     </p>
                   </div>
                   <div class="space-y-3">
-                    <button type="button" phx-click="sign_document"
-                      class="w-full justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer">
+                    <button
+                      type="button"
+                      phx-click="sign_document"
+                      class="w-full justify-center inline-flex items-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors cursor-pointer"
+                    >
                       Sign
                     </button>
-                    <button type="button" phx-click="back_to_review"
-                      class="w-full justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer">
+                    <button
+                      type="button"
+                      phx-click="back_to_review"
+                      class="w-full justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800 cursor-pointer"
+                    >
                       Back to Review
                     </button>
-                    <button type="button" phx-click="decline"
-                      class="w-full justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-red-600 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-red-400 dark:hover:bg-gray-800 cursor-pointer">
+                    <button
+                      type="button"
+                      phx-click="decline"
+                      class="w-full justify-center inline-flex items-center rounded-lg border border-chrome-border px-4 py-2 text-sm font-medium text-red-600 hover:bg-gray-50 transition-colors dark:border-gray-600 dark:text-red-400 dark:hover:bg-gray-800 cursor-pointer"
+                    >
                       Decline to Sign
                     </button>
                   </div>
                 <% end %>
-
               <% :receipt -> %>
                 <div class="text-center py-6">
                   <%= if @declined do %>
@@ -206,7 +249,7 @@ defmodule QuireWeb.SignerLive do
                       Request Declined
                     </h2>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                      You have declined to sign "<%= @envelope.subject %>".
+                      You have declined to sign "{@envelope.subject}".
                       The sender has been notified.
                     </p>
                   <% else %>
@@ -214,7 +257,7 @@ defmodule QuireWeb.SignerLive do
                       Document Signed!
                     </h2>
                     <p class="text-sm text-gray-600 dark:text-gray-400 mb-6">
-                      Thank you, you have successfully signed "<%= @envelope.subject %>".
+                      Thank you, you have successfully signed "{@envelope.subject}".
                     </p>
                   <% end %>
                   <p class="text-xs text-gray-400 dark:text-gray-500">
@@ -236,6 +279,7 @@ defmodule QuireWeb.SignerLive do
       |> record_signer_viewed()
       |> assign(:step, :consent)
       |> assign(:error, nil)
+
     {:noreply, socket}
   end
 
@@ -264,6 +308,7 @@ defmodule QuireWeb.SignerLive do
          socket
          |> assign(:signing_successful, true)
          |> record_audit_event("signed")}
+
       {:error, reason} ->
         {:noreply, assign(socket, :error, "Unable to sign: #{format_error(reason)}")}
     end
@@ -285,6 +330,7 @@ defmodule QuireWeb.SignerLive do
          |> assign(:step, :receipt)
          |> assign(:declined, true)
          |> record_audit_event("declined")}
+
       {:error, reason} ->
         {:noreply, assign(socket, :error, "Unable to process request: #{format_error(reason)}")}
     end
@@ -300,6 +346,7 @@ defmodule QuireWeb.SignerLive do
 
   defp record_signer_viewed(socket) do
     %{signer: signer} = socket.assigns
+
     if signer.status == :pending do
       case Esign.record_signer_view(signer) do
         {:ok, updated} -> assign(socket, :signer, updated)
@@ -318,12 +365,18 @@ defmodule QuireWeb.SignerLive do
 
   defp format_error(:signer_not_viewed_yet), do: "Please view the document first."
   defp format_error(:envelope_not_sent), do: "The envelope has not been sent yet."
-  defp format_error(:envelope_already_completed), do: "This document has already been signed by all parties."
+
+  defp format_error(:envelope_already_completed),
+    do: "This document has already been signed by all parties."
+
   defp format_error(:envelope_declined), do: "This document has been declined."
   defp format_error(:envelope_voided), do: "This document has been voided."
   defp format_error(:envelope_expired), do: "This document has expired."
   defp format_error(:already_signed), do: "You have already signed this document."
   defp format_error(:already_declined), do: "You have already declined to sign this document."
-  defp format_error(:signer_out_of_order), do: "Please wait for the previous signer to sign first."
+
+  defp format_error(:signer_out_of_order),
+    do: "Please wait for the previous signer to sign first."
+
   defp format_error(reason), do: "An error occurred (#{inspect(reason)}). Please try again."
 end

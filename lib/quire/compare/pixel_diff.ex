@@ -70,15 +70,17 @@ defmodule Quire.Compare.PixelDiff do
             end
 
           page_result = diff_page(i, i, a, b)
+
           {[page_result | acc], diff_sum + page_result.diff_pixels,
            total_sum + page_result.total_pixels}
         end)
 
-      {:ok, %PixelDiff{
-        pages: Enum.reverse(page_diffs),
-        total_diff_pixels: total_diff,
-        total_pixels: total_all
-      }}
+      {:ok,
+       %PixelDiff{
+         pages: Enum.reverse(page_diffs),
+         total_diff_pixels: total_diff,
+         total_pixels: total_all
+       }}
     end
   end
 
@@ -137,10 +139,10 @@ defmodule Quire.Compare.PixelDiff do
 
   @doc false
   def compute_diff(%ExPdfium.Bitmap{data: a, width: w, height: h}, %ExPdfium.Bitmap{
-         data: b,
-         width: w,
-         height: h
-       }) do
+        data: b,
+        width: w,
+        height: h
+      }) do
     # Per-pixel comparison: zip aligned triplets via tail recursion.
     do_compute_diff(a, b, <<>>)
   end

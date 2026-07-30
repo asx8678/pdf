@@ -73,7 +73,9 @@ defmodule QuireWeb.WorkspaceLiveTest do
   describe "reset form (T-124)" do
     @reset_btn ~s{button[phx-click="reset_form"]}
 
-    test "reset button is visible in the Forms tab and disabled when no form fields", %{conn: conn} do
+    test "reset button is visible in the Forms tab and disabled when no form fields", %{
+      conn: conn
+    } do
       {:ok, lv, _html} = open_workspace(conn)
       select_tab(lv, "forms")
 

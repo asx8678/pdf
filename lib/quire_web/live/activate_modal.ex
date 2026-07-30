@@ -43,7 +43,8 @@ defmodule QuireWeb.ActivateModal do
 
         <!-- Current tier badge -->
         <div class="mb-4 px-3 py-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-xs text-gray-500 dark:text-gray-400">
-          Current plan: <span class="font-medium text-gray-700 dark:text-gray-200 capitalize">{@current_tier}</span>
+          Current plan:
+          <span class="font-medium text-gray-700 dark:text-gray-200 capitalize">{@current_tier}</span>
         </div>
 
         <.form

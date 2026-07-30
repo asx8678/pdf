@@ -26,7 +26,8 @@ defmodule Quire.Esign.AuditEventTest do
       envelope = insert_envelope(%{owner_id: user.id, document_id: doc.id})
       signer = insert_signer(envelope, %{})
 
-      assert {:ok, event} = Esign.record_audit_event(envelope, signer, "signer_viewed", %{"ip" => "127.0.0.1"})
+      assert {:ok, event} =
+               Esign.record_audit_event(envelope, signer, "signer_viewed", %{"ip" => "127.0.0.1"})
 
       assert event.event == "signer_viewed"
       assert event.envelope_id == envelope.id

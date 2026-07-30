@@ -12,16 +12,12 @@ defmodule Quire.Workers.TrialExpiryWorkerTest do
       assert :ok = TrialExpiryWorker.perform(%Oban.Job{args: %{}})
 
       remaining_trials =
-        Quire.Repo.one(
-          from(l in License, where: l.tier == "trial", select: count(l.id))
-        )
+        Quire.Repo.one(from(l in License, where: l.tier == "trial", select: count(l.id)))
 
       assert remaining_trials == 0
 
       standards =
-        Quire.Repo.one(
-          from(l in License, where: l.tier == "standard", select: count(l.id))
-        )
+        Quire.Repo.one(from(l in License, where: l.tier == "standard", select: count(l.id)))
 
       assert standards == 2
     end
@@ -33,9 +29,7 @@ defmodule Quire.Workers.TrialExpiryWorkerTest do
       assert :ok = TrialExpiryWorker.perform(%Oban.Job{args: %{}})
 
       remaining_trials =
-        Quire.Repo.one(
-          from(l in License, where: l.tier == "trial", select: count(l.id))
-        )
+        Quire.Repo.one(from(l in License, where: l.tier == "trial", select: count(l.id)))
 
       assert remaining_trials == 2
     end
@@ -46,9 +40,7 @@ defmodule Quire.Workers.TrialExpiryWorkerTest do
       assert :ok = TrialExpiryWorker.perform(%Oban.Job{args: %{}})
 
       premium =
-        Quire.Repo.one(
-          from(l in License, where: l.tier == "premium", select: count(l.id))
-        )
+        Quire.Repo.one(from(l in License, where: l.tier == "premium", select: count(l.id)))
 
       assert premium == 1
     end

@@ -29,10 +29,15 @@ defmodule Quire.Workers.EnvelopeExpiryWorker do
 
     Enum.each(expired_envelopes, fn envelope ->
       case Esign.expire_envelope(envelope) do
-        {:ok, _} -> :ok
+        {:ok, _} ->
+          :ok
+
         {:error, reason} ->
           require Logger
-          Logger.warning("EnvelopeExpiryWorker: failed to expire #{envelope.id}: #{inspect(reason)}")
+
+          Logger.warning(
+            "EnvelopeExpiryWorker: failed to expire #{envelope.id}: #{inspect(reason)}"
+          )
       end
     end)
 

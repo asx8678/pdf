@@ -28,7 +28,7 @@ defmodule QuireWeb.UserLive.ForgotPassword do
             phx-mounted={JS.focus()}
           />
           <.button class="w-full" disabled={@submitted}>
-            {@submitted && "Email sent" || "Send reset instructions"}
+            {(@submitted && "Email sent") || "Send reset instructions"}
           </.button>
         </.form>
 
@@ -51,11 +51,17 @@ defmodule QuireWeb.UserLive.ForgotPassword do
 
   @impl true
   def handle_event("send_reset", %{"user" => %{"email" => email}}, socket) do
-    Accounts.deliver_user_reset_password_instructions(email, &url(~p"/users/reset-password/#{&1}"))
+    Accounts.deliver_user_reset_password_instructions(
+      email,
+      &url(~p"/users/reset-password/#{&1}")
+    )
 
     {:noreply,
      socket
-     |> put_flash(:info, "If your email is in our system, you will receive reset instructions shortly.")
+     |> put_flash(
+       :info,
+       "If your email is in our system, you will receive reset instructions shortly."
+     )
      |> assign(:submitted, true)}
   end
 end
