@@ -57,6 +57,10 @@ config :quire, QuireWeb.Endpoint,
   pubsub_server: Quire.PubSub,
   live_view: [signing_salt: "kAfh3PPB"]
 
+# Chromium executable path for chromic_pdf (§3.6.6).
+# Override with CHROME_EXECUTABLE env var or per-environment config.
+config :chromic_pdf, chrome_executable: System.get_env("CHROME_EXECUTABLE") || "/usr/bin/chromium"
+
 # Configure LiveView
 config :phoenix_live_view,
   # the attribute set on all root tags. Used for Phoenix.LiveView.ColocatedCSS.

@@ -118,7 +118,8 @@ defmodule Quire.Engine do
     {"PAdES signing / validation", Quire.Pades},
     {"document encryption", Quire.SecurityHandler},
     {"PDF/A conversion", Quire.PdfA},
-    {"content-stream composition", Quire.Compose}
+    {"content-stream composition", Quire.Compose},
+    {"HTML/URL to PDF rendering", ChromicPDF}
   ]
 
   @nif_engines [
@@ -126,7 +127,8 @@ defmodule Quire.Engine do
   ]
 
   @optional_engines [
-    Quire.Ocr.Engine
+    Quire.Ocr.Engine,
+    ChromicPDF
   ]
 
   @doc false
