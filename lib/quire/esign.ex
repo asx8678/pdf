@@ -85,10 +85,10 @@ defmodule Quire.Esign do
   In sequential mode, only the lowest-ordered unsigned signer can access.
   """
   def can_signer_access?(envelope, signer) do
-    case envelope.signing_mode do
-      :parallel -> true
-      :sequential -> is_next_signer?(signer, list_signers(envelope))
-      nil -> true
+    if (envelope.signing_mode || :sequential) == :parallel do
+      true
+    else
+      is_next_signer?(signer, list_signers(envelope))
     end
   end
 
