@@ -43,6 +43,9 @@ config :quire, Quire.Vault,
 # Print only warnings and errors during test
 config :logger, level: :warning
 
+# Run Oban in testing mode — skip plugins and queues, allow inserting jobs
+config :quire, Oban, testing: :manual, plugins: false
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 
