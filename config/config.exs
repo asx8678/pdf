@@ -24,6 +24,7 @@ config :quire,
   ecto_repos: [Quire.Repo],
   generators: [timestamp_type: :utc_datetime, binary_id: true],
   storage_adapter: Quire.Storage.Web,
+  translation_provider: Quire.Translation.Provider.Null,
   storage_backend: Quire.Storage.Web.Filesystem,
   render_adapter: Quire.Render.Pdfium
 
