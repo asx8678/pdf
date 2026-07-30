@@ -13,6 +13,7 @@ defmodule Quire.Documents.Page do
     field :page_index, :integer
     field :width, :float
     field :height, :float
+    field :has_text, :boolean, default: false
     field :thumbnail_ref, :string
 
     timestamps(type: :utc_datetime)
@@ -24,6 +25,7 @@ defmodule Quire.Documents.Page do
           page_index: non_neg_integer(),
           width: float() | nil,
           height: float() | nil,
+          has_text: boolean() | nil,
           thumbnail_ref: String.t() | nil,
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil

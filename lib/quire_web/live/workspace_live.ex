@@ -22,6 +22,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.Rail, only: [rail: 1]
   import QuireWeb.Chrome.ShortcutsModal, only: [shortcuts_modal: 1]
   import QuireWeb.Chrome.StatusBar, only: [status_bar: 1]
+  import QuireWeb.Chrome.ThumbnailsPanel, only: [thumbnails_panel: 1]
   import QuireWeb.Chrome.TitleBar, only: [title_bar: 1]
   import QuireWeb.Shared.Modal, only: [modal: 1]
 
@@ -71,6 +72,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:right_panel, nil)
       |> assign(:page, 1)
       |> assign(:total_pages, doc_page_count)
+      |> assign(:thumbnails, [])
       |> assign(:zoom, 100)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
@@ -402,6 +404,23 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :page, page)}
   end
 
+  # Thumbnails panel (T-046) — clamp into range and push to the viewer
+  # hook so pdf.js scrolls to the page.
+  def handle_event("navigate_page", %{"page" => page}, socket) do
+    case Integer.parse(to_string(page)) do
+      {page, _} ->
+        page = page |> max(1) |> min(socket.assigns.total_pages)
+
+        {:noreply,
+         socket
+         |> assign(:page, page)
+         |> push_event("navigate_page", %{page: page})}
+
+      :error ->
+        {:noreply, socket}
+    end
+  end
+
   def handle_event("document_loaded", %{"page_count" => page_count}, socket) do
     {:noreply, assign(socket, :total_pages, page_count)}
   end
@@ -596,6 +615,8 @@ defmodule QuireWeb.WorkspaceLive do
 
   attr :side, :string, values: ["left", "right"], required: true
   attr :panel, :atom, required: true
+  attr :pages, :list, default: []
+  attr :page, :integer, default: 1
 
   defp side_panel(assigns) do
     ~H"""
@@ -619,9 +640,14 @@ defmodule QuireWeb.WorkspaceLive do
           <.icon name="hero-x-mark" class="size-4 text-gray-500 dark:text-gray-400" />
         </button>
       </div>
-      <div class="flex-1 overflow-y-auto p-4">
-        <p class="text-sm text-gray-400 dark:text-gray-500">{panel_hint(@panel)}</p>
-      </div>
+      <%= cond do %>
+        <% @panel == :thumbnails -> %>
+          <.thumbnails_panel pages={@pages} current_page={@page} />
+        <% true -> %>
+          <div class="flex-1 overflow-y-auto p-4">
+            <p class="text-sm text-gray-400 dark:text-gray-500">{panel_hint(@panel)}</p>
+          </div>
+      <% end %>
     </aside>
     """
   end

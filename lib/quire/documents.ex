@@ -242,10 +242,13 @@ defmodule Quire.Documents do
     Repo.insert_all(Quire.Documents.Page, rows)
   end
 
-  defp enqueue_post_ingest_jobs(_doc, _rev, _ref) do
-    # T-045: Thumbnail render job — enqueued via Oban here.
-    # T-Q59: Text‑layer probe job — enqueued via Oban here.
-    # Both are stubs until the workers exist.
+  defp enqueue_post_ingest_jobs(doc, rev, _ref) do
+    # Text-extraction worker — populates document_page_text and sets has_text.
+    %{revision_id: rev.id, document_id: doc.id}
+    |> Quire.Workers.TextExtractWorker.new([])
+    |> Oban.insert!()
+
+    # T-045: Thumbnail render worker — enqueued once it exists.
     :ok
   end
 
