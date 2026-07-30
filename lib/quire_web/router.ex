@@ -17,6 +17,14 @@ defmodule QuireWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # Full-viewport chrome shell (WorkspaceLive): suppresses the scaffold
+  # nav in the root layout so the workspace fills the screen.
+  pipeline :chrome_shell do
+    plug :put_chrome_shell
+  end
+
+  defp put_chrome_shell(conn, _opts), do: assign(conn, :chrome_shell, true)
+
   scope "/", QuireWeb do
     pipe_through :browser
 
@@ -57,6 +65,15 @@ defmodule QuireWeb.Router do
     end
 
     post "/users/update-password", UserSessionController, :update_password
+  end
+
+  scope "/", QuireWeb do
+    pipe_through [:browser, :require_authenticated_user, :chrome_shell]
+
+    live_session :workspace,
+      on_mount: [{QuireWeb.UserAuth, :require_authenticated}] do
+      live "/workspace/:id", WorkspaceLive, :show
+    end
   end
 
   scope "/", QuireWeb do

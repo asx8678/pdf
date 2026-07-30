@@ -25,7 +25,7 @@ defmodule QuireWeb.Chrome.ZoomControl do
       </button>
       <select
         aria-label="Zoom level"
-        class="w-20 text-sm text-center border border-chrome-border rounded px-1 py-0.5 bg-chrome-white text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-accent"
+        class="w-20 text-sm text-center border border-chrome-border dark:border-gray-600 rounded px-1 py-0.5 bg-chrome-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-accent"
       >
         <option :for={p <- @presets} value={p} selected={p == @zoom}>{p}%</option>
       </select>
