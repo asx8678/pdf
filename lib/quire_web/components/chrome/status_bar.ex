@@ -8,11 +8,13 @@ defmodule QuireWeb.Chrome.StatusBar do
   use Phoenix.Component
 
   import QuireWeb.Chrome.PageNavPill, only: [page_nav_pill: 1]
+  import QuireWeb.Chrome.RotateControl, only: [rotate_control: 1]
   import QuireWeb.Chrome.ZoomControl, only: [zoom_control: 1]
 
   attr :page, :integer, default: 1
   attr :total_pages, :integer, default: 1
   attr :zoom, :integer, default: 100
+  attr :rotation, :integer, default: 0
   attr :progress, :float, default: nil
   attr :progress_label, :string, default: nil
   attr :class, :string, default: nil
@@ -48,6 +50,8 @@ defmodule QuireWeb.Chrome.StatusBar do
         <div class="pr-3 border-r border-chrome-border dark:border-gray-600">
           <.page_nav_pill page={@page} total_pages={@total_pages} />
         </div>
+
+        <.rotate_control rotation={@rotation} />
 
         <.zoom_control zoom={@zoom} />
       </div>

@@ -49,4 +49,12 @@
 .chrome-document-tab { height: var(--spacing-document-tab); }
 .chrome-rail { width: var(--spacing-rail); }
 
+/* Fullscreen mode (T-052): hide chrome elements when workspace-shell gets .fullscreen-mode */
+.fullscreen-mode .chrome-titlebar,
+.fullscreen-mode .chrome-menubar,
+.fullscreen-mode .chrome-ribbon,
+.fullscreen-mode .chrome-document-tab {
+  display: none;
+}
+
 /* This file is for your main application CSS */

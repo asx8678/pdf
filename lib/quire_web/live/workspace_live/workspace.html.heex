@@ -7,6 +7,7 @@
     tabindex="-1"
     aria-label="Workspace"
     aria-hidden={@backstage_open}
+    class={if(@fullscreen, do: "fullscreen-mode")}
   >
     <.title_bar
       document_title={@document_title}
@@ -24,7 +25,12 @@
     <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
     <.document_tabs documents={@documents} active_id={@active_document_id} />
 
-    <div class="flex flex-1 min-h-0">
+    <div
+      class={[
+        "flex flex-1 min-h-0 transition-all duration-200",
+        if(@fullscreen, do: "fixed inset-0 z-50 bg-canvas dark:bg-gray-900")
+      ]}
+    >
       <.rail side="left" items={@left_items} on_item_click="toggle_panel" />
       <.side_panel
         :if={@left_panel}
@@ -63,6 +69,16 @@
           class="absolute inset-0 overflow-auto"
         >
         </div>
+
+        <button
+          :if={@fullscreen}
+          type="button"
+          phx-click="toggle_fullscreen"
+          class="absolute top-4 right-4 z-50 p-2 bg-chrome-bg/90 backdrop-blur border border-chrome-border rounded-full hover:bg-chrome-bg transition-colors shadow-lg"
+          aria-label="Exit fullscreen"
+        >
+          <.icon name="hero-arrows-pointing-in" class="size-4" />
+        </button>
       </main>
 
       <.side_panel
@@ -86,9 +102,11 @@
     </div>
 
     <.status_bar
+      :if={!@fullscreen}
       page={@page}
       total_pages={@total_pages}
       zoom={@zoom}
+      rotation={@rotation}
       progress={@progress}
     />
 

@@ -89,6 +89,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:search_whole_word, false)
       |> assign(:searching, false)
       |> assign(:zoom, 100)
+      |> assign(:fullscreen, false)
+      |> assign(:rotation, 0)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
@@ -262,6 +264,15 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :show_shortcuts, true)}
   end
 
+  # Ctrl/⌘+Shift+F — toggle fullscreen mode
+  def handle_event("keydown", %{"key" => "F"} = params, socket) do
+    if (params["ctrlKey"] || params["metaKey"]) && params["shiftKey"] do
+      {:noreply, assign(socket, :fullscreen, !socket.assigns.fullscreen)}
+    else
+      {:noreply, socket}
+    end
+  end
+
   # Esc — cancel/close: dismiss whichever modal is open
   def handle_event("keydown", %{"key" => "Escape"}, socket) do
     socket =
@@ -270,6 +281,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:confirm_close_doc, nil)
       |> assign(:backstage_open, false)
       |> assign(:backstage_view, nil)
+      |> assign(:fullscreen, false)
 
     {:noreply, socket}
   end
@@ -587,6 +599,25 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("toggle_panel", _params, socket), do: {:noreply, socket}
+
+  def handle_event("toggle_fullscreen", _params, socket) do
+    {:noreply, assign(socket, :fullscreen, !socket.assigns.fullscreen)}
+  end
+
+  def handle_event("rotate_cw", _params, socket) do
+    rotation = rem(socket.assigns.rotation + 90, 360)
+    {:noreply, assign(socket, :rotation, rotation) |> push_event("rotate", %{rotation: rotation})}
+  end
+
+  def handle_event("rotate_ccw", _params, socket) do
+    rotation = rem(socket.assigns.rotation - 90, 360)
+    rotation = if rotation < 0, do: rotation + 360, else: rotation
+    {:noreply, assign(socket, :rotation, rotation) |> push_event("rotate", %{rotation: rotation})}
+  end
+
+  def handle_event("reset_rotation", _params, socket) do
+    {:noreply, assign(socket, :rotation, 0) |> push_event("rotate", %{rotation: 0})}
+  end
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
