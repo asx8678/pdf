@@ -315,21 +315,9 @@ defmodule QuireWeb.UserLive.Settings do
       |> assign_tessdata_state()
       |> assign_totp_state()
       |> assign(:highlight_fields,
-        case Ecto.UUID.dump(user.id) do
-          {:ok, bin_id} ->
-            Quire.Repo.query!(
-              "SELECT highlight_fields FROM user_settings WHERE user_id = $1",
-              [bin_id]
-            )
-            |> (fn %{rows: rows} ->
-                  case rows do
-                    [] -> false
-                    [[val]] -> val
-                  end
-                end).()
-
-          :error ->
-            false
+        case Quire.Repo.get_by(Quire.Accounts.UserSetting, user_id: user.id) do
+          nil -> false
+          setting -> setting.highlight_fields
         end
       )
 
