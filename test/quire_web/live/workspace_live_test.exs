@@ -165,7 +165,8 @@ defmodule QuireWeb.WorkspaceLiveTest do
 
       for key <- ~w(PageUp PageDown Home End) do
         render_keydown(lv, "keydown", %{"key" => key})
-        assert has_element?(lv, "div[role='navigation'][aria-label='Page navigation']", "1 / 1")
+        assert has_element?(lv, "input[aria-label='Page number'][value='1']")
+        assert has_element?(lv, "span", "/ 1")
       end
     end
   end
@@ -228,7 +229,8 @@ defmodule QuireWeb.WorkspaceLiveTest do
 
       render_click(lv, "navigate_page", %{"page" => "1"})
 
-      assert has_element?(lv, "div[role='navigation'][aria-label='Page navigation']", "1 / 1")
+      assert has_element?(lv, "input[aria-label='Page number'][value='1']")
+      assert has_element?(lv, "span", "/ 1")
     end
   end
 
