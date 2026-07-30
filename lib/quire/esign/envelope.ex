@@ -16,6 +16,7 @@ defmodule Quire.Esign.Envelope do
     field :subject, :string
     field :message, :string
     field :status, Ecto.Enum, values: [:draft, :sent, :partially_signed, :completed, :declined, :voided, :expired]
+    field :signing_mode, Ecto.Enum, values: [:sequential, :parallel], default: :sequential
     field :expires_at, :utc_datetime
     field :sent_at, :utc_datetime
     field :completed_at, :utc_datetime
@@ -29,7 +30,7 @@ defmodule Quire.Esign.Envelope do
   @doc false
   def changeset(envelope, attrs) do
     envelope
-    |> cast(attrs, [:document_id, :owner_id, :subject, :message, :expires_at])
+    |> cast(attrs, [:document_id, :owner_id, :subject, :message, :expires_at, :signing_mode])
     |> validate_required([:document_id, :owner_id])
     |> validate_length(:subject, max: 255)
   end

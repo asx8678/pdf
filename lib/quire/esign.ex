@@ -60,6 +60,7 @@ defmodule Quire.Esign do
   """
   def sign_envelope(%Envelope{status: status} = envelope, %Signer{} = signer, attrs \\ %{}) do
     with :ok <- verify_signing_state(status, signer.status),
+         :ok <- verify_signing_order(signer, list_signers(envelope), envelope.signing_mode || :sequential),
          {:ok, updated_signer} <- do_sign_signer(signer, attrs),
          :ok <- maybe_complete_envelope(envelope, updated_signer) do
       {:ok, updated_signer}
@@ -76,6 +77,44 @@ defmodule Quire.Esign do
   defp verify_signing_state(_, :signed), do: {:error, :already_signed}
   defp verify_signing_state(_, :declined), do: {:error, :already_declined}
   defp verify_signing_state(_, _), do: {:error, :invalid_transition}
+
+  @doc """
+  Checks whether a signer's access token is active for the signing flow.
+
+  In parallel mode, all signers can access immediately.
+  In sequential mode, only the lowest-ordered unsigned signer can access.
+  """
+  def can_signer_access?(envelope, signer) do
+    case envelope.signing_mode do
+      :parallel -> true
+      :sequential -> is_next_signer?(signer, list_signers(envelope))
+      nil -> true
+    end
+  end
+
+  @doc """
+  Checks that the signer is allowed to sign based on the signing order.
+
+  Takes a list of all signers ordered by their `order` field.
+
+  In parallel mode, any signer may sign (no order restriction).
+  In sequential mode, only the lowest-ordered unsigned signer may sign.
+  """
+  def verify_signing_order(signer, signers, mode)
+
+  def verify_signing_order(_signer, _signers, :parallel), do: :ok
+  def verify_signing_order(signer, signers, :sequential) do
+    if is_next_signer?(signer, signers) do
+      :ok
+    else
+      {:error, :signer_out_of_order}
+    end
+  end
+
+  defp is_next_signer?(signer, signers) do
+    next = Enum.find(signers, fn s -> s.status not in [:signed, :declined] end)
+    next != nil and next.id == signer.id
+  end
 
   defp do_sign_signer(signer, attrs) do
     now = DateTime.utc_now(:second)
@@ -113,8 +152,13 @@ defmodule Quire.Esign do
   end
 
   defp get_unsigned_signers_count(envelope_id) do
-    Repo.count(
-      from(s in Signer, where: s.envelope_id == ^envelope_id and s.status not in [:signed, :declined])
+    import Ecto.Query
+
+    Repo.one!(
+      from(s in Signer,
+        where: s.envelope_id == ^envelope_id and s.status not in [:signed, :declined],
+        select: count(s.id)
+      )
     )
   end
 
