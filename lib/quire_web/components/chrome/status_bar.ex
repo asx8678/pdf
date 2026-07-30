@@ -19,6 +19,8 @@ defmodule QuireWeb.Chrome.StatusBar do
   attr :rotation, :integer, default: 0
   attr :split, :boolean, default: false
   attr :snapshot_active, :boolean, default: false
+  attr :read_aloud_active, :boolean, default: false
+  attr :read_aloud_playing, :boolean, default: false
   attr :progress, :float, default: nil
   attr :progress_label, :string, default: nil
   attr :class, :string, default: nil
@@ -58,6 +60,22 @@ defmodule QuireWeb.Chrome.StatusBar do
         <.rotate_control rotation={@rotation} />
 
         <.split_view split={@split} />
+
+        <button
+          type="button"
+          phx-click={if @read_aloud_active, do: "read_aloud_stop", else: "read_aloud_play"}
+          class={[
+            "p-1 rounded transition-colors",
+            if(@read_aloud_active,
+              do: "bg-accent/10 text-accent",
+              else: "hover:bg-gray-100 dark:hover:bg-gray-700"
+            )
+          ]}
+          aria-label={if @read_aloud_active, do: "Stop reading", else: "Read aloud"}
+          aria-pressed={@read_aloud_active}
+        >
+          <.icon name="hero-speaker-wave" class="size-3.5" />
+        </button>
 
         <button
           type="button"

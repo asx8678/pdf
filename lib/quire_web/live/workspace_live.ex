@@ -93,6 +93,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:rotation, 0)
       |> assign(:split_view, false)
       |> assign(:snapshot_active, false)
+      |> assign(:read_aloud_active, false)
+      |> assign(:read_aloud_playing, false)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
@@ -587,9 +589,30 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   def handle_event("snapshot_captured", %{"dataUrl" => _data_url}, socket) do
-    # Stub: clipboard and download handled on the client; future iterations
-    # may store to a server-side gallery or attach to the document.
     {:noreply, socket}
+  end
+
+  def handle_event("read_aloud_play", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:read_aloud_active, true)
+     |> assign(:read_aloud_playing, true)
+     |> push_event("read_aloud", %{action: "play", page: socket.assigns.page})}
+  end
+
+  def handle_event("read_aloud_pause", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:read_aloud_playing, false)
+     |> push_event("read_aloud", %{action: "pause"})}
+  end
+
+  def handle_event("read_aloud_stop", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:read_aloud_active, false)
+     |> assign(:read_aloud_playing, false)
+     |> push_event("read_aloud", %{action: "stop"})}
   end
 
   # ── Pre-existing event handlers ──────────────────────────────────────────
