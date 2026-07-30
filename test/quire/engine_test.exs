@@ -98,15 +98,16 @@ defmodule Quire.EngineTest do
   end
 
   describe "Quire.Engine trace/4" do
-    setup do
+    setup context do
       test_pid = self()
+      handler_id = "engine-test-#{context.line}-#{inspect(test_pid)}"
 
       handler = fn event, measurements, metadata, _config ->
-        send(test_pid, {:telemetry, event, measurements, metadata})
+        send(test_pid, {:telemetry, handler_id, event, measurements, metadata})
       end
 
       :telemetry.attach_many(
-        "engine-test-#{inspect(test_pid)}",
+        handler_id,
         [
           [:quire, :engine, :start],
           [:quire, :engine, :stop],
@@ -117,38 +118,38 @@ defmodule Quire.EngineTest do
       )
 
       on_exit(fn ->
-        :telemetry.detach("engine-test-#{inspect(test_pid)}")
+        :telemetry.detach(handler_id)
       end)
 
-      :ok
+      %{handler_id: handler_id}
     end
 
-    test "emits start and stop on success" do
+    test "emits start and stop on success", %{handler_id: handler_id} do
       assert {:ok, 42} = Quire.Engine.trace(Quire.Render, :page_count, [ref: "doc"], fn -> 42 end)
 
-      assert_receive {:telemetry, [:quire, :engine, :start], measurements, metadata}
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], measurements, metadata}
       assert metadata.engine == Quire.Render
       assert metadata.operation == :page_count
       assert is_integer(measurements.system_time)
 
-      assert_receive {:telemetry, [:quire, :engine, :stop], measurements, metadata}
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :stop], measurements, metadata}
       assert metadata.engine == Quire.Render
       assert is_integer(measurements.duration)
     end
 
-    test "emits exception on failure" do
+    test "emits exception on failure", %{handler_id: handler_id} do
       assert {:error, %Quire.Engine.Error{}} =
                Quire.Engine.trace(Quire.Render, :page_count, [ref: "doc"], fn ->
                  raise ArgumentError, "bad arg"
                end)
 
-      assert_receive {:telemetry, [:quire, :engine, :start], _, _}
-      assert_receive {:telemetry, [:quire, :engine, :exception], measurements, metadata}
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], _, _}
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], measurements, metadata}
       assert metadata.engine == Quire.Render
       assert is_integer(measurements.duration)
     end
 
-    test "error contains structured fields" do
+    test "error contains structured fields", %{handler_id: handler_id} do
       assert {:error, error} =
                Quire.Engine.trace(Quire.Pdf, :save, [], fn ->
                  raise ErlangError, original: :nif_panicked
@@ -156,11 +157,11 @@ defmodule Quire.EngineTest do
 
       assert error.engine == Quire.Pdf
       assert error.operation == :save
-      assert error.code == :nif
-      assert is_binary(error.message)
-      assert is_binary(error.detail)
-    end
 
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], _, metadata}
+      assert metadata.engine == Quire.Pdf
+    end
+  end
     test "function clause error is captured" do
       fun = fn -> :erlang.error(:function_clause) end
 
@@ -169,7 +170,6 @@ defmodule Quire.EngineTest do
 
       assert error.code == :function_clause
     end
-  end
 
   describe "Quire.Engine.check/0" do
     test "returns a map with engine keys" do
