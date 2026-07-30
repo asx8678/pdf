@@ -2541,6 +2541,52 @@ plus Office fixtures for the native converters: `report.docx`,
 
 Each phase's acceptance criteria MUST be exercised against the corpus.
 
+### 13.1 Authentication in LiveView tests
+
+`phx.gen.auth` added session-based authentication to every LiveView route.
+All workspace routes are behind a `live_session :authenticated` that
+redirects an unauthenticated mount to the login page. Writing a LiveView
+test without first creating a logged-in session will produce a 302 redirect
+instead of rendered HTML, and the test will fail on a missing
+`current_scope` assign.
+
+**Set up an authenticated session.** Use the
+`register_and_log_in_user/1` helper from
+`test/support/conn_case.ex` (automatically imported by `use QuireWeb.ConnCase`):
+
+```elixir
+defmodule QuireWeb.ExampleLiveTest do
+  use QuireWeb.ConnCase, async: true
+
+  setup :register_and_log_in_user
+
+  test "renders the workspace", %{conn: conn} do
+    {:ok, view, _html} = live(conn, ~p"/workspace/1")
+    assert has_element?(view, "#workspace-shell")
+  end
+end
+```
+
+`register_and_log_in_user` creates a `%Quire.Accounts.User{}` and
+`%Quire.Accounts.UserToken{}`, logs it into the test `conn`, and returns
+both in the test context. The conn is then ready for `Phoenix.LiveViewTest.live/3`.
+
+**Pass `current_scope` to `<Layouts.app>`.** All workspace templates wrap
+their content in `<Layouts.app flash={@flash} current_scope={@current_scope}>`.
+The layout uses `current_scope` to scope data queries and permissions.
+If the assign is missing the template will crash — it is set automatically
+for authenticated routes by the `fetch_current_scope` plug in the router's
+`live_session`.
+
+**Expected redirect.** An unauthenticated LiveView mount does not crash —
+it redirects to the login page. Test this explicitly for public-only routes:
+
+```elixir
+test "redirects unauthenticated users", %{conn: conn} do
+  assert {:error, {:redirect, %{to: "/log_in"}}} = live(conn, ~p"/workspace/1")
+end
+```
+
 ---
 
 ## 14. Performance and correctness budgets
