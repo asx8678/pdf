@@ -39,12 +39,42 @@ defmodule QuireWeb.UserLive.Settings do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="text-center">
-        <.header>
-          Account Settings
-          <:subtitle>Manage your account email address and password settings</:subtitle>
-        </.header>
+      <.header>
+        Settings
+        <:subtitle>Configure your preferences, account, and system</:subtitle>
+      </.header>
+
+      <!-- Tab bar -->
+      <div class="mt-6 border-b border-chrome-border dark:border-gray-700">
+        <nav class="-mb-px flex space-x-6 overflow-x-auto" role="tablist" aria-label="Settings tabs">
+          <button
+            :for={tab <- ~w(general editing ocr security privacy_translation connected_accounts keyboard_shortcuts about)}
+            role="tab"
+            type="button"
+            phx-click="switch_tab"
+            phx-value-tab={tab}
+            aria-selected={@active_tab == String.to_existing_atom(tab)}
+            class={[
+              "whitespace-nowrap pb-3 px-1 text-sm font-medium border-b-2 transition-colors cursor-pointer",
+              if(@active_tab == String.to_existing_atom(tab),
+                do: "border-accent text-accent",
+                else: "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:border-gray-300 dark:hover:border-gray-600"
+              )
+            ]}
+          >
+            {tab_title(tab)}
+          </button>
+        </nav>
       </div>
+
+      <!-- General tab -->
+      <div :if={@active_tab == :general} class="mt-6 space-y-8">
+        <div class="text-center">
+          <.header>
+            Account
+            <:subtitle>Manage your account email address and password</:subtitle>
+          </.header>
+        </div>
 
       <.form for={@email_form} id="email_form" phx-submit="update_email" phx-change="validate_email">
         <.input
@@ -95,11 +125,15 @@ defmodule QuireWeb.UserLive.Settings do
           Save Password
         </.button>
       </.form>
+      </div>
 
-      <hr class="my-8 border-chrome-border dark:border-gray-700" />
+      <!-- Editing tab -->
+      <div :if={@active_tab == :editing} class="mt-6 space-y-8">
+        <.header>
+          Editing
+          <:subtitle>Form field display, signature preferences, and editing defaults</:subtitle>
+        </.header>
 
-      <!-- Form & Sign settings -->
-      <div>
         <.header>
           Form &amp; Sign
           <:subtitle>Form field display and signature preferences</:subtitle>
@@ -131,12 +165,11 @@ defmodule QuireWeb.UserLive.Settings do
         </div>
       </div>
 
-      <hr class="my-8 border-chrome-border dark:border-gray-700" />
-
-      <div>
+      <!-- OCR tab -->
+      <div :if={@active_tab == :ocr} class="mt-6 space-y-8">
         <.header>
-          OCR Languages
-          <:subtitle>Manage downloaded language packs for text recognition</:subtitle>
+          OCR
+          <:subtitle>Manage downloaded language packs and OCR options</:subtitle>
         </.header>
 
         <div class="mt-4 space-y-4">
@@ -191,8 +224,14 @@ defmodule QuireWeb.UserLive.Settings do
             </button>
           </div>
         </div>
+      </div>
 
-        <hr class="my-8 border-chrome-border dark:border-gray-700" />
+      <!-- Security tab -->
+      <div :if={@active_tab == :security} class="mt-6 space-y-8">
+        <.header>
+          Security
+          <:subtitle>Authentication methods, privacy, and permissions</:subtitle>
+        </.header>
 
         <!-- TOTP Two-Factor Authentication (T-163) -->
         <div>
@@ -285,10 +324,153 @@ defmodule QuireWeb.UserLive.Settings do
         </div>
       </div>
 
-      <hr class="my-8 border-chrome-border dark:border-gray-700" />
+      <!-- Privacy & Translation tab -->
+      <div :if={@active_tab == :privacy_translation} class="mt-6 space-y-8">
+        <.header>
+          Privacy &amp; Translation
+          <:subtitle>Translation provider, data handling, and retention</:subtitle>
+        </.header>
 
-      <!-- About — Engine version table -->
-      <div>
+        <div class="mt-4 space-y-6">
+          <div class="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <h3 class="text-sm font-medium text-gray-700 dark:text-gray-200 mb-2">Translation Provider</h3>
+            <p class="text-sm text-gray-500 dark:text-gray-400">
+              Translation is powered by <strong>Provider.Null</strong> — no document content leaves your machine.
+              When a real provider is configured, this tab will show which provider is active, what data
+              is transmitted, and the retention policy for translated content.
+            </p>
+          </div>
+
+          <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700/40 rounded-lg">
+            <p class="text-sm text-blue-700 dark:text-blue-300">
+              <strong>Note:</strong> Translation is the only feature that sends document content to a third party.
+              The default provider is <strong>Provider.Null</strong> (no data sent). Change the provider above
+              to enable real translations. Review our privacy policy for details on data handling.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Connected Accounts tab -->
+      <div :if={@active_tab == :connected_accounts} class="mt-6 space-y-8">
+        <.header>
+          Connected Accounts
+          <:subtitle>Cloud storage and OAuth connections</:subtitle>
+        </.header>
+
+        <div class="mt-4 space-y-4">
+          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Google Drive</p>
+              <p class="text-xs text-gray-500 mt-1">Connect to access and store documents</p>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500 italic">Coming soon</span>
+          </div>
+          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Dropbox</p>
+              <p class="text-xs text-gray-500 mt-1">Connect to access and store documents</p>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500 italic">Coming soon</span>
+          </div>
+          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">OneDrive</p>
+              <p class="text-xs text-gray-500 mt-1">Connect to access and store documents</p>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500 italic">Coming soon</span>
+          </div>
+          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Box</p>
+              <p class="text-xs text-gray-500 mt-1">Connect to access and store documents</p>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500 italic">Coming soon</span>
+          </div>
+          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">S3 / WebDAV</p>
+              <p class="text-xs text-gray-500 mt-1">Manual configuration for custom storage backends</p>
+            </div>
+            <span class="text-xs text-gray-400 dark:text-gray-500 italic">Coming soon</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Keyboard Shortcuts tab -->
+      <div :if={@active_tab == :keyboard_shortcuts} class="mt-6 space-y-8">
+        <.header>
+          Keyboard Shortcuts
+          <:subtitle>Available shortcuts and key bindings</:subtitle>
+        </.header>
+
+        <div class="mt-4 overflow-hidden rounded-lg border border-chrome-border dark:border-gray-700">
+          <table class="min-w-full divide-y divide-chrome-border dark:divide-gray-700">
+            <thead class="bg-gray-50 dark:bg-gray-800/50">
+              <tr>
+                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Shortcut</th>
+                <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white dark:bg-gray-800/30 divide-y divide-chrome-border dark:divide-gray-700">
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘N</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">New document</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘O</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Open file</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘S</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Save</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘⇧S</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Save as</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘P</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Print</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘Z</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Undo</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘⇧Z</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Redo</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘F</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Find in document</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘+ / ⌘-</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Zoom in / out</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘0</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Reset zoom</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">Esc</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Cancel current tool / close modal</td>
+              </tr>
+              <tr>
+                <td class="px-4 py-2 text-sm font-mono text-gray-700 dark:text-gray-300"><kbd class="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-xs">⌘K</kbd></td>
+                <td class="px-4 py-2 text-sm text-gray-600 dark:text-gray-400">Toggle side panel</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-xs text-gray-400 dark:text-gray-500 mt-2">
+          These shortcuts apply to the main workspace. Some shortcuts may vary by platform.
+        </p>
+      </div>
+
+      <!-- About tab -->
+      <div :if={@active_tab == :about} class="mt-6 space-y-8">
         <.header>
           About
           <:subtitle>Component versions, engine status, and system information</:subtitle>
@@ -416,6 +598,7 @@ defmodule QuireWeb.UserLive.Settings do
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
+      |> assign(:active_tab, :general)
       |> assign_tessdata_state()
       |> assign_totp_state()
       |> assign(:highlight_fields,
@@ -438,6 +621,11 @@ defmodule QuireWeb.UserLive.Settings do
   @impl true
   def handle_info({:engine_check, result}, socket) do
     {:noreply, assign(socket, :engine_check, result)}
+  end
+
+  @impl true
+  def handle_event("switch_tab", %{"tab" => tab}, socket) do
+    {:noreply, assign(socket, :active_tab, String.to_existing_atom(tab))}
   end
 
   @impl true
@@ -654,4 +842,14 @@ defmodule QuireWeb.UserLive.Settings do
   defp engine_state(info) do
     info[:state] || :unavailable
   end
+
+  defp tab_title("general"), do: "General"
+  defp tab_title("editing"), do: "Editing"
+  defp tab_title("ocr"), do: "OCR"
+  defp tab_title("security"), do: "Security"
+  defp tab_title("privacy_translation"), do: "Privacy & Translation"
+  defp tab_title("connected_accounts"), do: "Connected Accounts"
+  defp tab_title("keyboard_shortcuts"), do: "Keyboard Shortcuts"
+  defp tab_title("about"), do: "About"
+  defp tab_title(tab), do: String.capitalize(tab)
 end
