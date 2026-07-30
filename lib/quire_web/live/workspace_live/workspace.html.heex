@@ -30,10 +30,23 @@
 
       <main
         id="document-canvas"
-        class="flex-1 min-w-0 flex items-center justify-center"
+        phx-hook="PdfViewerHook"
+        data-document-url={@document_url}
+        class="flex-1 min-w-0 relative overflow-hidden bg-canvas dark:bg-gray-900"
         aria-label="Document canvas"
+        tabindex="0"
       >
-        <.no_document_placeholder />
+        <div
+          :if={!@document_url}
+          class="absolute inset-0 flex items-center justify-center"
+        >
+          <.no_document_placeholder />
+        </div>
+        <div
+          id="pdf-viewer-container"
+          class="absolute inset-0 overflow-auto"
+        >
+        </div>
       </main>
 
       <.side_panel :if={@right_panel} side="right" panel={@right_panel} />

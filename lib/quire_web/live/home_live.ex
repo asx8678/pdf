@@ -95,6 +95,13 @@ defmodule QuireWeb.HomeLive do
       |> assign(:sort_by, "last_opened")
       |> assign(:view_mode, "grid")
       |> assign(:recent_docs, [])
+      |> assign(:uploading, false)
+      |> assign(:open_error, nil)
+      |> assign(:show_password_prompt, false)
+      |> assign(:pending_bytes, nil)
+      |> assign(:pending_title, nil)
+      |> assign(:password_form, to_form(%{}))
+      |> allow_upload(:pdf, accept: ~w(.pdf), max_entries: 1, max_file_size: 500_000_000)
 
     {:ok, socket}
   end
@@ -114,9 +121,20 @@ defmodule QuireWeb.HomeLive do
             <.tile_card
               :for={tile <- visible_tiles(@tiles, @hidden_tiles)}
               tile={tile}
-              on_click={tile.id == "customize" && "open_customize"}
+              on_click={
+                cond do
+                  tile.id == "open" -> "open_pdf"
+                  tile.id == "customize" -> "open_customize"
+                  true -> nil
+                end
+              }
             />
           </div>
+
+          <%!-- Hidden upload form triggered by the Open PDF tile --%>
+          <form id="pdf-upload-form" phx-submit="upload" class="hidden" phx-hook=".FileTrigger">
+            <.live_file_input upload={@uploads.pdf} id="pdf-upload-input" accept=".pdf" />
+          </form>
         </div>
 
         <!-- Right: Recent panel -->
@@ -142,12 +160,31 @@ defmodule QuireWeb.HomeLive do
         </button>
       </div>
 
+      <.password_prompt_modal
+        :if={@show_password_prompt}
+        on_submit="submit_password"
+        on_cancel="cancel_password"
+        form={@password_form}
+      />
+
       <.customize_modal
         :if={@show_customize}
         tiles={@tiles}
         hidden_tiles={@hidden_tiles}
         on_close="close_customize"
       />
+
+      <script :type={Phoenix.LiveView.ColocatedHook} name=".FileTrigger">
+        export default {
+          mounted() {
+            this.handleEvent("trigger_file_picker", () => {
+              // Find the live_file_input inside the hidden upload form
+              const input = document.getElementById("pdf-upload-input");
+              if (input) input.click();
+            });
+          }
+        }
+      </script>
     </Layouts.app>
     """
   end
@@ -155,6 +192,12 @@ defmodule QuireWeb.HomeLive do
   # ── Event handlers ────────────────────────────────────────────────────────
 
   @impl true
+  def handle_event("open_pdf", _params, socket) do
+    # Push event to the .FileTrigger colocated hook, which clicks the
+    # hidden live_file_input and opens the native file picker.
+    {:noreply, push_event(socket, "trigger_file_picker", %{})}
+  end
+
   def handle_event("open_customize", _params, socket) do
     {:noreply, assign(socket, :show_customize, true)}
   end
@@ -181,6 +224,102 @@ defmodule QuireWeb.HomeLive do
 
   def handle_event("set_view_mode", %{"mode" => mode}, socket) when mode in ["grid", "list"] do
     {:noreply, assign(socket, :view_mode, mode)}
+  end
+
+  @impl true
+  def handle_event("upload", _params, socket) do
+    # Consume the uploaded file and run the ingest pipeline.
+    # Phoenix.LiveView calls this when the upload-submit form fires;
+    # we read the file from the temp path and feed it through ingest.
+    [%{meta: %{name: name}, bytes: pdf_bytes}] =
+      consume_uploaded_entries(socket, :pdf, fn meta, entry ->
+        %{meta: meta, bytes: File.read!(entry.path)}
+      end)
+
+    title = name
+
+    socket =
+      socket
+      |> assign(:uploading, true)
+      |> assign(:open_error, nil)
+
+    case Quire.Documents.ingest(pdf_bytes, socket.assigns.current_scope, title: title) do
+      {:ok, %{document: doc, document_url: _url}} ->
+        socket =
+          socket
+          |> assign(:uploading, false)
+          |> put_flash(:info, "Opening #{doc.title}")
+
+        {:noreply, push_navigate(socket, to: ~p"/workspace/#{doc.id}")}
+
+      {:error, :password_required} ->
+        {:noreply,
+         socket
+         |> assign(:uploading, false)
+         |> assign(:show_password_prompt, true)
+         |> assign(:pending_bytes, pdf_bytes)
+         |> assign(:pending_title, title)}
+
+      {:error, :invalid_pdf} ->
+        {:noreply,
+         socket
+         |> assign(:uploading, false)
+         |> put_flash(:error, "The file is not a valid PDF")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:uploading, false)
+         |> put_flash(:error, "Failed to open document: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("submit_password", %{"password" => password}, socket) do
+    if bytes = socket.assigns.pending_bytes do
+      title = socket.assigns.pending_title || "Untitled"
+
+      case Quire.Documents.open_with_password(bytes, password, socket.assigns.current_scope,
+             title: title
+           ) do
+        {:ok, %{document: doc, document_url: _url}} ->
+          {:noreply,
+           socket
+           |> assign(:show_password_prompt, false)
+           |> assign(:pending_bytes, nil)
+           |> assign(:pending_title, nil)
+           |> put_flash(:info, "Opening #{doc.title}")
+           |> push_navigate(to: ~p"/workspace/#{doc.id}")}
+
+        {:error, :not_implemented} ->
+          {:noreply,
+           socket
+           |> assign(:show_password_prompt, false)
+           |> assign(:pending_bytes, nil)
+           |> assign(:pending_title, nil)
+           |> put_flash(:error, "Password-protected PDF support is not yet available")}
+
+        {:error, :wrong_password} ->
+          {:noreply, put_flash(socket, :error, "Incorrect password. Please try again.")}
+
+        {:error, reason} ->
+          {:noreply,
+           socket
+           |> assign(:show_password_prompt, false)
+           |> assign(:pending_bytes, nil)
+           |> assign(:pending_title, nil)
+           |> put_flash(:error, "Failed to open document: #{inspect(reason)}")}
+      end
+    else
+      {:noreply, assign(socket, :show_password_prompt, false)}
+    end
+  end
+
+  def handle_event("cancel_password", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_password_prompt, false)
+     |> assign(:pending_bytes, nil)
+     |> assign(:pending_title, nil)}
   end
 
   def handle_event("clear_recent", _params, socket) do
@@ -296,6 +435,39 @@ defmodule QuireWeb.HomeLive do
         class="mb-2"
       />
     </div>
+    """
+  end
+
+  attr :on_submit, :string, required: true
+  attr :on_cancel, :string, required: true
+  attr :form, :any, required: true
+
+  defp password_prompt_modal(assigns) do
+    ~H"""
+    <.modal title="Password required" on_close={@on_cancel} open={true}>
+      <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        This PDF is encrypted. Enter the document password to open it.
+      </p>
+      <.form
+        for={@form}
+        id="password-form"
+        phx-submit={@on_submit}
+        class="space-y-4"
+      >
+        <.input
+          field={@form[:password]}
+          type="password"
+          label="Password"
+          placeholder="Enter document password"
+          required
+          autocomplete="off"
+        />
+        <div class="flex justify-end gap-2">
+          <.button type="submit" variant="primary">Open</.button>
+          <.button type="button" phx-click={@on_cancel} variant="outline">Cancel</.button>
+        </div>
+      </.form>
+    </.modal>
     """
   end
 

@@ -79,12 +79,12 @@ defmodule QuireWeb.DocumentController do
     end
   end
 
-  defp serve_full(conn, ref, etag, content_type, size) do
+  defp serve_full(conn, ref, etag, content_type, _size) do
     conn
     |> put_resp_header("etag", etag)
     |> put_resp_header("accept-ranges", "bytes")
     |> put_resp_content_type(content_type)
-    |> stream_as_chunks(Storage.stream(ref), 200)
+    |> stream_ok(Storage.stream(ref))
   end
 
   defp serve_range(conn, ref, etag, content_type, size, start, end_) do
@@ -96,14 +96,13 @@ defmodule QuireWeb.DocumentController do
     |> put_resp_header("content-range", "bytes #{start}-#{end_}/#{size}")
     |> put_resp_content_type(content_type)
     |> put_resp_header("content-length", Integer.to_string(content_length))
-    |> stream_as_chunks(range_stream(ref, start, end_), 206)
+    |> stream_partial(range_stream(ref, start, end_))
   end
 
   # ── Chunked streaming ──────────────────────────────────────────────────
 
-
-
   # Stream an enumerable as chunked transfer encoding with HTTP 200.
+  @spec stream_ok(Plug.Conn.t(), Enumerable.t()) :: Plug.Conn.t()
   defp stream_ok(conn, enumerable) do
     {:ok, conn} = Plug.Conn.send_chunked(conn, 200)
 
@@ -116,6 +115,7 @@ defmodule QuireWeb.DocumentController do
   end
 
   # Stream an enumerable as chunked transfer encoding with HTTP 206.
+  @spec stream_partial(Plug.Conn.t(), Enumerable.t()) :: Plug.Conn.t()
   defp stream_partial(conn, enumerable) do
     {:ok, conn} = Plug.Conn.send_chunked(conn, 206)
 
@@ -196,7 +196,8 @@ defmodule QuireWeb.DocumentController do
 
   defp parse_range(_, _size), do: {:error, :invalid_range}
 
-  defp not_found(conn), do: conn |> put_status(:not_found) |> json(%{error: "not_found"}) |> halt()
+  defp not_found(conn),
+    do: conn |> put_status(:not_found) |> json(%{error: "not_found"}) |> halt()
 
   defp forbidden(conn),
     do: conn |> put_status(:forbidden) |> json(%{error: "forbidden"}) |> halt()

@@ -43,12 +43,25 @@ defmodule QuireWeb.WorkspaceLive do
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
-    initial_doc = %{id: id, title: "Document #{id}", dirty: false, path: nil}
+    scope = socket.assigns.current_scope
+    document_url = "/documents/" <> id <> "/pdf"
+
+    {doc_title, doc_page_count} =
+      case Quire.Documents.get_document(id, scope) do
+        {:ok, doc} ->
+          {doc.title, doc.page_count}
+
+        _ ->
+          {"Unknown document", 1}
+      end
+
+    initial_doc = %{id: id, title: doc_title, dirty: false, path: nil}
 
     socket =
       socket
       |> assign(:page_title, "Workspace")
-      |> assign(:document_title, "Document #{id}")
+      |> assign(:document_title, doc_title)
+      |> assign(:document_url, document_url)
       |> assign(:documents, [initial_doc])
       |> assign(:active_document_id, id)
       |> assign(:confirm_close_doc, nil)
@@ -57,7 +70,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:left_panel, nil)
       |> assign(:right_panel, nil)
       |> assign(:page, 1)
-      |> assign(:total_pages, 1)
+      |> assign(:total_pages, doc_page_count)
       |> assign(:zoom, 100)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
@@ -380,6 +393,34 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("send_email", _params, socket) do
     # T-198: Send via Swoosh; for Phase 1, just close the modal
     {:noreply, assign(socket, :show_email_compose, false)}
+  end
+
+  # ── PdfViewerHook event handlers (T-042) ────────────────────────────────
+
+  @impl true
+  def handle_event("page_changed", %{"page" => page}, socket) do
+    {:noreply, assign(socket, :page, page)}
+  end
+
+  def handle_event("document_loaded", %{"page_count" => page_count}, socket) do
+    {:noreply, assign(socket, :total_pages, page_count)}
+  end
+
+  def handle_event("document_ready", %{"total_pages" => total_pages} = params, socket) do
+    page = Map.get(params, "current_page", 1)
+    {:noreply, assign(socket, :total_pages, total_pages) |> assign(:page, page)}
+  end
+
+  def handle_event("zoom_changed", %{"zoom" => zoom}, socket) do
+    {:noreply, assign(socket, :zoom, zoom)}
+  end
+
+  def handle_event("document_error", %{"message" => msg}, socket) do
+    {:noreply, put_flash(socket, :error, "Document error: #{msg}")}
+  end
+
+  def handle_event("document_error", _params, socket) do
+    {:noreply, put_flash(socket, :error, "An unknown document error occurred")}
   end
 
   # ── Pre-existing event handlers ──────────────────────────────────────────
