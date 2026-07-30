@@ -225,7 +225,41 @@ defmodule Quire.FormData do
   end
 
   @doc """
-  Write field values to a PDF and regenerate appearances.
+  Read default field values from a PDF by walking the AcroForm field tree and
+  collecting `/DV` entries.
+
+  Returns `{:ok, %{name => default_value}}`. Fields without a `/DV` default are
+  omitted from the map.
+  """
+  @spec read_defaults(binary()) :: {:ok, map()} | {:error, term()}
+  def read_defaults(pdf_binary) when is_binary(pdf_binary) do
+    with {:ok, qdoc} <- Pdf.open(pdf_binary) do
+      defaults = collect_defaults(qdoc)
+      {:ok, defaults}
+    end
+  end
+
+  @doc """
+  Reset all form fields to their default values.
+
+  Equivalent to `read_defaults/1` + `write/3`, wrapped in a single call.
+  Pass `flatten: true` to flatten after resetting.
+
+  Returns `{:ok, updated_pdf_binary}`.
+  """
+  @spec reset(binary(), keyword()) :: {:ok, binary()} | {:error, term()}
+  def reset(pdf_binary, opts \\ []) when is_binary(pdf_binary) do
+    with {:ok, defaults} <- read_defaults(pdf_binary) do
+      if defaults == %{} do
+        {:ok, pdf_binary}
+      else
+        write(pdf_binary, defaults, opts)
+      end
+    end
+  end
+
+  @doc """
+  Write form field values to a PDF and regenerate appearances.
 
   Options:
     * `:flatten` — if `true`, flatten document after writing (default `false`).
@@ -306,6 +340,48 @@ defmodule Quire.FormData do
       end
     end
   end
+
+  defp collect_defaults(qdoc) do
+    with {:ok, field_refs} <- fetch_field_refs(qdoc) do
+      walk_defaults(qdoc, field_refs, %{})
+    end
+  end
+
+  defp walk_defaults(_qdoc, [], acc), do: acc
+
+  defp walk_defaults(qdoc, [{:ref, num, gen} | rest], acc) do
+    case Pdf.get_object(qdoc, {num, gen}) do
+      {:ok, field} when is_map(field) ->
+        kids = Map.get(field, "/Kids", [])
+        has_ft = Map.has_key?(field, "/FT")
+
+        acc =
+          if has_ft and Map.has_key?(field, "/T") and Map.has_key?(field, "/DV") do
+            name = Map.get(field, "/T")
+            dv = field["/DV"]
+            value = normalize_default(dv)
+            if value != nil, do: Map.put(acc, name, value), else: acc
+          else
+            acc
+          end
+
+        walk_defaults(qdoc, List.wrap(kids) ++ rest, acc)
+
+      _ ->
+        walk_defaults(qdoc, rest, acc)
+    end
+  end
+
+  defp walk_defaults(qdoc, [_non_ref | rest], acc) do
+    walk_defaults(qdoc, rest, acc)
+  end
+
+  defp normalize_default(nil), do: nil
+  defp normalize_default(b) when is_binary(b), do: b
+  defp normalize_default(true), do: "Yes"
+  defp normalize_default(false), do: "Off"
+  defp normalize_default({:name, n}), do: n
+  defp normalize_default(_), do: nil
 
   defp walk_and_set(_qdoc, [], _values), do: :ok
 
