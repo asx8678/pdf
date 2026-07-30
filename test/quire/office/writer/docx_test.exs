@@ -34,7 +34,7 @@ defmodule Quire.Office.Writer.DocxTest do
     test "renders a paragraph" do
       layout =
         Layout.new()
-        |> add_section(page: [paragraph: "Hello World"])
+        |> add_section(paragraph: "Hello World")
 
       doc_xml = extract_document_xml(layout)
       assert doc_xml =~ "Hello World"
@@ -110,8 +110,8 @@ defmodule Quire.Office.Writer.DocxTest do
     test "renders multiple sections" do
       layout =
         Layout.new()
-        |> add_section(page: [paragraph: "Page 1"])
-        |> add_section(page: [paragraph: "Page 2"])
+        |> add_section(paragraph: "Page 1")
+        |> add_section(paragraph: "Page 2")
 
       doc_xml = extract_document_xml(layout)
       assert doc_xml =~ "Page 1"
