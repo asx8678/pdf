@@ -7,7 +7,7 @@
     "frontendDist": "../priv/static",
     "devUrl": "http://localhost:4000",
     "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "cd .. && MIX_ENV=prod mix release --path src-tauri/target/rel"
   },
   "app": {
     "windows": [
@@ -35,6 +35,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": []
+    "resources": ["target/rel/**"]
   }
 }
