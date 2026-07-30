@@ -274,41 +274,14 @@ defmodule QuireWeb.HomeLive do
     end
   end
 
-  def handle_event("submit_password", %{"password" => password}, socket) do
-    if bytes = socket.assigns.pending_bytes do
-      title = socket.assigns.pending_title || "Untitled"
-
-      case Quire.Documents.open_with_password(bytes, password, socket.assigns.current_scope,
-             title: title
-           ) do
-        {:ok, %{document: doc, document_url: _url}} ->
-          {:noreply,
-           socket
-           |> assign(:show_password_prompt, false)
-           |> assign(:pending_bytes, nil)
-           |> assign(:pending_title, nil)
-           |> put_flash(:info, "Opening #{doc.title}")
-           |> push_navigate(to: ~p"/workspace/#{doc.id}")}
-
-        {:error, :not_implemented} ->
-          {:noreply,
-           socket
-           |> assign(:show_password_prompt, false)
-           |> assign(:pending_bytes, nil)
-           |> assign(:pending_title, nil)
-           |> put_flash(:error, "Password-protected PDF support is not yet available")}
-
-        {:error, :wrong_password} ->
-          {:noreply, put_flash(socket, :error, "Incorrect password. Please try again.")}
-
-        {:error, reason} ->
-          {:noreply,
-           socket
-           |> assign(:show_password_prompt, false)
-           |> assign(:pending_bytes, nil)
-           |> assign(:pending_title, nil)
-           |> put_flash(:error, "Failed to open document: #{inspect(reason)}")}
-      end
+  def handle_event("submit_password", _params, socket) do
+    if socket.assigns.pending_bytes do
+      {:noreply,
+       socket
+       |> assign(:show_password_prompt, false)
+       |> assign(:pending_bytes, nil)
+       |> assign(:pending_title, nil)
+       |> put_flash(:error, "Password-protected PDF support is not yet available")}
     else
       {:noreply, assign(socket, :show_password_prompt, false)}
     end

@@ -104,7 +104,7 @@ defmodule QuireWeb.DocumentController do
   # Stream an enumerable as chunked transfer encoding with HTTP 200.
   @spec stream_ok(Plug.Conn.t(), Enumerable.t()) :: Plug.Conn.t()
   defp stream_ok(conn, enumerable) do
-    {:ok, conn} = Plug.Conn.send_chunked(conn, 200)
+    conn = begin_chunked(conn, 200)
 
     Enum.reduce_while(enumerable, conn, fn chunk, conn ->
       case Plug.Conn.chunk(conn, chunk) do
@@ -117,7 +117,7 @@ defmodule QuireWeb.DocumentController do
   # Stream an enumerable as chunked transfer encoding with HTTP 206.
   @spec stream_partial(Plug.Conn.t(), Enumerable.t()) :: Plug.Conn.t()
   defp stream_partial(conn, enumerable) do
-    {:ok, conn} = Plug.Conn.send_chunked(conn, 206)
+    conn = begin_chunked(conn, 206)
 
     Enum.reduce_while(enumerable, conn, fn chunk, conn ->
       case Plug.Conn.chunk(conn, chunk) do
@@ -161,6 +161,17 @@ defmodule QuireWeb.DocumentController do
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────
+
+  # Wraps Plug.Conn.send_chunked to work around Elixir 1.20's gradual type
+  # checker — it cannot see that send_chunked promotes conn.state from :set to
+  # :chunked, producing a false `pattern will never match` warning.
+  defp begin_chunked(conn, status) do
+    # send_chunked always returns {:ok, conn}. Use send_chunked via
+    # apply/3 + elem/2 to avoid Elixir 1.20's gradual type checker false
+    # positive on the conn.state transition from :set to :chunked.
+    {:ok, conn} = :erlang.apply(Plug.Conn, :send_chunked, [conn, status])
+    conn
+  end
 
   defp etag_for(doc) do
     ts = DateTime.to_unix(doc.updated_at)
