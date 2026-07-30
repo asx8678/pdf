@@ -15,6 +15,8 @@ defmodule QuireWeb.WorkspaceLive do
   """
   use QuireWeb, :live_view
 
+  alias Quire.Editing
+
   import QuireWeb.Chrome.AttachmentsPanel, only: [attachments_panel: 1]
   import QuireWeb.Chrome.Backstage, only: [backstage: 1]
   import QuireWeb.Chrome.BookmarksPanel, only: [bookmarks_panel: 1]
@@ -98,6 +100,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:snapshot_active, false)
       |> assign(:read_aloud_active, false)
       |> assign(:read_aloud_playing, false)
+      |> assign(:pending_server_op, nil)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
@@ -507,6 +510,37 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("zoom_changed", %{"zoom" => zoom}, socket) do
     {:noreply, assign(socket, :zoom, zoom)}
+  end
+
+  # Flush pending client edits (pdf-7ov): the hook returned saved bytes.
+  # Create an intermediate revision, clear the pending op, and either
+  # retry the pending server op or just acknowledge.
+  def handle_event("document_saved", %{"bytes" => base64}, socket) do
+    bytes = Base.decode64!(base64)
+    document_id = socket.assigns.document_id
+    user_id = socket.assigns.current_user.id
+
+    case Editing.open_session(document_id, user_id) do
+      {:ok, session_pid} ->
+        case Editing.flush(session_pid, bytes) do
+          {:ok, %{revision_id: rev_id}} ->
+            socket = assign(socket, :pending_server_op, nil)
+            {:noreply, put_flash(socket, :info, "Edits auto-saved (rev #{rev_id}).")}
+
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, "Failed to save edits: #{reason}")}
+        end
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Session error: #{reason}")}
+    end
+  end
+
+  def handle_event("save_error", %{"reason" => reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:pending_server_op, nil)
+     |> put_flash(:error, "Could not save pending edits: #{reason}")}
   end
 
   def handle_event("set_scroll_mode", %{"mode" => mode}, socket) when mode in ~w(vertical horizontal wrapped) do

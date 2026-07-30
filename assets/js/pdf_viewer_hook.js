@@ -102,6 +102,29 @@ const PdfViewerHook = {
       }, 150);
     }, { passive: false });
 
+    // Flush pending client edits (pdf-7ov): save modified PDF bytes
+    // and push the result back so the server can create an intermediate
+    // revision before applying a server-side op.
+    this.handleEvent("request_save", async () => {
+      if (!this._pdfDocument) {
+        this.pushEvent("save_error", { reason: "no_document" });
+        return;
+      }
+      try {
+        const data = await this._pdfDocument.saveDocument();
+        const bytes = new Uint8Array(data);
+        // Convert to base64 for the LiveView wire
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+        this.pushEvent("document_saved", { bytes: base64, byte_size: bytes.length });
+      } catch (err) {
+        this.pushEvent("save_error", { reason: err.message || "save_failed" });
+      }
+    });
+
     // Search panel (T-048) — run the find controller with the panel's
     // query and options; matches are highlighted in the text layer.
     this.handleEvent("find", ({ query, match_case, whole_word }) => {
