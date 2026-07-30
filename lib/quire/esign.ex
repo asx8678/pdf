@@ -44,6 +44,25 @@ defmodule Quire.Esign do
 
     case Repo.update(changeset) do
       {:ok, updated} ->
+        # Generate access tokens for all pending signers
+        signers = list_signers(updated)
+
+        Enum.each(signers, fn signer ->
+          if is_nil(signer.access_token) do
+            token = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+            case signer
+                 |> Signer.changeset(%{})
+                 |> Ecto.Changeset.put_change(:access_token, token)
+                 |> Repo.update() do
+              {:ok, _} -> :ok
+              {:error, changeset} ->
+                require Logger
+                Logger.warning("Failed to generate access token for signer #{signer.id}: #{inspect(changeset.errors)}")
+            end
+          end
+        end)
+
         record_audit_event(updated, "envelope_sent", %{})
         {:ok, updated}
 
@@ -301,6 +320,18 @@ defmodule Quire.Esign do
   """
   def get_envelope!(id) do
     Repo.get!(Envelope, id)
+  end
+
+  @doc """
+  Finds a signer by their access token.
+
+  Returns `{:ok, %Signer{}}` or `{:error, :not_found}`.
+  """
+  def get_signer_by_token(token) when is_binary(token) do
+    case Repo.get_by(Signer, access_token: token) do
+      nil -> {:error, :not_found}
+      signer -> {:ok, signer}
+    end
   end
 
   @doc """

@@ -101,5 +101,14 @@ defmodule QuireWeb.Router do
     get "/users/log-in/totp/complete", UserSessionController, :totp_complete
     post "/users/log-in", UserSessionController, :create
     delete "/users/log-out", UserSessionController, :delete
+
+    # Public signer routes (§9.9) — outside authentication, uses token
+    # for authorization instead of user session
+    live_session :signer,
+      root_layout: {QuireWeb.Layouts, :root} do
+      live "/sign/:token", SignerLive, :sign
+    end
+
+    get "/sign/:token/document", SignerController, :show
   end
 end
