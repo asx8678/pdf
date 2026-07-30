@@ -6,8 +6,8 @@ defmodule QuireWeb.WorkspaceLive do
   state stay in lockstep without PubSub round trips.
 
   Mounted at `/workspace/:id` for authenticated users. Wired here: menu
-  bar tab selection, rail panel toggles, page navigation, and the
-  multi-document tab strip (T-032) — open, switch, close, reorder
+  bar tab selection, rail panel toggles, page navigation, the
+  thumbnails panel (T-046), and the multi-document tab strip (T-032) — open, switch, close, reorder
   tabs, and an unsaved-changes confirmation modal — and the §8.5
   keyboard map (T-033) with its discoverable shortcuts modal. Document
   loading and the per-tab ribbon LiveComponents (§9), and the backstage
@@ -657,7 +657,6 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
 
-  defp panel_hint(:thumbnails), do: "Open a document to browse its page thumbnails here."
   defp panel_hint(:bookmarks), do: "Open a document to read and manage its outline bookmarks."
   defp panel_hint(:search), do: "Open a document to search its text."
   defp panel_hint(:attachments), do: "Open a document to list its embedded attachments."

@@ -26,7 +26,13 @@
 
     <div class="flex flex-1 min-h-0">
       <.rail side="left" items={@left_items} on_item_click="toggle_panel" />
-      <.side_panel :if={@left_panel} side="left" panel={@left_panel} />
+      <.side_panel
+        :if={@left_panel}
+        side="left"
+        panel={@left_panel}
+        pages={@thumbnails}
+        page={@page}
+      />
 
       <main
         id="document-canvas"
@@ -49,7 +55,13 @@
         </div>
       </main>
 
-      <.side_panel :if={@right_panel} side="right" panel={@right_panel} />
+      <.side_panel
+        :if={@right_panel}
+        side="right"
+        panel={@right_panel}
+        pages={@thumbnails}
+        page={@page}
+      />
       <.rail side="right" items={@right_items} on_item_click="toggle_panel" />
     </div>
 
