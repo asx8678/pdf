@@ -177,6 +177,11 @@ const PdfViewerHook = {
       }
     });
 
+    // Handle server response to open a FreeText editor for the clicked run
+    this.handleEvent("open_text_editor", ({ text, bbox, font_name, font_size, page_index }) => {
+      this._openTextEditorAtRun(text, bbox, font_name, font_size, page_index);
+    });
+
     // Search panel (T-048) — run the find controller with the panel's
     // query and options; matches are highlighted in the text layer.
     this.handleEvent("find", ({ query, match_case, whole_word }) => {
@@ -630,6 +635,103 @@ const PdfViewerHook = {
     } catch (e) {
       // Editors will be captured on save via saveDocument()
     }
+  },
+
+  // ── Edit-mode click-to-select text (T-091, pdf-8vsn) ────────────────
+
+  /** Bind click handler on the viewer container when edit mode is active. */
+  _bindEditTextClick() {
+    this._unbindEditTextClick();
+    const container = this.el.querySelector("#pdf-viewer-container");
+    if (!container) return;
+    this._editTextClickHandler = (e) => this._onEditTextClick(e);
+    container.addEventListener("click", this._editTextClickHandler);
+  },
+
+  /** Unbind the edit-mode click handler. */
+  _unbindEditTextClick() {
+    if (!this._editTextClickHandler) return;
+    const container = this.el.querySelector("#pdf-viewer-container");
+    if (container) {
+      container.removeEventListener("click", this._editTextClickHandler);
+    }
+    this._editTextClickHandler = null;
+  },
+
+  /**
+   * Handle a click on the text layer in edit mode.
+   * Determines the page and PDF-space coordinates, then sends them
+   * to the server for run identification.
+   */
+  _onEditTextClick(e) {
+    if (!this._editModeEnabled || !this._viewer) return;
+
+    // Find the page view that was clicked
+    const container = this.el.querySelector("#pdf-viewer-container");
+    const rect = container.getBoundingClientRect();
+    const cssX = e.clientX - rect.left;
+    const cssY = e.clientY - rect.top;
+
+    // Iterate page views to find which page was clicked
+    const pages = this._viewer._pages;
+    if (!pages) return;
+
+    for (let i = 0; i < pages.length; i++) {
+      const pv = pages[i];
+      if (!pv || !pv.div) continue;
+      const pr = pv.div.getBoundingClientRect();
+
+      if (e.clientX >= pr.left && e.clientX <= pr.right &&
+          e.clientY >= pr.top && e.clientY <= pr.bottom) {
+        // Found the clicked page — convert CSS coords to PDF points
+        const vp = pv.viewport;
+        const pageIndex = pv.id - 1; // pdf.js uses 1-based page id
+        const [pdfX, pdfY] = vp.convertToPdfPoint(cssX, cssY);
+
+        this.pushEvent("edit_text_click", {
+          page_index: pageIndex,
+          x: pdfX,
+          y: pdfY
+        });
+        break;
+      }
+    }
+  },
+
+  /**
+   * Open a pdf.js FreeText editor at the identified run's bounding box,
+   * pre-populated with the run's text.
+   */
+  _openTextEditorAtRun(text, bbox, fontName, fontSize, pageIndex) {
+    if (!this._viewer) return;
+    const { AnnotationEditorType } = pdfjsLib;
+
+    // Switch to FreeText annotation editor mode
+    this._viewer.annotationEditorMode = { mode: AnnotationEditorType.FREETEXT };
+
+    // Wait briefly for the editor layer to be ready, then create and position
+    // the editor at the run's bounding box.
+    setTimeout(() => {
+      const editorLayer = this._viewer._annotationEditorLayer;
+      if (!editorLayer) return;
+
+      try {
+        const [x0, y0, x1, y1] = bbox;
+        const w = x1 - x0;
+        const h = y1 - y0;
+        const editor = editorLayer.createAndAddNewEditor(
+          { x: x0, y: y0, width: w, height: h },
+          /* isCentered */ false
+        );
+
+        if (editor && editor.editorDiv) {
+          // Set the initial text content
+          editor.editorDiv.textContent = text;
+        }
+      } catch (err) {
+        console.warn("PdfViewerHook: openTextEditorAtRun failed:", err);
+      }
+    }, 50);
   },
 };
 
