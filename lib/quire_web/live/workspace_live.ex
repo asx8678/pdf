@@ -100,6 +100,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:snapshot_active, false)
       |> assign(:read_aloud_active, false)
       |> assign(:read_aloud_playing, false)
+      |> assign(:mutations_pending, false)
       |> assign(:pending_server_op, nil)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
@@ -541,6 +542,32 @@ defmodule QuireWeb.WorkspaceLive do
      socket
      |> assign(:pending_server_op, nil)
      |> put_flash(:error, "Could not save pending edits: #{reason}")}
+  end
+
+  # DocMutateHook (T-088): a client-side mutation was applied optimistically
+  # and the result bytes are ready. Store the inverse for potential revert.
+  def handle_event("document_mutated", %{"kind" => kind, "data" => data}, socket) do
+    op = %{kind: kind, data: data}
+    document_id = socket.assigns.document_id
+    user_id = socket.assigns.current_user.id
+
+    with {:ok, session_pid} <- Editing.open_session(document_id, user_id),
+         {:ok, _} <- Editing.apply(session_pid, op) do
+      {:noreply,
+       socket
+       |> assign(:mutations_pending, true)
+       |> put_flash(:info, "Applied: #{kind}")}
+    else
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> push_event("reject_mutation", %{})
+         |> put_flash(:error, "Mutation rejected: #{reason}")}
+    end
+  end
+
+  def handle_event("mutation_error", %{"reason" => reason}, socket) do
+    {:noreply, put_flash(socket, :error, "Mutation error: #{reason}")}
   end
 
   def handle_event("set_scroll_mode", %{"mode" => mode}, socket) when mode in ~w(vertical horizontal wrapped) do
