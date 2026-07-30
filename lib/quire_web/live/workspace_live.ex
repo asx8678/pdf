@@ -23,6 +23,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.BookmarksPanel, only: [bookmarks_panel: 1]
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
   import QuireWeb.Chrome.EmailCompose, only: [email_compose: 1]
+  import QuireWeb.Chrome.EsignWizard, only: [esign_wizard: 1]
   import QuireWeb.Chrome.LayersPanel, only: [layers_panel: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
@@ -127,6 +128,15 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:backstage_open, false)
       |> assign(:backstage_view, nil)
       |> assign(:show_email_compose, false)
+      |> assign(:show_esign_wizard, false)
+      |> assign(:esign_wizard_step, :signers)
+      |> assign(:esign_wizard_signers, [])
+      |> assign(:esign_wizard_fields, [])
+      |> assign(:esign_wizard_subject, "")
+      |> assign(:esign_wizard_message, "")
+      |> assign(:esign_wizard_expires_at, nil)
+      |> assign(:esign_wizard_sending, false)
+      |> assign(:esign_wizard_error, nil)
       |> assign(:builtin_stamps, builtin_stamps())
       |> assign(:selected_stamp_id, nil)
       |> assign(:stamp_mode_active, false)
@@ -501,6 +511,201 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("send_email", _params, socket) do
     # T-198: Send via Swoosh; for Phase 1, just close the modal
     {:noreply, assign(socket, :show_email_compose, false)}
+  end
+
+  # ── E-Sign wizard event handlers (T-147) ─────────────────────────────────
+
+  @impl true
+  def handle_event("open_esign_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_esign_wizard, true)
+     |> assign(:esign_wizard_step, :signers)
+     |> assign(:esign_wizard_signers, [])
+     |> assign(:esign_wizard_fields, [])
+     |> assign(:esign_wizard_subject, "")
+     |> assign(:esign_wizard_message, "")
+     |> assign(:esign_wizard_expires_at, nil)
+     |> assign(:esign_wizard_sending, false)
+     |> assign(:esign_wizard_error, nil)}
+  end
+
+  def handle_event("close_esign_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_esign_wizard, false)}
+  end
+
+  def handle_event("esign_wizard_next", _params, socket) do
+    steps = [:signers, :fields, :compose, :expiry, :send]
+    current = socket.assigns.esign_wizard_step
+    idx = Enum.find_index(steps, &(&1 == current))
+
+    if idx && idx < length(steps) - 1 do
+      next = Enum.at(steps, idx + 1)
+      {:noreply, assign(socket, :esign_wizard_step, next)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("esign_wizard_prev", _params, socket) do
+    steps = [:signers, :fields, :compose, :expiry, :send]
+    current = socket.assigns.esign_wizard_step
+    idx = Enum.find_index(steps, &(&1 == current))
+
+    if idx && idx > 0 do
+      prev = Enum.at(steps, idx - 1)
+      {:noreply, assign(socket, :esign_wizard_step, prev)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("esign_wizard_add_signer", _params, socket) do
+    signers = socket.assigns.esign_wizard_signers
+    order = length(signers) + 1
+    new_signer = %{name: "", email: "", role: "", order: order}
+    {:noreply, assign(socket, :esign_wizard_signers, signers ++ [new_signer])}
+  end
+
+  def handle_event("esign_wizard_remove_signer", %{"index" => index_str}, socket) do
+    index = String.to_integer(index_str)
+    signers = List.delete_at(socket.assigns.esign_wizard_signers, index)
+    signers = Enum.with_index(signers, 1) |> Enum.map(fn {s, i} -> %{s | order: i} end)
+    {:noreply, assign(socket, :esign_wizard_signers, signers)}
+  end
+
+  def handle_event("esign_wizard_update_signer", params, socket) do
+    # phx-change sends the input value under the input's name key,
+    # plus phx-value-index and phx-value-field attrs
+    index = String.to_integer(Map.get(params, "index", "0"))
+    field = Map.get(params, "field", "name")
+    value = Map.get(params, params["_target"] |> List.last() || "name", "")
+    signers = socket.assigns.esign_wizard_signers
+
+    updated = Enum.with_index(signers) |> Enum.map(fn
+      {s, i} when i == index -> Map.put(s, String.to_existing_atom(field), value)
+      {s, _} -> s
+    end)
+
+    {:noreply, assign(socket, :esign_wizard_signers, updated)}
+  end
+
+  def handle_event("esign_wizard_add_field", %{"signer_index" => idx}, socket) do
+    signer_index = String.to_integer(idx)
+    new_field = %{id: Ecto.UUID.generate(), signer_index: signer_index, kind: :signature, page_index: 0}
+    {:noreply, assign(socket, :esign_wizard_fields, socket.assigns.esign_wizard_fields ++ [new_field])}
+  end
+
+  def handle_event("esign_wizard_remove_field", %{"id" => field_id}, socket) do
+    {:noreply, assign(socket, :esign_wizard_fields, Enum.reject(socket.assigns.esign_wizard_fields, &(&1.id == field_id)))}
+  end
+
+  def handle_event("esign_wizard_update_field", params, socket) do
+    field_id = Map.get(params, "id", "")
+    field_key = Map.get(params, "field", "kind")
+    value_raw = Map.get(params, "kind", "signature")
+
+    kind =
+      case field_key do
+        "kind" -> String.to_existing_atom(value_raw)
+        _ -> value_raw
+      end
+
+    fields = Enum.map(socket.assigns.esign_wizard_fields, fn
+      f when f.id == field_id -> Map.put(f, String.to_existing_atom(field_key), kind)
+      f -> f
+    end)
+
+    {:noreply, assign(socket, :esign_wizard_fields, fields)}
+  end
+
+  def handle_event("esign_wizard_update_compose", params, socket) do
+    field = Map.get(params, "field", "subject")
+    value = Map.get(params, field, "")
+    {:noreply, assign(socket, String.to_existing_atom("esign_wizard_#{field}"), value)}
+  end
+
+  def handle_event("esign_wizard_update_expiry", params, socket) do
+    value = Map.get(params, "expires_at", "")
+    expires_at =
+      case value do
+        "" -> nil
+        str -> NaiveDateTime.from_iso8601!(str) |> DateTime.from_naive!("Etc/UTC")
+      end
+
+    {:noreply, assign(socket, :esign_wizard_expires_at, expires_at)}
+  end
+
+  def handle_event("esign_wizard_send", _params, socket) do
+    %{assigns: assigns} = socket
+    signers = assigns.esign_wizard_signers
+    fields = assigns.esign_wizard_fields
+    subject = assigns.esign_wizard_subject
+    message = assigns.esign_wizard_message
+    expires_at = assigns.esign_wizard_expires_at
+
+    socket = assign(socket, :esign_wizard_sending, true)
+    socket = assign(socket, :esign_wizard_error, nil)
+
+    if length(signers) == 0 do
+      {:noreply,
+       socket
+       |> assign(:esign_wizard_error, "At least one signer is required")
+       |> assign(:esign_wizard_sending, false)}
+    else
+      doc_id = assigns.active_document_id
+      owner = assigns.current_scope
+
+      # Create envelope via Esign context
+      case Quire.Esign.create_envelope(%{
+        document_id: doc_id,
+        owner_id: owner.user.id,
+        subject: subject,
+        message: message,
+        expires_at: expires_at
+      }) do
+        {:ok, envelope} ->
+          # Add signers
+          results = Enum.map(signers, fn s ->
+            Quire.Esign.add_signer(envelope, %{
+              name: s.name,
+              email: s.email,
+              role: s.role,
+              order: s.order
+            })
+          end)
+
+          errors = Enum.filter(results, &match?({:error, _}, &1))
+
+          if length(errors) > 0 do
+            {:noreply,
+             socket
+             |> assign(:esign_wizard_error, "Failed to add signers")
+             |> assign(:esign_wizard_sending, false)}
+          else
+            # Send envelope
+            case Quire.Esign.send_envelope(envelope) do
+              {:ok, _env} ->
+                {:noreply,
+                 socket
+                 |> assign(:show_esign_wizard, false)
+                 |> assign(:esign_wizard_sending, false)}
+
+              {:error, reason} ->
+                {:noreply,
+                 socket
+                 |> assign(:esign_wizard_error, "Failed to send: #{inspect(reason)}")
+                 |> assign(:esign_wizard_sending, false)}
+            end
+          end
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> assign(:esign_wizard_error, "Failed to create envelope: #{inspect(changeset.errors)}")
+           |> assign(:esign_wizard_sending, false)}
+      end
+    end
   end
 
   # ── PdfViewerHook event handlers (T-042) ────────────────────────────────
@@ -1804,7 +2009,19 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
-      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and @active_tab != "page"}>
+      <!-- E-Sign tab ribbon (T-147) -->
+      <div :if={@active_tab == "esign"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Request">
+          <.ribbon_button
+            icon="hero-envelope"
+            label="Request Signature"
+            phx-click="open_esign_wizard"
+            tooltip="Create and send a signature request"
+          />
+        </.ribbon_group>
+      </div>
+
+      <div :if={@active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and @active_tab != "page" and @active_tab != "esign"}>
         <p
           class="text-sm text-gray-400 dark:text-gray-500 italic px-4"
         >

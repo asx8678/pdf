@@ -189,6 +189,18 @@
       on_send="send_email"
     />
 
+    <.esign_wizard
+      open={@show_esign_wizard}
+      step={@esign_wizard_step}
+      signers={@esign_wizard_signers}
+      fields={@esign_wizard_fields}
+      subject={@esign_wizard_subject}
+      message={@esign_wizard_message}
+      expires_at={@esign_wizard_expires_at}
+      sending={@esign_wizard_sending}
+      error={@esign_wizard_error}
+    />
+
     <div
       :if={@whiteout_warning_visible}
       class="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 max-w-lg w-full bg-amber-50 dark:bg-amber-900/80 border border-amber-300 dark:border-amber-700 rounded-xl shadow-xl p-4"
