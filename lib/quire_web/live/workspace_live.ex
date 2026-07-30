@@ -7,7 +7,7 @@ defmodule QuireWeb.WorkspaceLive do
 
   Mounted at `/workspace/:id` for authenticated users. Wired here: menu
   bar tab selection, rail panel toggles, page navigation, the
-  thumbnails panel (T-046), and the multi-document tab strip (T-032) — open, switch, close, reorder
+  thumbnails panel (T-046), and the bookmarks outline panel (T-047), and the multi-document tab strip (T-032) — open, switch, close, reorder
   tabs, and an unsaved-changes confirmation modal — and the §8.5
   keyboard map (T-033) with its discoverable shortcuts modal. Document
   loading and the per-tab ribbon LiveComponents (§9), and the backstage
@@ -16,6 +16,7 @@ defmodule QuireWeb.WorkspaceLive do
   use QuireWeb, :live_view
 
   import QuireWeb.Chrome.Backstage, only: [backstage: 1]
+  import QuireWeb.Chrome.BookmarksPanel, only: [bookmarks_panel: 1]
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
   import QuireWeb.Chrome.EmailCompose, only: [email_compose: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
@@ -73,6 +74,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:page, 1)
       |> assign(:total_pages, doc_page_count)
       |> assign(:thumbnails, [])
+      |> assign(:bookmarks, [])
       |> assign(:zoom, 100)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
@@ -404,6 +406,12 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :page, page)}
   end
 
+  # Bookmarks panel (T-047) — bookmark creation lands with the outline
+  # feature ticket; the button is visible but inert until then.
+  def handle_event("add_bookmark", _params, socket) do
+    {:noreply, socket}
+  end
+
   # Thumbnails panel (T-046) — clamp into range and push to the viewer
   # hook so pdf.js scrolls to the page.
   def handle_event("navigate_page", %{"page" => page}, socket) do
@@ -617,6 +625,7 @@ defmodule QuireWeb.WorkspaceLive do
   attr :panel, :atom, required: true
   attr :pages, :list, default: []
   attr :page, :integer, default: 1
+  attr :bookmarks, :list, default: []
 
   defp side_panel(assigns) do
     ~H"""
@@ -643,6 +652,8 @@ defmodule QuireWeb.WorkspaceLive do
       <%= cond do %>
         <% @panel == :thumbnails -> %>
           <.thumbnails_panel pages={@pages} current_page={@page} />
+        <% @panel == :bookmarks -> %>
+          <.bookmarks_panel bookmarks={@bookmarks} current_page={@page} />
         <% true -> %>
           <div class="flex-1 overflow-y-auto p-4">
             <p class="text-sm text-gray-400 dark:text-gray-500">{panel_hint(@panel)}</p>
@@ -657,7 +668,6 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
 
-  defp panel_hint(:bookmarks), do: "Open a document to read and manage its outline bookmarks."
   defp panel_hint(:search), do: "Open a document to search its text."
   defp panel_hint(:attachments), do: "Open a document to list its embedded attachments."
 

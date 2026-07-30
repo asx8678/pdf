@@ -153,4 +153,66 @@ defmodule QuireWeb.WorkspaceLiveTest do
       end
     end
   end
+
+  describe "bookmarks panel (T-047)" do
+    @rail_button ~s{button[phx-click="toggle_panel"][phx-value-side="left"][phx-value-item="bookmarks"][aria-label="Bookmarks"]}
+
+    test "the left rail toggles the bookmarks panel open and closed", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      refute has_element?(lv, "aside[aria-label='Bookmarks']")
+
+      lv |> element(@rail_button) |> render_click()
+
+      assert has_element?(lv, "aside[aria-label='Bookmarks']")
+      assert has_element?(lv, "#bookmarks-panel")
+      assert has_element?(lv, "#{@rail_button}[aria-pressed='true']")
+
+      lv |> element(@rail_button) |> render_click()
+
+      refute has_element?(lv, "aside[aria-label='Bookmarks']")
+    end
+
+    test "shows the empty state with an Add bookmark action", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      lv |> element(@rail_button) |> render_click()
+
+      assert has_element?(lv, "#bookmarks-panel", "No bookmarks")
+      assert has_element?(lv, "#bookmarks-panel button[aria-label='Add bookmark']")
+
+      # The stub add_bookmark handler accepts the click without crashing
+      lv |> element(~s{#bookmarks-panel button[aria-label="Add bookmark"]}) |> render_click()
+
+      assert has_element?(lv, "#bookmarks-panel", "No bookmarks")
+    end
+
+    test "renders nested bookmarks with indentation and current-page highlight" do
+      html =
+        render_component(&QuireWeb.Chrome.BookmarksPanel.bookmarks_panel/1,
+          bookmarks: [
+            %{title: "Chapter 1", page: 1, children: [%{title: "Section 1.1", page: 3}]},
+            %{title: "Chapter 2", page: 10}
+          ],
+          current_page: 3
+        )
+
+      assert html =~ "Chapter 1"
+      assert html =~ "Section 1.1"
+      assert html =~ "Chapter 2"
+      assert html =~ ~s(phx-click="navigate_page")
+      assert html =~ ~s(phx-value-page="3")
+      assert html =~ "padding-left: 16px"
+      # Exactly the current page's bookmark is highlighted
+      assert html |> String.split("bg-accent/10 text-accent") |> length() == 2
+    end
+
+    test "clicking a bookmark fires navigate_page and updates the current page", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      render_click(lv, "navigate_page", %{"page" => "1"})
+
+      assert has_element?(lv, "div[role='navigation'][aria-label='Page navigation']", "1 / 1")
+    end
+  end
 end

@@ -32,6 +32,7 @@
         panel={@left_panel}
         pages={@thumbnails}
         page={@page}
+        bookmarks={@bookmarks}
       />
 
       <main
@@ -61,6 +62,7 @@
         panel={@right_panel}
         pages={@thumbnails}
         page={@page}
+        bookmarks={@bookmarks}
       />
       <.rail side="right" items={@right_items} on_item_click="toggle_panel" />
     </div>
