@@ -124,11 +124,13 @@ const PdfViewerHook = {
           // Toggle off: restore normal viewer interaction
           this._editModeEnabled = false;
           this._viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+          this._unbindEditTextClick();
           this.pushEvent("edit_mode_changed", { active: false });
         } else {
           // Toggle on: switch to edit mode, disable FreeText creation
           this._editModeEnabled = true;
           this._viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+          this._bindEditTextClick();
           this.pushEvent("edit_mode_changed", { active: true });
         }
       }

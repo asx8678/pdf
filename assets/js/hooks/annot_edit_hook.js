@@ -38,6 +38,7 @@ const SHAPE_MODES = new Set([
   "polygon",
   "cloud",
   "polyline",
+  "whiteout",
 ]);
 
 // Stamp modes — custom SVG stamp placement (built-in SVG + custom image/text)
@@ -984,7 +985,8 @@ const AnnotEditHook = {
         this._renderOvalShape(svg, ns);
         break;
       }
-      case "rectangle": {
+      case "rectangle":
+      case "whiteout": {
         this._renderRectShape(svg, ns);
         break;
       }
@@ -1186,16 +1188,27 @@ const AnnotEditHook = {
 
     if (w < 1 && h < 1) return;
 
+    const isWhiteout = this._shapeMode === "whiteout";
+    const fillColor = isWhiteout ? "#FFFFFF" : this._fillColor;
+    const fillOpacity = isWhiteout ? 1.0 : this._shapeOpacity * 0.3;
+    const strokeColor = isWhiteout ? "#E5E7EB" : this._strokeColor;
+    const strokeWidth = isWhiteout ? 1 : this._strokeWidth;
+    const strokeOpacity = isWhiteout ? 1.0 : this._shapeOpacity;
+    const strokeDash = isWhiteout ? "4,2" : null;
+
     const rect = document.createElementNS(ns, "rect");
     rect.setAttribute("x", x);
     rect.setAttribute("y", y);
     rect.setAttribute("width", Math.max(w, 1));
     rect.setAttribute("height", Math.max(h, 1));
-    rect.setAttribute("fill", this._fillColor);
-    rect.setAttribute("fill-opacity", this._shapeOpacity * 0.3);
-    rect.setAttribute("stroke", this._strokeColor);
-    rect.setAttribute("stroke-width", this._strokeWidth);
-    rect.setAttribute("stroke-opacity", this._shapeOpacity);
+    rect.setAttribute("fill", fillColor);
+    rect.setAttribute("fill-opacity", fillOpacity);
+    rect.setAttribute("stroke", strokeColor);
+    rect.setAttribute("stroke-width", strokeWidth);
+    rect.setAttribute("stroke-opacity", strokeOpacity);
+    if (strokeDash) {
+      rect.setAttribute("stroke-dasharray", strokeDash);
+    }
     svg.appendChild(rect);
   },
 
@@ -1463,6 +1476,14 @@ const AnnotEditHook = {
       strokeWidth: this._strokeWidth,
       opacity: Math.round(this._shapeOpacity * 100),
     };
+
+    // Whiteout: force opaque white fill, no visible stroke.
+    if (mode === "whiteout") {
+      data.fillColor = "#FFFFFF";
+      data.strokeColor = "#FFFFFF";
+      data.strokeWidth = 0;
+      data.opacity = 100;
+    }
 
     // Measure modes: include computed measurement values in PDF points.
     if (this._isMeasureMode(mode)) {

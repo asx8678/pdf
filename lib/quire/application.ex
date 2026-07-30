@@ -34,6 +34,13 @@ defmodule Quire.Application do
           Quire.Engine.print_boot_table()
         end
 
+        # Initialise the tessdata cache directory and configure
+        # :image_ocr, :tessdata_path so that Image.OCR discovers
+        # both system-installed and downloaded packs (§T-141).
+        unless System.get_env("QUIRE_SKIP_TESSDATA_INIT") do
+          Quire.Ocr.Tessdata.init!()
+        end
+
         {:ok, pid}
 
       error ->

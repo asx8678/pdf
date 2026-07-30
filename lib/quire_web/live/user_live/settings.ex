@@ -5,6 +5,36 @@ defmodule QuireWeb.UserLive.Settings do
 
   alias Quire.Accounts
 
+  @known_languages %{
+    "eng" => "English",
+    "fra" => "French",
+    "deu" => "German",
+    "spa" => "Spanish",
+    "ita" => "Italian",
+    "por" => "Portuguese",
+    "nld" => "Dutch",
+    "dan" => "Danish",
+    "swe" => "Swedish",
+    "nor" => "Norwegian",
+    "fin" => "Finnish",
+    "ron" => "Romanian",
+    "ces" => "Czech",
+    "pol" => "Polish",
+    "ukr" => "Ukrainian",
+    "rus" => "Russian",
+    "ara" => "Arabic",
+    "hin" => "Hindi",
+    "chi_sim" => "Chinese (Simplified)",
+    "chi_tra" => "Chinese (Traditional)",
+    "jpn" => "Japanese",
+    "kor" => "Korean",
+    "tha" => "Thai",
+    "vie" => "Vietnamese",
+    "tur" => "Turkish",
+    "ell" => "Greek",
+    "heb" => "Hebrew"
+  }
+
   @impl true
   def render(assigns) do
     ~H"""
@@ -65,6 +95,69 @@ defmodule QuireWeb.UserLive.Settings do
           Save Password
         </.button>
       </.form>
+
+      <hr class="my-8 border-chrome-border dark:border-gray-700" />
+
+      <!-- OCR Tessdata Management -->
+      <div>
+        <.header>
+          OCR Languages
+          <:subtitle>Manage downloaded language packs for text recognition</:subtitle>
+        </.header>
+
+        <div class="mt-4 space-y-4">
+          <!-- Disk usage -->
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <span class="text-sm text-gray-700 dark:text-gray-200">Disk usage</span>
+            <span class="text-sm font-mono text-gray-600 dark:text-gray-400">
+              {format_bytes(@disk_usage)}
+            </span>
+          </div>
+
+          <!-- Installed languages -->
+          <div :if={@cached_languages != []}>
+            <h3 class="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-2 uppercase tracking-wide">
+              Downloaded language packs
+            </h3>
+            <div class="space-y-1">
+              <div
+                :for={lang <- @cached_languages}
+                class="flex items-center justify-between px-3 py-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+              >
+                <span class="text-sm text-gray-700 dark:text-gray-200">
+                  {language_label(lang)}
+                  <span class="text-xs text-gray-400 dark:text-gray-500 ml-1">({lang})</span>
+                </span>
+                <button
+                  type="button"
+                  phx-click="remove_language"
+                  phx-value-lang={lang}
+                  aria-label="Remove {language_label(lang)}"
+                  class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border border-chrome-border dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:border-red-300 dark:hover:border-red-700 transition-colors cursor-pointer"
+                >
+                  <.icon name="hero-trash" class="size-3.5" /> Remove
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <p :if={@cached_languages == []} class="text-sm text-gray-500 dark:text-gray-400 italic">
+            No language packs have been downloaded. Select a language in the OCR options panel to download it.
+          </p>
+
+          <!-- Remove All -->
+          <div :if={@cached_languages != []} class="pt-2">
+            <button
+              type="button"
+              phx-click="remove_all_languages"
+              aria-label="Remove all downloaded language packs"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors cursor-pointer"
+            >
+              <.icon name="hero-trash" class="size-3.5" /> Remove All
+            </button>
+          </div>
+        </div>
+      </div>
     </Layouts.app>
     """
   end
@@ -94,6 +187,7 @@ defmodule QuireWeb.UserLive.Settings do
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
+      |> assign_tessdata_state()
 
     {:ok, socket}
   end
@@ -157,4 +251,41 @@ defmodule QuireWeb.UserLive.Settings do
         {:noreply, assign(socket, password_form: to_form(changeset, action: :insert))}
     end
   end
+
+  # ── Tessdata management events ───────────────────────────────────────
+
+  def handle_event("remove_language", %{"lang" => lang}, socket) do
+    Quire.Ocr.Tessdata.remove(lang)
+    {:noreply, assign_tessdata_state(socket)}
+  end
+
+  def handle_event("remove_all_languages", _params, socket) do
+    cached = Quire.Ocr.Tessdata.cached_languages()
+
+    Enum.each(cached, &Quire.Ocr.Tessdata.remove/1)
+
+    socket =
+      socket
+      |> put_flash(:info, "All downloaded language packs have been removed.")
+      |> assign_tessdata_state()
+
+    {:noreply, socket}
+  end
+
+  # ── Tessdata helpers ─────────────────────────────────────────────────
+
+  defp assign_tessdata_state(socket) do
+    assign(socket,
+      cached_languages: Quire.Ocr.Tessdata.cached_languages(),
+      disk_usage: Quire.Ocr.Tessdata.disk_usage()
+    )
+  end
+
+  defp language_label(lang) do
+    Map.get(@known_languages, lang, lang)
+  end
+
+  defp format_bytes(n) when n >= 1_048_576, do: "#{Float.round(n / 1_048_576, 2)} MB"
+  defp format_bytes(n) when n >= 1024, do: "#{Float.round(n / 1024, 1)} KB"
+  defp format_bytes(n), do: "#{n} B"
 end

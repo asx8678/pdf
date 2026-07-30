@@ -77,7 +77,8 @@ defmodule Quire.Office.Reader.Docx do
           numbering: numbering,
           rels: rels,
           entry_map: entry_map,
-          notes: []
+          notes: [],
+          unsupported_seen: MapSet.new()
         }
 
         case Saxy.parse_string(doc_xml, __MODULE__.DocumentHandler, state) do
@@ -278,6 +279,10 @@ defmodule Quire.Office.Reader.Docx do
       end)
     end
 
+    defp add_note(state, message) do
+      %{state | notes: [%{level: :unsupported, message: message, source: "docx"} | state.notes]}
+    end
+
     defp extract_img(state, rid, alt) do
       target = Map.get(state.rels, rid)
 
@@ -373,9 +378,27 @@ defmodule Quire.Office.Reader.Docx do
           {:ok, %{state | image_rid: rid, in_blip: state.in_blip + 1}}
 
         match_ns(name, "headerReference") ->
+          state =
+            if state.in_header_ref == 0 and not MapSet.member?(state.unsupported_seen, "header"),
+              do:
+                add_note(
+                  %{state | unsupported_seen: MapSet.put(state.unsupported_seen, "header")},
+                  "Headers are not supported; content skipped"
+                ),
+              else: state
+
           {:ok, %{state | in_header_ref: state.in_header_ref + 1}}
 
         match_ns(name, "footerReference") ->
+          state =
+            if state.in_footer_ref == 0 and not MapSet.member?(state.unsupported_seen, "footer"),
+              do:
+                add_note(
+                  %{state | unsupported_seen: MapSet.put(state.unsupported_seen, "footer")},
+                  "Footers are not supported; content skipped"
+                ),
+              else: state
+
           {:ok, %{state | in_footer_ref: state.in_footer_ref + 1}}
 
         match_ns(name, "sectPr") ->

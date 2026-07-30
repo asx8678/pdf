@@ -7,7 +7,7 @@ defmodule Quire.Documents.Annotation do
   """
   use Quire.Schema
 
-  @kind_values ~w(highlight underline strikethrough squiggly sticky_note free_text free_text_callout ink stamp signature line arrow double_arrow dimension oval rectangle polygon cloud polyline file_attachment measure_distance measure_perimeter measure_area)
+  @kind_values ~w(highlight underline strikethrough squiggly sticky_note free_text free_text_callout ink stamp signature line arrow double_arrow dimension oval rectangle polygon cloud polyline file_attachment measure_distance measure_perimeter measure_area whiteout)
 
   schema "annotations" do
     field :revision_id, :binary_id

@@ -78,7 +78,9 @@ defmodule QuireWeb.OcrOptionsLive do
        deskew: true,
        auto_rotate: true,
        clean: true,
-       optimise_level: 1
+       optimise_level: 1,
+       download_states: %{},
+       download_errors: %{}
      )}
   end
 
@@ -103,12 +105,31 @@ defmodule QuireWeb.OcrOptionsLive do
   def handle_event("toggle_language", %{"lang" => lang}, socket) do
     current = socket.assigns.selected_languages
 
-    updated =
-      if lang in current,
-        do: List.delete(current, lang),
-        else: [lang | current]
+    if lang in current do
+      # Removing language — just remove from selection
+      {:noreply, assign(socket, :selected_languages, List.delete(current, lang))}
+    else
+      # Adding language — ensure it is downloaded
+      already_ready? =
+        Map.get(socket.assigns.download_states, lang) == :ready or
+          Image.OCR.Tessdata.installed?(lang, datapath: Quire.Ocr.Tessdata.cache_root())
 
-    {:noreply, assign(socket, :selected_languages, updated)}
+      socket =
+        socket
+        |> assign(:selected_languages, [lang | current])
+        |> put_download_state(lang, :ready)
+
+      if already_ready? do
+        {:noreply, socket}
+      else
+        socket = put_download_state(socket, lang, :downloading)
+
+        # Start async download in a Task; the result comes back as {:ensure_result, lang, status}
+        send(self(), {:ensure_tessdata, lang})
+
+        {:noreply, socket}
+      end
+    end
   end
 
   def handle_event("set_mode", %{"mode" => mode}, socket) when mode in ~w(skip redo force) do
@@ -161,6 +182,74 @@ defmodule QuireWeb.OcrOptionsLive do
     {:noreply, socket |> assign(status: :loading) |> probe_languages()}
   end
 
+  # ── Tessdata download handling ───────────────────────────────────────
+
+  # LiveComponents support handle_info/2 even though the behaviour does not
+  # declare it as a required callback.
+  def handle_info({:ensure_tessdata, lang}, socket) do
+    # Run the download in a separate task so the LiveView process is not
+    # blocked by network I/O.  The result is sent back as a message.
+    live_view_pid = self()
+
+    Task.start(fn ->
+      result = Quire.Ocr.Tessdata.ensure(lang)
+      send(live_view_pid, {:ensure_result, lang, result})
+    end)
+
+    {:noreply, socket}
+  end
+
+  def handle_info({:ensure_result, lang, result}, socket) do
+    socket =
+      case result do
+        {:ok, _status} ->
+          socket |> put_download_state(lang, :ready) |> put_download_error(lang, nil)
+
+        {:error, reason} ->
+          error_msg = user_download_error(reason)
+          socket |> put_download_state(lang, :error) |> put_download_error(lang, error_msg)
+      end
+
+    {:noreply, socket}
+  end
+
+  defp put_download_state(socket, lang, state) do
+    assign(socket, :download_states, Map.put(socket.assigns.download_states, lang, state))
+  end
+
+  defp put_download_error(socket, lang, msg) do
+    errors =
+      if msg,
+        do: Map.put(socket.assigns.download_errors, lang, msg),
+        else: Map.delete(socket.assigns.download_errors, lang)
+
+    assign(socket, :download_errors, errors)
+  end
+
+  defp user_download_error({:http_status, status}) do
+    "Download failed (HTTP #{status}). Check your internet connection and try again."
+  end
+
+  defp user_download_error({:http_error, reason}) when is_atom(reason) do
+    "Download failed: #{reason}. Please check your network connection."
+  end
+
+  defp user_download_error({:http_error, reason}) do
+    "Download failed: #{inspect(reason)}. Please check your network connection."
+  end
+
+  defp user_download_error(:hash_mismatch) do
+    "Downloaded file is corrupt. Please try again."
+  end
+
+  defp user_download_error(reason) when is_binary(reason) do
+    reason
+  end
+
+  defp user_download_error(reason) do
+    "Could not download language pack: #{inspect(reason)}."
+  end
+
   # ── Rendering ─────────────────────────────────────────────────────────
 
   @impl true
@@ -191,6 +280,8 @@ defmodule QuireWeb.OcrOptionsLive do
             optimise_levels={@optimise_levels}
             optimise_level={@optimise_level}
             ocr_running={@ocr_running}
+            download_states={@download_states}
+            download_errors={@download_errors}
           />
       <% end %>
     </div>
@@ -260,6 +351,8 @@ defmodule QuireWeb.OcrOptionsLive do
   attr :optimise_levels, :list, required: true
   attr :optimise_level, :integer, required: true
   attr :ocr_running, :boolean, default: false
+  attr :download_states, :map, default: %{}
+  attr :download_errors, :map, default: %{}
 
   defp options_form(assigns) do
     ~H"""
@@ -279,17 +372,28 @@ defmodule QuireWeb.OcrOptionsLive do
             phx-click="toggle_language"
             phx-value-lang={lang.code}
             phx-target={@myself}
+            disabled={Map.get(@download_states, lang.code) == :downloading}
             class={[
-              "px-2.5 py-1 text-xs rounded-full border transition-colors cursor-pointer",
-              if(lang.code in @selected_languages,
-                do: "bg-accent/10 border-accent/30 text-accent font-medium",
-                else:
-                  "border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500"
+              "px-2.5 py-1 text-xs rounded-full border transition-colors",
+              download_button_classes(
+                lang.code,
+                @selected_languages,
+                @download_states,
+                @download_errors
               )
             ]}
           >
+            <span
+              :if={Map.get(@download_states, lang.code) == :downloading}
+              class="inline-block size-3 border-2 border-current border-t-transparent rounded-full animate-spin mr-1"
+            />
             {lang.label}
           </button>
+        </div>
+        <div :for={{lang, error} <- @download_errors} class="mt-1 flex items-center gap-1.5">
+          <span class="text-xs text-red-600 dark:text-red-400">
+            {error}
+          </span>
         </div>
         <p :if={@selected_languages == []} class="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
           At least one language must be selected.
@@ -378,19 +482,33 @@ defmodule QuireWeb.OcrOptionsLive do
           type="button"
           phx-click="run_ocr"
           phx-target={@myself}
-          disabled={@ocr_running or @selected_languages == []}
+          disabled={
+            ocr_can_run?(@selected_languages, @download_states, @download_errors, @ocr_running) ==
+              false
+          }
           aria-label={
             cond do
-              @ocr_running -> "OCR is already running"
-              @selected_languages == [] -> "Select at least one language to run OCR"
-              true -> "Run OCR with selected options"
+              @ocr_running ->
+                "OCR is already running"
+
+              has_download_errors?(@selected_languages, @download_errors) ->
+                "Some languages failed to download"
+
+              has_downloading?(@selected_languages, @download_states) ->
+                "Downloading language packs…"
+
+              @selected_languages == [] ->
+                "Select at least one language to run OCR"
+
+              true ->
+                "Run OCR with selected options"
             end
           }
           class={[
             "w-full inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-            if(@ocr_running or @selected_languages == [],
-              do: "bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed",
-              else: "bg-accent text-accent-fg hover:bg-accent-hover cursor-pointer"
+            if(ocr_can_run?(@selected_languages, @download_states, @download_errors, @ocr_running),
+              do: "bg-accent text-accent-fg hover:bg-accent-hover cursor-pointer",
+              else: "bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
             )
           ]}
         >
@@ -575,4 +693,37 @@ defmodule QuireWeb.OcrOptionsLive do
   end
 
   defp split_lang(_), do: ["eng"]
+
+  # ── Download-state helpers ──────────────────────────────────────────
+
+  defp download_button_classes(lang, selected, states, errors) do
+    cond do
+      Map.get(states, lang) == :downloading ->
+        "opacity-60 border-gray-300 dark:border-gray-600 text-gray-400 dark:text-gray-500"
+
+      Map.has_key?(errors, lang) ->
+        "border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20"
+
+      lang in selected ->
+        "bg-accent/10 border-accent/30 text-accent font-medium cursor-pointer"
+
+      true ->
+        "border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer"
+    end
+  end
+
+  defp ocr_can_run?(selected, states, errors, running) do
+    not running and
+      selected != [] and
+      not has_download_errors?(selected, errors) and
+      not has_downloading?(selected, states)
+  end
+
+  defp has_download_errors?(selected, errors) do
+    Enum.any?(selected, &Map.has_key?(errors, &1))
+  end
+
+  defp has_downloading?(selected, states) do
+    Enum.any?(selected, fn lang -> Map.get(states, lang) == :downloading end)
+  end
 end

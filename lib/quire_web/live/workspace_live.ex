@@ -133,6 +133,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:cal_known_unit, "mm")
       |> assign(:cal_drawn_points, nil)
       |> assign(:cal_page_index, nil)
+      |> assign(:whiteout_mode_active, false)
+      |> assign(:whiteout_warning_visible, false)
+      |> assign(:whiteout_warning_dismissed, false)
+      |> load_user_settings()
       |> load_saved_signatures()
 
     Phoenix.PubSub.subscribe(Quire.PubSub, "document:#{id}")
@@ -513,6 +517,14 @@ defmodule QuireWeb.WorkspaceLive do
         "free_text_callout" ->
           handle_callout_commit(socket, document_id, data)
 
+        # Whiteout — record annotation and show warning
+        "whiteout" ->
+          socket = handle_annotation_commit(socket, document_id, type, data)
+
+          show_warning = !socket.assigns.whiteout_warning_dismissed
+
+          assign(socket, :whiteout_warning_visible, show_warning)
+
         # All other types (shapes, native pdf.js annotations)
         _ ->
           handle_annotation_commit(socket, document_id, type, data)
@@ -545,6 +557,7 @@ defmodule QuireWeb.WorkspaceLive do
         :active_measure_mode,
         if(mode in ~w(measure_distance measure_perimeter measure_area), do: mode, else: nil)
       )
+      |> assign(:whiteout_mode_active, mode == "whiteout")
       |> push_event("toggle_annot_mode", %{mode: mode})
 
     {:noreply, socket}
@@ -1038,6 +1051,54 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :rotation, 0) |> push_event("rotate", %{rotation: 0})}
   end
 
+  # ── Whiteout event handlers (T-109) ──────────────────────────────────────
+
+  def handle_event("whiteout_committed", %{"data" => data}, socket) do
+    document_id = socket.assigns.active_document_id
+    user_id = socket.assigns.current_user.id
+
+    annot = %{
+      revision_id: document_id,
+      page_index: data["pageIndex"] || 0,
+      kind: "whiteout",
+      rect: data["rectPdf"] || data["rect"],
+      path_data: data["pathData"],
+      color: %{"r" => 255, "g" => 255, "b" => 255},
+      opacity: 100,
+      border_width: 0,
+      author: socket.assigns.current_user.name || user_id
+    }
+
+    socket = record_annotation(socket, document_id, user_id, annot)
+
+    # Show warning unless permanently dismissed
+    show_warning = !socket.assigns.whiteout_warning_dismissed
+
+    {:noreply, assign(socket, :whiteout_warning_visible, show_warning)}
+  end
+
+  def handle_event("dismiss_whiteout_warning", _params, socket) do
+    {:noreply, assign(socket, :whiteout_warning_visible, false)}
+  end
+
+  def handle_event("dismiss_whiteout_permanently", _params, socket) do
+    user_id = socket.assigns.current_user.id
+
+    Quire.Accounts.update_user_settings(user_id, %{whiteout_warning_dismissed: true})
+
+    {:noreply,
+     socket
+     |> assign(:whiteout_warning_visible, false)
+     |> assign(:whiteout_warning_dismissed, true)}
+  end
+
+  def handle_event("switch_to_redact", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:whiteout_warning_visible, false)
+     |> push_event("toggle_annot_mode", %{mode: "redact"})}
+  end
+
   # ── Signature capture event handlers (T-114) ────────────────────────────
 
   def handle_event("save_signature", params, socket) do
@@ -1078,6 +1139,15 @@ defmodule QuireWeb.WorkspaceLive do
     user_id = socket.assigns.current_user.id
     signatures = Quire.Accounts.list_saved_signatures(user_id)
     assign(socket, :signatures, signatures)
+  end
+
+  defp load_user_settings(socket) do
+    user_id = socket.assigns.current_user.id
+
+    settings = Quire.Accounts.get_user_settings(user_id)
+    dismissed = settings.whiteout_warning_dismissed
+
+    assign(socket, :whiteout_warning_dismissed, dismissed || false)
   end
 
   # ── Private helpers ──────────────────────────────────────────────────────
@@ -1298,6 +1368,17 @@ defmodule QuireWeb.WorkspaceLive do
 
       <!-- Comment tab ribbon groups (T-107) -->
       <div :if={@active_tab == "comment"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Shapes">
+          <.ribbon_button
+            icon="hero-stop"
+            label="Whiteout"
+            active={@whiteout_mode_active}
+            phx-click="toggle_annot_mode"
+            phx-value-mode="whiteout"
+            tooltip="Whiteout — covers content visually"
+          />
+        </.ribbon_group>
+
         <.ribbon_group label="Stamps">
           <.ribbon_button
             :for={stamp <- @builtin_stamps}
