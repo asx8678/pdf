@@ -2087,9 +2087,6 @@ defmodule QuireWeb.WorkspaceLive do
         try do
           with {:ok, merged} <- ExPdfium.append(dest_doc, src_doc),
                {:ok, merged_bytes} <- ExPdfium.save_to_bytes(merged) do
-            ExPdfium.close(src_doc)
-            ExPdfium.close(dest_doc)
-
             # Store as new revision
             {:ok, new_ref} =
               Quire.Storage.put(merged_bytes,
