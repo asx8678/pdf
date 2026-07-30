@@ -215,4 +215,92 @@ defmodule QuireWeb.WorkspaceLiveTest do
       assert has_element?(lv, "div[role='navigation'][aria-label='Page navigation']", "1 / 1")
     end
   end
+
+  describe "layers panel (T-050)" do
+    @rail_button ~s{button[phx-click="toggle_panel"][phx-value-side="left"][phx-value-item="layers"][aria-label="Layers"]}
+
+    test "the left rail toggles the layers panel open and closed", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      refute has_element?(lv, "aside[aria-label='Layers']")
+
+      lv |> element(@rail_button) |> render_click()
+
+      assert has_element?(lv, "aside[aria-label='Layers']")
+      assert has_element?(lv, "#layers-panel")
+      assert has_element?(lv, "#{@rail_button}[aria-pressed='true']")
+
+      lv |> element(@rail_button) |> render_click()
+
+      refute has_element?(lv, "aside[aria-label='Layers']")
+    end
+
+    test "shows the empty state when the document has no layers", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      lv |> element(@rail_button) |> render_click()
+
+      assert has_element?(lv, "#layers-panel", "No layers")
+      assert has_element?(lv, "#layers-panel", "optional content groups")
+    end
+
+    test "the stub toggle_layer handler accepts the event without crashing", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+
+      lv |> element(@rail_button) |> render_click()
+      render_click(lv, "toggle_layer", %{"name" => "Layer 1"})
+
+      assert has_element?(lv, "#layers-panel", "No layers")
+    end
+
+    test "toggle_layer flips visibility locally; locked layers stay put" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{
+          __changed__: %{},
+          layers: [
+            %{name: "Base map", visible: true, locked: false},
+            %{name: "Survey", visible: true, locked: true}
+          ]
+        }
+      }
+
+      {:noreply, socket} =
+        QuireWeb.WorkspaceLive.handle_event("toggle_layer", %{"name" => "Base map"}, socket)
+
+      assert [%{name: "Base map", visible: false}, %{name: "Survey", visible: true}] =
+               socket.assigns.layers
+
+      {:noreply, socket} =
+        QuireWeb.WorkspaceLive.handle_event("toggle_layer", %{"name" => "Survey"}, socket)
+
+      assert [%{name: "Base map", visible: false}, %{name: "Survey", visible: true}] =
+               socket.assigns.layers
+    end
+
+    test "renders layers with checked, dimmed and locked states" do
+      html =
+        render_component(&QuireWeb.Chrome.LayersPanel.layers_panel/1,
+          layers: [
+            %{name: "Base map", visible: true, locked: false},
+            %{name: "Annotations", visible: false, locked: false},
+            %{name: "Survey", visible: true, locked: true}
+          ]
+        )
+
+      assert html =~ "3 layers"
+      assert html =~ "Base map"
+      assert html =~ ~s(phx-click="toggle_layer")
+      assert html =~ ~s(phx-value-name="Annotations")
+
+      # Visible layers get the accent checkbox; the hidden one doesn't
+      assert html |> String.split("bg-accent border-accent") |> length() == 3
+      assert html |> String.split("hero-check") |> length() == 3
+
+      # The hidden layer's name is dimmed
+      assert html =~ "text-gray-400 dark:text-gray-500"
+
+      # Exactly the locked layer shows a lock icon
+      assert html |> String.split("hero-lock-closed") |> length() == 2
+    end
+  end
 end

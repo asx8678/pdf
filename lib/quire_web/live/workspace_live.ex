@@ -19,6 +19,7 @@ defmodule QuireWeb.WorkspaceLive do
   import QuireWeb.Chrome.BookmarksPanel, only: [bookmarks_panel: 1]
   import QuireWeb.Chrome.DocumentTabs, only: [document_tabs: 1]
   import QuireWeb.Chrome.EmailCompose, only: [email_compose: 1]
+  import QuireWeb.Chrome.LayersPanel, only: [layers_panel: 1]
   import QuireWeb.Chrome.MenuBar, only: [menu_bar: 1]
   import QuireWeb.Chrome.Rail, only: [rail: 1]
   import QuireWeb.Chrome.SearchPanel, only: [search_panel: 1]
@@ -34,7 +35,8 @@ defmodule QuireWeb.WorkspaceLive do
 
   @left_rail_items [
     %{id: :thumbnails, icon: "hero-squares-2x2", label: "Thumbnails"},
-    %{id: :bookmarks, icon: "hero-bookmark", label: "Bookmarks"}
+    %{id: :bookmarks, icon: "hero-bookmark", label: "Bookmarks"},
+    %{id: :layers, icon: "hero-rectangle-stack", label: "Layers"}
   ]
 
   @right_rail_items [
@@ -42,7 +44,7 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :attachments, icon: "hero-paper-clip", label: "Attachments"}
   ]
 
-  @panels [:thumbnails, :bookmarks, :search, :attachments]
+  @panels [:thumbnails, :bookmarks, :layers, :search, :attachments]
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -76,6 +78,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:total_pages, doc_page_count)
       |> assign(:thumbnails, [])
       |> assign(:bookmarks, [])
+      |> assign(:layers, [])
       |> assign(:search_query, "")
       |> assign(:search_results, [])
       |> assign(:search_total, 0)
@@ -420,6 +423,19 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
+  # Layers panel (T-050) — toggles a layer's local visibility flag.
+  # Stub: the real OCG toggle (pdf.js PDFDocument.getOptionalContentConfig)
+  # lands with T-051; locked layers don't toggle.
+  def handle_event("toggle_layer", %{"name" => name}, socket) do
+    layers =
+      Enum.map(socket.assigns.layers, fn
+        %{name: ^name, locked: false} = layer -> %{layer | visible: !layer.visible}
+        layer -> layer
+      end)
+
+    {:noreply, assign(socket, :layers, layers)}
+  end
+
   # Thumbnails panel (T-046) — clamp into range and push to the viewer
   # hook so pdf.js scrolls to the page.
   def handle_event("navigate_page", %{"page" => page}, socket) do
@@ -735,6 +751,7 @@ defmodule QuireWeb.WorkspaceLive do
   attr :pages, :list, default: []
   attr :page, :integer, default: 1
   attr :bookmarks, :list, default: []
+  attr :layers, :list, default: []
   attr :search_query, :string, default: ""
   attr :search_results, :list, default: []
   attr :search_total, :integer, default: 0
@@ -770,6 +787,8 @@ defmodule QuireWeb.WorkspaceLive do
           <.thumbnails_panel pages={@pages} current_page={@page} />
         <% @panel == :bookmarks -> %>
           <.bookmarks_panel bookmarks={@bookmarks} current_page={@page} />
+        <% @panel == :layers -> %>
+          <.layers_panel layers={@layers} />
         <% @panel == :search -> %>
           <.search_panel
             query={@search_query}
@@ -791,6 +810,7 @@ defmodule QuireWeb.WorkspaceLive do
 
   defp panel_title(:thumbnails), do: "Thumbnails"
   defp panel_title(:bookmarks), do: "Bookmarks"
+  defp panel_title(:layers), do: "Layers"
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
 
