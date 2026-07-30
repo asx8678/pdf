@@ -574,21 +574,24 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, put_flash(socket, :error, "Mutation error: #{reason}")}
   end
 
-  def handle_event("set_scroll_mode", %{"mode" => mode}, socket) when mode in ~w(vertical horizontal wrapped) do
+  def handle_event("set_scroll_mode", %{"mode" => mode}, socket)
+      when mode in ~w(vertical horizontal wrapped) do
     {:noreply,
      socket
      |> assign(:scroll_mode, String.to_existing_atom(mode))
      |> push_event("set_scroll_mode", %{mode: mode})}
   end
 
-  def handle_event("set_spread_mode", %{"mode" => mode}, socket) when mode in ~w(none single odd even) do
+  def handle_event("set_spread_mode", %{"mode" => mode}, socket)
+      when mode in ~w(none single odd even) do
     {:noreply,
      socket
      |> assign(:spread_mode, String.to_existing_atom(mode))
      |> push_event("set_spread_mode", %{mode: mode})}
   end
 
-  def handle_event("set_fit_mode", %{"mode" => mode}, socket) when mode in ~w(fit_page fit_width actual_size) do
+  def handle_event("set_fit_mode", %{"mode" => mode}, socket)
+      when mode in ~w(fit_page fit_width actual_size) do
     {:noreply,
      socket
      |> assign(:fit_mode, String.to_existing_atom(mode))
@@ -831,7 +834,9 @@ defmodule QuireWeb.WorkspaceLive do
       socket
     else
       index = rem(socket.assigns.search_current + delta + length(results), length(results))
-      page = results |> Enum.at(index) |> Map.get(:page) |> max(1) |> min(socket.assigns.total_pages)
+
+      page =
+        results |> Enum.at(index) |> Map.get(:page) |> max(1) |> min(socket.assigns.total_pages)
 
       socket
       |> assign(:search_current, index)

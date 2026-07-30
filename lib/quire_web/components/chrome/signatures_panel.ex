@@ -45,7 +45,11 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
           type="button"
           role="tab"
           id="sig-tab-draw"
-          phx-click={JS.toggle(to: "#sig-draw-content", out: "hidden", in: "hidden") |> JS.toggle(to: "#sig-type-content", in: "hidden") |> JS.toggle(to: "#sig-upload-content", in: "hidden")}
+          phx-click={
+            JS.toggle(to: "#sig-draw-content", out: "hidden", in: "hidden")
+            |> JS.toggle(to: "#sig-type-content", in: "hidden")
+            |> JS.toggle(to: "#sig-upload-content", in: "hidden")
+          }
           class="flex-1 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-b-2 border-transparent data-[active=true]:border-accent data-[active=true]:text-accent transition-all cursor-pointer"
           aria-controls="sig-draw-content"
         >
@@ -55,7 +59,11 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
           type="button"
           role="tab"
           id="sig-tab-type"
-          phx-click={JS.toggle(to: "#sig-draw-content", in: "hidden") |> JS.toggle(to: "#sig-type-content", out: "hidden", in: "hidden") |> JS.toggle(to: "#sig-upload-content", in: "hidden")}
+          phx-click={
+            JS.toggle(to: "#sig-draw-content", in: "hidden")
+            |> JS.toggle(to: "#sig-type-content", out: "hidden", in: "hidden")
+            |> JS.toggle(to: "#sig-upload-content", in: "hidden")
+          }
           class="flex-1 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-b-2 border-transparent data-[active=true]:border-accent data-[active=true]:text-accent transition-all cursor-pointer"
           aria-controls="sig-type-content"
         >
@@ -65,7 +73,11 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
           type="button"
           role="tab"
           id="sig-tab-upload"
-          phx-click={JS.toggle(to: "#sig-draw-content", in: "hidden") |> JS.toggle(to: "#sig-type-content", in: "hidden") |> JS.toggle(to: "#sig-upload-content", out: "hidden", in: "hidden")}
+          phx-click={
+            JS.toggle(to: "#sig-draw-content", in: "hidden")
+            |> JS.toggle(to: "#sig-type-content", in: "hidden")
+            |> JS.toggle(to: "#sig-upload-content", out: "hidden", in: "hidden")
+          }
           class="flex-1 px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 border-b-2 border-transparent data-[active=true]:border-accent data-[active=true]:text-accent transition-all cursor-pointer"
           aria-controls="sig-upload-content"
         >
@@ -84,7 +96,10 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
             id="sig-draw-canvas"
             class="absolute inset-0 w-full h-full touch-none"
           />
-          <div id="sig-draw-placeholder" class="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div
+            id="sig-draw-placeholder"
+            class="absolute inset-0 flex items-center justify-center pointer-events-none"
+          >
             <p class="text-xs text-gray-400 dark:text-gray-500">Draw your signature</p>
           </div>
         </div>
@@ -235,15 +250,26 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
           phx-hook=".SignatureUpload"
           class="border-2 border-dashed border-chrome-border dark:border-gray-600 rounded-lg p-6 text-center hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
         >
-          <.icon name="hero-arrow-up-tray" class="size-8 text-gray-300 dark:text-gray-500 mx-auto mb-2" />
+          <.icon
+            name="hero-arrow-up-tray"
+            class="size-8 text-gray-300 dark:text-gray-500 mx-auto mb-2"
+          />
           <p class="text-xs text-gray-400 dark:text-gray-500">
             Click to upload an image, or drag and drop
           </p>
           <p class="text-xs text-gray-300 dark:text-gray-600 mt-1">PNG, JPG, WebP — max 5 MB</p>
-          <input type="file" id="sig-upload-input" accept="image/png,image/jpeg,image/webp" class="hidden" />
+          <input
+            type="file"
+            id="sig-upload-input"
+            accept="image/png,image/jpeg,image/webp"
+            class="hidden"
+          />
         </div>
 
-        <div id="sig-upload-preview" class="hidden w-full min-h-[60px] flex items-center justify-center bg-gray-50 dark:bg-gray-900 border border-chrome-border dark:border-gray-600 rounded-lg overflow-hidden">
+        <div
+          id="sig-upload-preview"
+          class="hidden w-full min-h-[60px] flex items-center justify-center bg-gray-50 dark:bg-gray-900 border border-chrome-border dark:border-gray-600 rounded-lg overflow-hidden"
+        >
         </div>
 
         <div class="flex items-center gap-2">
@@ -376,7 +402,10 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
                     class="w-full h-full object-contain"
                     alt={sig["label"]}
                   />
-                  <span :if={!is_binary(get_in(sig, ["data", "preview"]))} class="text-[10px] text-gray-400">
+                  <span
+                    :if={!is_binary(get_in(sig, ["data", "preview"]))}
+                    class="text-[10px] text-gray-400"
+                  >
                     img
                   </span>
               <% end %>

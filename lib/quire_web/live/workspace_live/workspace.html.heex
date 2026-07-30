@@ -25,12 +25,10 @@
     <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
     <.document_tabs documents={@documents} active_id={@active_document_id} />
 
-    <div
-      class={[
-        "flex flex-1 min-h-0 transition-all duration-200",
-        if(@fullscreen, do: "fixed inset-0 z-50 bg-canvas dark:bg-gray-900")
-      ]}
-    >
+    <div class={[
+      "flex flex-1 min-h-0 transition-all duration-200",
+      if(@fullscreen, do: "fixed inset-0 z-50 bg-canvas dark:bg-gray-900")
+    ]}>
       <.rail side="left" items={@left_items} on_item_click="toggle_panel" />
       <.side_panel
         :if={@left_panel}
@@ -72,8 +70,7 @@
             <div id="pdf-viewer-container-right" class="flex-1 overflow-auto"></div>
           </div>
         <% else %>
-          <div id="pdf-viewer-container" class="absolute inset-0 overflow-auto">
-          </div>
+          <div id="pdf-viewer-container" class="absolute inset-0 overflow-auto"></div>
         <% end %>
 
         <button
@@ -205,6 +202,5 @@
         }
       }
     </script>
-
   </div>
 </Layouts.workspace>

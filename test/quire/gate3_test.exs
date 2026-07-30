@@ -135,6 +135,7 @@ defmodule Quire.Gate3Test do
       # Deep verify first 10 reversed
       for i <- 0..9 do
         expected = "Page #{50 - i}"
+
         assert page_text(new_bytes, i) =~ expected,
                "page #{i} should contain '#{expected}' after reverse"
       end
@@ -246,7 +247,9 @@ defmodule Quire.Gate3Test do
       restored_media = media_box(uncropped, 0)
       assert restored_crop != nil
 
-      assert_in_delta restored_crop.left, restored_media.left, 0.1,
+      assert_in_delta restored_crop.left,
+                      restored_media.left,
+                      0.1,
                       "CropBox left should match MediaBox left after remove crop"
 
       assert_in_delta restored_crop.right, restored_media.right, 0.1
