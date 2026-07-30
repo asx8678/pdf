@@ -190,71 +190,68 @@ function fromPoints(points, unit) {
 
 /**
  * CSS → PDF → CSS round-trip check within 0.01 pt tolerance.
+ * Matches pdf.js PageViewport formulas.
  * @param {number} x — CSS x
  * @param {number} y — CSS y
  * @param {number} w — width
  * @param {number} h — height
- * @param {number} pageHeight
+ * @param {number} pageWidth — PDF page width
+ * @param {number} pageHeight — PDF page height
  * @param {number} [rotation=0]
  * @returns {boolean}
  */
-export function roundTripOk(x, y, w, h, pageHeight, rotation = 0, pageWidth = null) {
-  const pw = pageWidth || pageHeight;
-  const pdf = cssToPdfRotated(x, y, w, h, pageHeight, rotation, pw);
-  const css = pdfToCssRotated(pdf.x, pdf.y, pdf.width, pdf.height, pageHeight, rotation, pw);
+export function roundTripOk(x, y, w, h, pageWidth, pageHeight, rotation = 0) {
+  var pdf = cssToPdfRotated(x, y, w, h, pageWidth, pageHeight, rotation);
+  var css = pdfToCssRotated(pdf.x, pdf.y, pdf.width, pdf.height, pageWidth, pageHeight, rotation);
   return Math.abs(css.x - x) <= 0.01 && Math.abs(css.y - y) <= 0.01;
 }
 
 /**
  * CSS → PDF conversion with a rotation number (no pdf.js viewport).
+ * Uses pdf.js PageViewport formulas directly.
  * @param {number} x_css
  * @param {number} y_css
  * @param {number} w
  * @param {number} h
- * @param {number} pageHeight
+ * @param {number} pw — PDF page width
+ * @param {number} ph — PDF page height
  * @param {number} rotation — degrees 0, 90, 180, 270
  * @returns {{x:number, y:number, width:number, height:number}}
  */
-export function cssToPdfRotated(x_css, y_css, w, h, pageHeight, rotation, pageWidth) {
-  if (rotation && rotation !== 0) {
-    var pw = typeof pageWidth === 'number' ? pageWidth : pageHeight;
-    var r = applyRotation(x_css, y_css, pw, pageHeight, rotation);
-    return {
-      x: r.x,
-      y: pageHeight - r.y - h,
-      width: w,
-      height: h
-    };
+export function cssToPdfRotated(x_css, y_css, w, h, pw, ph, rotation) {
+  switch (rotation) {
+    case 90:
+      return { x: pw + y_css, y: -x_css - h, width: w, height: h };
+    case 180:
+      return { x: pw - x_css, y: ph - y_css - h, width: w, height: h };
+    case 270:
+      return { x: y_css, y: ph - x_css - h, width: w, height: h };
+    default:
+      return { x: x_css, y: ph - y_css - h, width: w, height: h };
   }
-  return {
-    x: x_css,
-    y: pageHeight - y_css - h,
-    width: w,
-    height: h
-  };
 }
 
 /**
  * PDF → CSS conversion with a rotation number (no pdf.js viewport).
+ * Inverse of cssToPdfRotated.
  * @param {number} x_pdf
  * @param {number} y_pdf
  * @param {number} w_pdf
  * @param {number} h_pdf
- * @param {number} pageHeight
+ * @param {number} pw — PDF page width
+ * @param {number} ph — PDF page height
  * @param {number} rotation — degrees 0, 90, 180, 270
  * @returns {{x:number, y:number, width:number, height:number}}
  */
-export function pdfToCssRotated(x_pdf, y_pdf, w_pdf, h_pdf, pageHeight, rotation, pageWidth) {
-  if (rotation && rotation !== 0) {
-    var pw = typeof pageWidth === 'number' ? pageWidth : pageHeight;
-    var cssY = pageHeight - y_pdf - h_pdf;
-    var r = applyRotation(x_pdf, cssY, pw, pageHeight, -rotation);
-    return { x: r.x, y: r.y, width: w_pdf, height: h_pdf };
+export function pdfToCssRotated(x_pdf, y_pdf, w_pdf, h_pdf, pw, ph, rotation) {
+  switch (rotation) {
+    case 90:
+      return { x: -y_pdf - h_pdf, y: x_pdf - pw, width: w_pdf, height: h_pdf };
+    case 180:
+      return { x: pw - x_pdf, y: ph - y_pdf - h_pdf, width: w_pdf, height: h_pdf };
+    case 270:
+      return { x: ph - y_pdf - h_pdf, y: x_pdf, width: w_pdf, height: h_pdf };
+    default:
+      return { x: x_pdf, y: ph - y_pdf - h_pdf, width: w_pdf, height: h_pdf };
   }
-  return {
-    x: x_pdf,
-    y: pageHeight - y_pdf - h_pdf,
-    width: w_pdf,
-    height: h_pdf
-  };
 }

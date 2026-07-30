@@ -32,33 +32,20 @@ test('JS and Elixir geometry agree over 1000 random tuples', async ({ page }) =>
     const random = seededRandom(42);
     const failures = [];
 
-    // Generate 1000 random tuples matching the Elixir property test range
+    // Generate 1000 random tuples
     for (let i = 0; i < 1000; i++) {
-      const pw = Math.floor(random() * 1100) + 100;  // 100-1200
-      const ph = Math.floor(random() * 1500) + 100;  // 100-1600
-      const x = Math.floor(random() * Math.max(1, pw - 10));
-      const y = Math.floor(random() * Math.max(1, ph - 10));
-      const bw = Math.floor(random() * Math.max(10, pw - x)) + 10;
-      const bh = Math.floor(random() * Math.max(10, ph - y)) + 10;
-      const rot = [0, 90, 180, 270][Math.floor(random() * 4)];
-
-      // CSS viewport dimensions swap for 90/270
-      const cssH = (rot === 90 || rot === 270) ? pw : ph;
+      var pw = Math.floor(random() * 1100) + 100;  // 100-1200
+      var ph = Math.floor(random() * 1500) + 100;  // 100-1600
+      var x = Math.floor(random() * Math.max(1, pw - 10));
+      var y = Math.floor(random() * Math.max(1, ph - 10));
+      var bw = Math.floor(random() * Math.max(10, pw - x)) + 10;
+      var bh = Math.floor(random() * Math.max(10, ph - y)) + 10;
+      var rot = [0, 90, 180, 270][Math.floor(random() * 4)];
 
       // Round trip: CSS → PDF → CSS should be identity
-      const ok = window.roundTripOk(x, y, bw, bh, cssH, rot, pw);
+      var ok = window.roundTripOk(x, y, bw, bh, pw, ph, rot);
       if (!ok) {
-        failures.push(`Round trip: (${x},${y}) ${bw}x${bh} cssH=${cssH} rot=${rot} pw=${pw}`);
-        if (failures.length >= 5) break;
-      }
-
-      // applyRotation inverse: after rotation, page dimensions swap for 90/270
-      var rotW = (rot === 90 || rot === 270) ? ph : pw;
-      var rotH = (rot === 90 || rot === 270) ? pw : ph;
-      var fwd = window.applyRotation(x, y, pw, ph, rot);
-      var inv = window.applyRotation(fwd.x, fwd.y, rotW, rotH, -rot);
-      if (Math.abs(inv.x - x) > 0.01 || Math.abs(inv.y - y) > 0.01) {
-        failures.push(`Inverse: (${x},${y}) rot=${rot} → (${fwd.x},${fwd.y}) → (${inv.x},${inv.y})`);
+        failures.push(`Round trip: (${x},${y}) ${bw}x${bh} pw=${pw} ph=${ph} rot=${rot}`);
         if (failures.length >= 5) break;
       }
     }
@@ -76,30 +63,29 @@ test('deliberately broken implementation is caught by the suite', async ({ page 
   // Inject a broken version of applyRotation and verify the round trip catches it
   await page.goto('about:blank');
   await page.addScriptTag({ content: `
-    function brokenRoundTripOk(x, y, w, h, ph, rot, pw) {
-      pw = pw || ph;
+    function brokenRoundTripOk(x, y, w, h, pw, ph, rot) {
+      // Off-by-one in rotation 90 y-flip and rotation 270 x formula
       var d = ((rot % 360) + 360) % 360;
-      var rx, ry;
-      // Bug: off-by-one in rotation 270 formula (h - y + 1 instead of h - y)
-      if (d === 90)  { rx = y;          ry = pw - x; }
-      else if (d === 270) { rx = ph - y + 1;  ry = x; }
-      else if (d === 180) { rx = pw - x;      ry = ph - y; }
-      else { rx = x;  ry = y; }
-      var pdfX = rx;
-      var pdfY = ph - ry - h;
-      var cssY = ph - pdfY - h;
-      var crx, cry;
-      var invD = ((-rot % 360) + 360) % 360;
-      if (invD === 90)  { crx = cssY;          cry = pw - pdfX; }
-      else if (invD === 270) { crx = ph - cssY + 1;  cry = pdfX; }
-      else if (invD === 180) { crx = pw - pdfX;      cry = ph - cssY; }
-      else { crx = pdfX;  cry = cssY; }
-      return Math.abs(crx - x) <= 0.01 && Math.abs(cry - y) <= 0.01;
+      var px, py;
+      switch (d) {
+        case 90:  px = pw + y;  py = -x - h + 1; break;  // off by +1
+        case 180: px = pw - x;  py = ph - y - h; break;
+        case 270: px = y + 1;   py = ph - x - h; break;  // off by +1
+        default:  px = x;       py = ph - y - h;
+      }
+      var cx, cy;
+      switch (d) {
+        case 90:  cx = -py - h;    cy = px - pw; break;
+        case 180: cx = pw - px;    cy = ph - py - h; break;
+        case 270: cx = ph - py - h; cy = px; break;
+        default:  cx = px;         cy = ph - py - h;
+      }
+      return Math.abs(cx - x) <= 0.01 && Math.abs(cy - y) <= 0.01;
     }
-    window.r1 = brokenRoundTripOk(10, 20, 100, 50, 792, 90, 612);
-    window.r2 = brokenRoundTripOk(10, 20, 100, 50, 612, 270, 792);
-    window.r3 = brokenRoundTripOk(10, 20, 100, 50, 612, 0, 792);
-    window.r4 = brokenRoundTripOk(10, 20, 100, 50, 612, 180, 792);
+    window.r1 = brokenRoundTripOk(10, 20, 100, 50, 612, 792, 90);
+    window.r2 = brokenRoundTripOk(10, 20, 100, 50, 612, 792, 270);
+    window.r3 = brokenRoundTripOk(10, 20, 100, 50, 612, 792, 0);
+    window.r4 = brokenRoundTripOk(10, 20, 100, 50, 612, 792, 180);
   `});
 
   const r1 = await page.evaluate(() => window.r1);

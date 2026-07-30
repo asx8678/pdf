@@ -97,7 +97,7 @@ defmodule Quire.GeometryRoundTripTest do
         ]
 
         for {x, y, bw, bh} <- positions do
-          assert Geometry.round_trip_ok?(x, y, bw, bh, css_h, rot, pw_pdf),
+          assert Geometry.round_trip_ok?(x, y, bw, bh, pw_pdf, ph_pdf, rot),
                  "Round trip failed at (#{x}, #{y}) size #{bw}x#{bh} rotation #{rot} on CSS #{css_w}x#{css_h} PDF #{pw_pdf}x#{ph_pdf}"
         end
       end

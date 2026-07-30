@@ -13,7 +13,7 @@ defmodule Quire.GeometryTest do
             w <- StreamData.integer(10..max(10, page_w - x)),
             h <- StreamData.integer(10..max(10, page_h - y))
           ) do
-      assert Geometry.round_trip_ok?(x, y, w, h, page_h)
+      assert Geometry.round_trip_ok?(x, y, w, h, page_w, page_h)
     end
   end
 

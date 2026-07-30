@@ -112,41 +112,53 @@ defmodule Quire.Geometry do
   Convert CSS/canvas bounding rect (top-left origin) to PDF user-space
   points (bottom-left origin).
 
-  Without a rotation the transform is a simple Y-flip:
-    x_pdf = x_css
-    y_pdf = page_height - y_css - height
+  Matches pdf.js `PageViewport.convertToPdfPoint`:
 
-  With rotation the page width must be provided to correctly transform
-  coordinates through the rotated frame.
+    rot 0:   x_pdf = x_css, y_pdf = pw - y_css - h
+    rot 90:  x_pdf = pw  + y_css, y_pdf = -x_css - h
+    rot 180: x_pdf = pw  - x_css, y_pdf = ph - y_css - h
+    rot 270: x_pdf = y_css,       y_pdf = ph - x_css - h
+
+  Where `pw` = PDF page width, `ph` = PDF page height.
   """
-  def css_to_pdf(x_css, y_css, width, height, page_height, rotation \\ 0, page_width \\ nil)
+  def css_to_pdf(x, y, w, h, pw, ph, rotation \\ 0)
 
-  def css_to_pdf(x, y, w, h, ph, 0, _pw) do
+  def css_to_pdf(x, y, w, h, _pw, ph, 0) do
     {x, ph - y - h, w, h}
   end
 
-  def css_to_pdf(x, y, w, h, ph, rot, pw) when is_number(pw) do
-    # Apply rotation using PAGE dimensions, not rect dimensions
-    {rx, ry} = apply_rotation(x, y, pw, ph, rot)
+  def css_to_pdf(x, y, w, h, pw, _ph, 90) do
+    {pw + y, -x - h, w, h}
+  end
 
-    # Convert to PDF coords from the rotated frame
-    {rx, ph - ry - h, w, h}
+  def css_to_pdf(x, y, w, h, pw, ph, 180) do
+    {pw - x, ph - y - h, w, h}
+  end
+
+  def css_to_pdf(x, y, w, h, _pw, ph, 270) do
+    {y, ph - x - h, w, h}
   end
 
   @doc """
-  Convert PDF user-space rect to CSS/canvas coords (top-left origin).
+  Convert PDF user-space rect (bottom-left origin) to CSS/canvas coords
+  (top-left origin). Inverse of `css_to_pdf/7`.
   """
-  def pdf_to_css(x_pdf, y_pdf, width, height, page_height, rotation \\ 0, page_width \\ nil)
+  def pdf_to_css(x, y, w, h, pw, ph, rotation \\ 0)
 
-  def pdf_to_css(x, y, w, h, ph, 0, _pw) do
+  def pdf_to_css(x, y, w, h, _pw, ph, 0) do
     {x, ph - y - h, w, h}
   end
 
-  def pdf_to_css(x, y, w, h, ph, rot, pw) when is_number(pw) do
-    # Convert PDF point back through CSS frame (inverse of css_to_pdf)
-    css_y = ph - y - h
-    {rx, ry} = apply_rotation(x, css_y, pw, ph, -rot)
-    {rx, ry, w, h}
+  def pdf_to_css(x, y, w, h, pw, _ph, 90) do
+    {-y - h, x - pw, w, h}
+  end
+
+  def pdf_to_css(x, y, w, h, pw, ph, 180) do
+    {pw - x, ph - y - h, w, h}
+  end
+
+  def pdf_to_css(x, y, w, h, _pw, ph, 270) do
+    {ph - y - h, x, w, h}
   end
 
   @doc """
@@ -166,11 +178,13 @@ defmodule Quire.Geometry do
 
   @doc """
   Check that a CSS → PDF → CSS round trip is identity within 0.01 pt.
+
+  Uses the same pdf.js-matched formulas as `css_to_pdf/7` and
+  `pdf_to_css/7`.
   """
-  def round_trip_ok?(x, y, w, h, page_h, rotation \\ 0, page_w \\ nil) do
-    pw = page_w || page_h
-    {px, py, _pw, _ph} = css_to_pdf(x, y, w, h, page_h, rotation, pw)
-    {cx, cy, _cw, _ch} = pdf_to_css(px, py, w, h, page_h, rotation, pw)
+  def round_trip_ok?(x, y, w, h, pw, ph, rotation \\ 0) do
+    {px, py, _pw, _ph} = css_to_pdf(x, y, w, h, pw, ph, rotation)
+    {cx, cy, _cw, _ch} = pdf_to_css(px, py, w, h, pw, ph, rotation)
 
     abs(cx - x) <= 0.01 and abs(cy - y) <= 0.01
   end
@@ -191,6 +205,4 @@ defmodule Quire.Geometry do
     {x - crop_x, y - crop_y}
   end
 
-  defp rotated_page_dims(w, h, rot) when rot in [90, 270], do: {h, w}
-  defp rotated_page_dims(w, h, _rot), do: {w, h}
 end
