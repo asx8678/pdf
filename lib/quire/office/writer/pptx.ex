@@ -31,7 +31,9 @@ defmodule Quire.Office.Writer.Pptx do
       {:ok, pptx_binary} = Quire.Office.Writer.Pptx.write(layout, :pptx, [])
   """
   @spec write(Layout.t(), :pptx, keyword()) :: {:ok, binary()}
-  def write(%Layout{} = layout, :pptx, _opts \\ []) do
+  def write(layout, format, _opts \\ [])
+
+  def write(%Layout{} = layout, :pptx, _opts) do
     init_state = %{media: [], next_media_id: 1}
 
     {slides_xmls, state} =
@@ -44,8 +46,11 @@ defmodule Quire.Office.Writer.Pptx do
     {:ok, build_zip(slides, state)}
   end
 
-  @doc "Best for text-based PDFs. Formatting fidelity is best-effort."
   @spec supported_formats() :: [:pptx]
+  def write(%Layout{}, format, _opts) do
+    {:error, "Unsupported format: #{inspect(format)}"}
+  end
+
   def supported_formats, do: [:pptx]
 
   # ── Slide rendering ─────────────────────────────────────────────────────

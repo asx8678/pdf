@@ -35,7 +35,9 @@ defmodule Quire.Office.Writer.Xlsx do
       {:ok, xlsx_binary} = Quire.Office.Writer.Xlsx.write(layout, :xlsx, [])
   """
   @spec write(Layout.t(), :xlsx, keyword()) :: {:ok, binary()}
-  def write(%Layout{} = layout, :xlsx, _opts \\ []) do
+  def write(layout, format, _opts \\ [])
+
+  def write(%Layout{} = layout, :xlsx, _opts) do
     sheets =
       layout.sections
       |> Enum.with_index(1)
@@ -48,7 +50,10 @@ defmodule Quire.Office.Writer.Xlsx do
     end
   end
 
-  @doc "Best for text-based PDFs. Formatting fidelity is best-effort."
+  def write(%Layout{}, format, _opts) do
+    {:error, "Unsupported format: #{inspect(format)}"}
+  end
+
   @spec supported_formats() :: [:xlsx]
   def supported_formats, do: [:xlsx]
 
@@ -77,18 +82,18 @@ defmodule Quire.Office.Writer.Xlsx do
   end
 
   defp block_to_rows({:heading, text, _level}) do
-    [[{"#{text}", bold: true}]]
+    [[[text, bold: true]]]
   end
 
   defp block_to_rows({:table, headers, rows}) do
     header_row =
       if headers != [] do
-        [Enum.map(headers, fn h -> {h, bold: true} end)]
+        [Enum.map(headers, fn h -> [h, bold: true] end)]
       else
         []
       end
 
-    data_rows = Enum.map(rows, fn row -> Enum.map(row, & &1) end)
+    data_rows = Enum.map(rows, fn row -> row end)
     header_row ++ data_rows
   end
 
