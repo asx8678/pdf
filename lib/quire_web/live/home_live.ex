@@ -110,7 +110,10 @@ defmodule QuireWeb.HomeLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <.title_bar document_title="Home" />
+      <.title_bar
+        document_title="Home"
+        notifications_pending={Quire.Licensing.expiring_soon?(@current_scope)}
+      />
 
       <div class="flex gap-6 w-full">
         <!-- Left: tile grid -->

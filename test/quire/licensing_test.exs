@@ -111,4 +111,59 @@ defmodule Quire.LicensingTest do
       assert Licensing.tiers() == ["trial", "standard", "premium", "business"]
     end
   end
+
+  describe "expiring_soon?/1" do
+    test "returns true when license expires within 7 days" do
+      user = user_fixture()
+
+      {:ok, _license} =
+        %License{user_id: user.id, tier: "trial"}
+        |> License.changeset(%{tier: "trial", expires_at: DateTime.add(DateTime.utc_now(), 3, :day)})
+        |> Quire.Repo.insert()
+
+      assert Licensing.expiring_soon?(user)
+    end
+
+    test "returns false when license expires beyond 7 days" do
+      user = user_fixture()
+
+      {:ok, _license} =
+        %License{user_id: user.id, tier: "trial"}
+        |> License.changeset(%{tier: "trial", expires_at: DateTime.add(DateTime.utc_now(), 30, :day)})
+        |> Quire.Repo.insert()
+
+      refute Licensing.expiring_soon?(user)
+    end
+
+    test "returns false when license has no expiry" do
+      user = user_fixture()
+
+      {:ok, _license} =
+        %License{user_id: user.id, tier: "standard"}
+        |> License.changeset(%{tier: "standard"})
+        |> Quire.Repo.insert()
+
+      refute Licensing.expiring_soon?(user)
+    end
+
+    test "returns false when user has no license" do
+      user = user_fixture()
+      refute Licensing.expiring_soon?(user)
+    end
+
+    test "returns false for nil" do
+      refute Licensing.expiring_soon?(nil)
+    end
+
+    test "accepts scope-like map with :user key" do
+      user = user_fixture()
+
+      {:ok, _license} =
+        %License{user_id: user.id, tier: "trial"}
+        |> License.changeset(%{tier: "trial", expires_at: DateTime.add(DateTime.utc_now(), 3, :day)})
+        |> Quire.Repo.insert()
+
+      assert Licensing.expiring_soon?(%{user: user})
+    end
+  end
 end

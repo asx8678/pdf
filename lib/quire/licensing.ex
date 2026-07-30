@@ -172,4 +172,40 @@ defmodule Quire.Licensing do
   """
   @spec tiers() :: [tier()]
   def tiers, do: ["trial", "standard", "premium", "business"]
+
+  @doc """
+  Returns `true` if the user's license expires within 7 days (avatar dot).
+
+  Accepts a `User` struct or `%Scope{}`. Returns `false` when the user
+  has no license, the license has no expiry, or the expiry is more than
+  7 days away.
+  """
+  @spec expiring_soon?(map() | nil) :: boolean()
+  def expiring_soon?(nil), do: false
+
+  def expiring_soon?(%{user: %{id: id}}), do: expiring_soon_for_user?(id)
+
+  def expiring_soon?(%{id: id}), do: expiring_soon_for_user?(id)
+
+  def expiring_soon?(_), do: false
+
+  defp expiring_soon_for_user?(user_id) do
+    import Ecto.Query
+
+    now = DateTime.utc_now()
+    seven_days = DateTime.add(now, 7 * 24 * 60 * 60, :second)
+
+    case Quire.Repo.one(
+      from(l in Quire.Accounts.License,
+        where:
+          l.user_id == ^user_id and
+            l.expires_at > ^now and
+            l.expires_at < ^seven_days,
+        select: count(l.id)
+      )
+    ) do
+      0 -> false
+      _ -> true
+    end
+  end
 end

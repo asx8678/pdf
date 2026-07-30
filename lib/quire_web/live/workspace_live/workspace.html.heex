@@ -15,6 +15,7 @@
       on_save="save_document"
       on_save_as="save_document_as"
       on_email="open_email_compose"
+      notifications_pending={Quire.Licensing.expiring_soon?(@current_scope)}
     />
     <.menu_bar
       active_tab={@active_tab}
