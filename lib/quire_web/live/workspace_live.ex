@@ -89,6 +89,9 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:search_whole_word, false)
       |> assign(:searching, false)
       |> assign(:zoom, 100)
+      |> assign(:scroll_mode, :vertical)
+      |> assign(:spread_mode, :single)
+      |> assign(:fit_mode, :fit_page)
       |> assign(:fullscreen, false)
       |> assign(:rotation, 0)
       |> assign(:split_view, false)
@@ -504,6 +507,27 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("zoom_changed", %{"zoom" => zoom}, socket) do
     {:noreply, assign(socket, :zoom, zoom)}
+  end
+
+  def handle_event("set_scroll_mode", %{"mode" => mode}, socket) when mode in ~w(vertical horizontal wrapped) do
+    {:noreply,
+     socket
+     |> assign(:scroll_mode, String.to_existing_atom(mode))
+     |> push_event("set_scroll_mode", %{mode: mode})}
+  end
+
+  def handle_event("set_spread_mode", %{"mode" => mode}, socket) when mode in ~w(none single odd even) do
+    {:noreply,
+     socket
+     |> assign(:spread_mode, String.to_existing_atom(mode))
+     |> push_event("set_spread_mode", %{mode: mode})}
+  end
+
+  def handle_event("set_fit_mode", %{"mode" => mode}, socket) when mode in ~w(fit_page fit_width actual_size) do
+    {:noreply,
+     socket
+     |> assign(:fit_mode, String.to_existing_atom(mode))
+     |> push_event("set_fit_mode", %{mode: mode})}
   end
 
   def handle_event("document_error", %{"message" => msg}, socket) do

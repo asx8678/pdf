@@ -51,16 +51,56 @@ const PdfViewerHook = {
     });
 
     this.handleEvent("set_scroll_mode", ({ mode }) => {
-      if (this._viewer) this._viewer.scrollMode = mode;
+      // pdf.js ScrollMode: vertical=0, horizontal=1, wrapped=2
+      const map = { vertical: 0, horizontal: 1, wrapped: 2 };
+      const val = map[mode];
+      if (val !== undefined && this._viewer) {
+        this._viewer.scrollMode = val;
+      }
     });
 
     this.handleEvent("set_spread_mode", ({ mode }) => {
-      if (this._viewer) this._viewer.spreadMode = mode;
+      // pdf.js SpreadMode: none=0, odd=1, even=2 (single=0, facing=1, cover-facing=2)
+      const map = { none: 0, single: 0, odd: 1, even: 2 };
+      const val = map[mode];
+      if (val !== undefined && this._viewer) {
+        this._viewer.spreadMode = val;
+      }
+    });
+
+    this.handleEvent("set_fit_mode", ({ mode }) => {
+      if (!this._viewer) return;
+      // pdf.js currentScaleValue: "page-fit", "page-width", "page-actual"
+      const map = {
+        fit_page: "page-fit",
+        fit_width: "page-width",
+        actual_size: "page-actual"
+      };
+      const val = map[mode];
+      if (val) this._viewer.currentScaleValue = val;
     });
 
     this.handleEvent("close_document", () => {
       this._closeDocument();
     });
+
+    // Ctrl+scroll zoom (T-051 §14.2: debounce re-render, CSS transform interim)
+    this.el.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      if (!this._viewer) return;
+
+      const delta = e.deltaY > 0 ? -0.1 : 0.1;
+      const newScale = Math.max(0.25, Math.min(5, this._viewer.currentScale + delta));
+      this._viewer.currentScale = newScale;
+
+      // Debounce the server push to 150ms (§14.2)
+      clearTimeout(this._zoomTimer);
+      this._zoomTimer = setTimeout(() => {
+        this.pushEvent("zoom_changed", { zoom: Math.round(newScale * 100) });
+        this._zoomTimer = null;
+      }, 150);
+    }, { passive: false });
 
     // Search panel (T-048) — run the find controller with the panel's
     // query and options; matches are highlighted in the text layer.

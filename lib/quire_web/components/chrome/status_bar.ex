@@ -18,12 +18,30 @@ defmodule QuireWeb.Chrome.StatusBar do
   attr :zoom, :integer, default: 100
   attr :rotation, :integer, default: 0
   attr :split, :boolean, default: false
+  attr :scroll_mode, :atom, default: :continuous
+  attr :spread_mode, :atom, default: :single
+  attr :fit_mode, :atom, default: :fit_page
   attr :snapshot_active, :boolean, default: false
   attr :read_aloud_active, :boolean, default: false
   attr :read_aloud_playing, :boolean, default: false
   attr :progress, :float, default: nil
   attr :progress_label, :string, default: nil
   attr :class, :string, default: nil
+
+  defp next_scroll_mode(:vertical), do: "horizontal"
+  defp next_scroll_mode(:horizontal), do: "wrapped"
+  defp next_scroll_mode(:wrapped), do: "vertical"
+  defp next_scroll_mode(_), do: "vertical"
+
+  defp next_spread_mode(:none), do: "odd"
+  defp next_spread_mode(:odd), do: "even"
+  defp next_spread_mode(:even), do: "none"
+  defp next_spread_mode(_), do: "none"
+
+  defp next_fit_mode(:fit_page), do: "fit_width"
+  defp next_fit_mode(:fit_width), do: "actual_size"
+  defp next_fit_mode(:actual_size), do: "fit_page"
+  defp next_fit_mode(_), do: "fit_page"
 
   def status_bar(assigns) do
     ~H"""
@@ -58,6 +76,24 @@ defmodule QuireWeb.Chrome.StatusBar do
         </div>
 
         <.rotate_control rotation={@rotation} />
+
+        <button type="button" phx-click="set_scroll_mode" phx-value-mode={next_scroll_mode(@scroll_mode)}
+          class={["p-1 rounded text-xs transition-colors", @scroll_mode != :vertical && "bg-accent/10 text-accent"]}
+          aria-label="Scroll mode: {@scroll_mode}">
+          <.icon name="hero-arrows-up-down" class="size-3.5" />
+        </button>
+
+        <button type="button" phx-click="set_spread_mode" phx-value-mode={next_spread_mode(@spread_mode)}
+          class={["p-1 rounded text-xs transition-colors", @spread_mode != :none && "bg-accent/10 text-accent"]}
+          aria-label="Spread mode: {@spread_mode}">
+          <.icon name="hero-rectangle-stack" class="size-3.5" />
+        </button>
+
+        <button type="button" phx-click="set_fit_mode" phx-value-mode={next_fit_mode(@fit_mode)}
+          class={["p-1 rounded text-xs transition-colors", @fit_mode != :fit_page && "bg-accent/10 text-accent"]}
+          aria-label="Fit mode: {@fit_mode}">
+          <.icon name="hero-arrows-pointing-in" class="size-3.5" />
+        </button>
 
         <.split_view split={@split} />
 
