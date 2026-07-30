@@ -2414,7 +2414,6 @@ defmodule QuireWeb.WorkspaceLive do
 
           {:noreply,
            socket
-           |> assign(:has_form_fields, false)
            |> push_event("open_document", %{
              url: socket.assigns.document_url,
              password: nil
