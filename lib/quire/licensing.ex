@@ -147,6 +147,19 @@ defmodule Quire.Licensing do
   end
 
   @doc """
+  Returns the current tier label for the given user or scope, without
+  re‑querying the database when the `:tier` key is already present.
+  """
+  @spec current_tier(map() | nil) :: String.t()
+  def current_tier(nil), do: "trial"
+
+  def current_tier(%{tier: tier}) when is_binary(tier), do: tier
+
+  def current_tier(%{user: %{tier: tier}}), do: tier
+
+  def current_tier(_fallback), do: "trial"
+
+  @doc """
   Returns the user-facing refusal message for a denied feature.
   """
   @spec refusal_message(feature()) :: String.t()

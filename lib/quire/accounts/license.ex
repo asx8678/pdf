@@ -28,6 +28,5 @@ defmodule Quire.Accounts.License do
     |> validate_required([:tier])
     |> validate_inclusion(:tier, ["trial", "standard", "premium", "business"])
     |> validate_number(:seats, greater_than: 0)
-    |> unique_constraint(:user_id)
   end
 end

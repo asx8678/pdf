@@ -307,6 +307,13 @@
 
     <.shortcuts_modal :if={@show_shortcuts} on_close="close_shortcuts" />
 
+    <.live_component
+      :if={@show_activate_modal}
+      module={QuireWeb.ActivateModal}
+      id="activate-modal"
+      current_scope={@current_scope}
+    />
+
     <.modal
       :if={@show_camera_capture}
       title="Scan Document with Camera"

@@ -148,6 +148,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:show_ocr_options, false)
       |> assign(:show_ocr_confidence, false)
       |> assign(:ocr_confidence_result, nil)
+      |> assign(:show_activate_modal, false)
       |> assign(:show_ocr_prompt, false)
       |> assign(:ocr_prompt_dismissed, false)
       |> assign(:measure_mode_active, false)
@@ -421,6 +422,14 @@ defmodule QuireWeb.WorkspaceLive do
 
   def handle_event("close_shortcuts", _params, socket) do
     {:noreply, assign(socket, :show_shortcuts, false)}
+  end
+
+  def handle_event("show_activate_modal", _params, socket) do
+    {:noreply, assign(socket, :show_activate_modal, true)}
+  end
+
+  def handle_event("close_activate", _params, socket) do
+    {:noreply, assign(socket, :show_activate_modal, false)}
   end
 
   # ── Backstage event handlers (T-036) ─────────────────────────────────────

@@ -81,7 +81,10 @@ defmodule QuireWeb.Chrome.MenuBar do
 
       <!-- Right: Activate now + help + gear -->
       <div class="flex items-center gap-1 ml-auto">
-        <button class="bg-gray-900 text-white text-xs font-medium px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors whitespace-nowrap">
+        <button
+          phx-click="show_activate_modal"
+          class="bg-gray-900 text-white text-xs font-medium px-3 py-1.5 rounded-md hover:bg-gray-800 transition-colors whitespace-nowrap"
+        >
           Activate now
         </button>
         <button

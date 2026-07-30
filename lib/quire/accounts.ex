@@ -6,7 +6,7 @@ defmodule Quire.Accounts do
   import Ecto.Query, warn: false
   alias Quire.Repo
 
-  alias Quire.Accounts.{User, UserSetting, UserToken, UserNotifier, SigningCredential}
+  alias Quire.Accounts.{User, UserSetting, UserToken, UserNotifier, SigningCredential, License, Totp}
 
   ## Database getters
 
@@ -599,5 +599,63 @@ defmodule Quire.Accounts do
   def reset_user_password(user, attrs) do
     changeset = User.password_changeset(user, attrs)
     update_user_and_delete_all_tokens(changeset)
+  end
+
+  @doc """
+  Validates an activation key against the `licenses` table.
+
+  On success upgrades the user's license to the tier associated with the key
+  and returns `{:ok, %License{}}`.  On failure returns `{:error, reason}`.
+  """
+  @spec validate_activation_key(User.t(), String.t()) :: {:ok, License.t()} | {:error, String.t()}
+  def validate_activation_key(_user, key) when key in ["", nil], do: {:error, "Please enter an activation key."}
+
+  def validate_activation_key(user, key) do
+    key = String.trim(key)
+
+    import Ecto.Query
+
+    query =
+      from(l in License,
+        where: l.activation_key == ^key,
+        limit: 1,
+        select: l
+      )
+
+    case Quire.Repo.one(query) do
+      nil ->
+        {:error, "Invalid activation key. Please check the key and try again."}
+
+      existing_license ->
+        now = DateTime.utc_now()
+
+        case existing_license.expires_at && DateTime.compare(existing_license.expires_at, now) do
+          :lt -> {:error, "This activation key has expired."}
+          _ ->
+            # Upsert the user's license
+            changeset =
+              %License{}
+              |> License.changeset(%{
+                tier: existing_license.tier,
+                seats: existing_license.seats,
+                activated_at: now,
+                expires_at: existing_license.expires_at,
+                activation_key: key
+              })
+              |> Ecto.Changeset.put_change(:user_id, user.id)
+
+            {:ok, _} =
+              Quire.Repo.insert(changeset,
+                on_conflict: [set: [
+                  tier: existing_license.tier,
+                  activated_at: now,
+                  activation_key: key
+                ]],
+                conflict_target: :user_id
+              )
+
+            {:ok, existing_license}
+        end
+    end
   end
 end
