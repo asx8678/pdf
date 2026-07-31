@@ -188,6 +188,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:form_detections, nil)
       |> assign(:clipboard_fallback, false)
       |> assign(:clipboard_fallback_msg, nil)
+      |> assign(:op_toasts, %{})
       |> assign(:translate_source, "detect")
       |> assign(:translate_target, "en")
       |> assign(:translate_mode, "overlay")
@@ -3160,7 +3161,49 @@ defmodule QuireWeb.WorkspaceLive do
         assign(socket, :ocr_progress, %{pct: pct})
       end
 
-    {:noreply, socket}
+    # T-086: live progress toasts + status strip, driven by PubSub broadcasts
+    toasts =
+      Map.update(
+        socket.assigns.op_toasts,
+        operation_id,
+        %{
+          message: "Conversion in progress",
+          pct: pct,
+          status: "running"
+        },
+        fn toast -> Map.merge(toast, %{pct: pct}) end
+      )
+
+    {:noreply, assign(socket, :op_toasts, toasts)}
+  end
+
+  @impl true
+  def handle_info({:operation_completed, operation_id, _doc_id}, socket) do
+    toasts =
+      Map.put(socket.assigns.op_toasts, operation_id, %{
+        message: "Conversion complete",
+        pct: 100,
+        status: "success"
+      })
+
+    {:noreply, assign(socket, :op_toasts, toasts)}
+  end
+
+  @impl true
+  def handle_info({:operation_failed, operation_id, _doc_id, reason}, socket) do
+    toasts =
+      Map.put(socket.assigns.op_toasts, operation_id, %{
+        message: reason,
+        pct: 100,
+        status: "error"
+      })
+
+    {:noreply, assign(socket, :op_toasts, toasts)}
+  end
+
+  @impl true
+  def handle_event("dismiss_op_toast", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :op_toasts, Map.delete(socket.assigns.op_toasts, id))}
   end
 
   @impl true

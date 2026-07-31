@@ -58,6 +58,17 @@ defmodule Quire.Workers.ConvertWorker do
     source_type = args["source_type"]
     doc_id = args["doc_id"]
 
+    operation =
+      case Quire.Operations.ensure_started(args, "convert_" <> source_type) do
+        {:ok, op_id, _doc, _user} -> {:ok, op_id, doc_id}
+        _ -> :skip
+      end
+
+    case operation do
+      {:ok, op_id, doc} -> Quire.Operations.progress(op_id, doc, 10)
+      :skip -> :ok
+    end
+
     result =
       case source_type do
         "html" -> convert_html(args)
@@ -65,13 +76,31 @@ defmodule Quire.Workers.ConvertWorker do
         other -> {:error, "Unknown source_type '#{other}'. Expected 'html' or 'url'."}
       end
 
-    case result do
-      {:ok, pdf_binary} ->
+    case {result, operation} do
+      {{:ok, pdf_binary}, {:ok, op_id, doc}} ->
+        Quire.Operations.progress(op_id, doc, 90)
+        persist_result(pdf_binary, args)
+        Quire.Operations.finish(op_id, doc)
+        emit_telemetry(:completed, %{doc_id: doc_id, source_type: source_type})
+        :ok
+
+      {{:ok, pdf_binary}, :skip} ->
         persist_result(pdf_binary, args)
         emit_telemetry(:completed, %{doc_id: doc_id, source_type: source_type})
         :ok
 
-      {:error, reason} ->
+      {{:error, reason}, {:ok, op_id, doc}} ->
+        Quire.Operations.fail(op_id, doc, reason)
+
+        emit_telemetry(:failed, %{
+          doc_id: doc_id,
+          source_type: source_type,
+          error: inspect(reason)
+        })
+
+        {:error, reason}
+
+      {{:error, reason}, :skip} ->
         emit_telemetry(:failed, %{
           doc_id: doc_id,
           source_type: source_type,

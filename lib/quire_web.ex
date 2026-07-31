@@ -86,6 +86,8 @@ defmodule QuireWeb do
       import Phoenix.HTML
       # Core UI components
       import QuireWeb.CoreComponents
+      # Progress toasts (T-086)
+      import QuireWeb.Shared.ProgressToast, only: [progress_toast: 1]
 
       # Common modules used in templates
       alias Phoenix.LiveView.JS

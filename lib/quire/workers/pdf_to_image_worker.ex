@@ -58,21 +58,21 @@ defmodule Quire.Workers.PdfToImageWorker do
 
   @impl true
   def perform(%Oban.Job{args: args}) do
-    doc_id = args["doc_id"]
-    operation_id = args["operation_id"]
-
     with {:ok, dpi} <- validated_dpi(args["dpi"] || 150),
          {:ok, format} <- validated_format(args["format"] || "png"),
          :ok <- validate_multipage_tiff(args["multipage_tiff"], format),
+         {:ok, operation_id, doc_id, _user_id} <-
+           Quire.Operations.ensure_started(args, "pdf_to_image"),
          {:ok, revision} <- fetch_revision(args["revision_id"]),
          {:ok, ref} <- fetch_storage_ref(revision),
          {:ok, pages} <- resolve_pages(args["page_range"], ref) do
       total = length(pages)
 
       if total == 0 do
+        Quire.Operations.fail(operation_id, doc_id, :no_pages)
         {:error, "No pages to render"}
       else
-        report_progress(operation_id, doc_id, 0)
+        Quire.Operations.progress(operation_id, doc_id, 0)
 
         result =
           render_pages(
@@ -89,13 +89,16 @@ defmodule Quire.Workers.PdfToImageWorker do
         case result do
           {:ok, output_binary} ->
             persist_result(output_binary, args, format, args["multipage_tiff"] || false)
-            report_progress(operation_id, doc_id, 100)
+            Quire.Operations.finish(operation_id, doc_id)
             :ok
 
           {:error, reason} ->
+            Quire.Operations.fail(operation_id, doc_id, reason)
             {:error, reason}
         end
       end
+    else
+      other -> other
     end
   end
 
@@ -111,7 +114,7 @@ defmodule Quire.Workers.PdfToImageWorker do
         fn page_num ->
           result = render_single_page(ref, page_num, dpi, format)
           # Report progress after each page completes (any order)
-          done = :atomics.add(completed, 1, 1)
+          done = :atomics.add_get(completed, 1, 1)
           pct = floor(done * 100 / total)
           report_progress(operation_id, doc_id, pct)
           {page_num, result}
@@ -308,7 +311,7 @@ defmodule Quire.Workers.PdfToImageWorker do
   defp report_progress(operation_id, doc_id, pct) when is_integer(pct) do
     pct = if pct > 100, do: 100, else: pct
     pct = if pct < 0, do: 0, else: pct
-    Quire.Workers.Base.report_progress(operation_id, doc_id, pct)
+    Quire.Operations.progress(operation_id, doc_id, pct)
   end
 
   # ── Persistence ────────────────────────────────────────────────────────

@@ -1071,6 +1071,41 @@
       />
     </form>
 
+    <%!-- T-086: operation status strip (live via PubSub broadcasts) --%>
+    <div
+      :if={Enum.any?(@op_toasts, fn {_id, t} -> t.status == "running" end)}
+      id="op-status-strip"
+      class="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 rounded-full border border-chrome-border dark:border-gray-600 bg-chrome-white dark:bg-gray-800 px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 shadow-lg"
+      role="status"
+      aria-live="polite"
+    >
+      <.icon name="hero-arrow-path" class="size-3.5 animate-spin text-accent" />
+      <span>
+        {Enum.count(@op_toasts, fn {_id, t} -> t.status == "running" end)} operation{if Enum.count(
+                                                                                          @op_toasts,
+                                                                                          fn {_id,
+                                                                                              t} ->
+                                                                                            t.status ==
+                                                                                              "running"
+                                                                                          end
+                                                                                        ) == 1,
+                                                                                        do: "",
+                                                                                        else: "s"} running
+      </span>
+    </div>
+
+    <%!-- T-086: operation progress toasts --%>
+    <div id="op-toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end">
+      <.progress_toast
+        :for={{id, toast} <- @op_toasts}
+        id={"op-toast-" <> id}
+        message={toast.message}
+        progress={toast.pct}
+        status={toast.status}
+        on_dismiss={JS.push("dismiss_op_toast", value: %{"id" => id})}
+      />
+    </div>
+
     <script :type={Phoenix.LiveView.ColocatedHook} name=".KeyboardShortcuts">
       export default {
         mounted() {
