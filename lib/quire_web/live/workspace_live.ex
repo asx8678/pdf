@@ -194,6 +194,15 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_provider_label, provider_label())
       |> assign(:translate_results, [])
       |> assign(:show_merge_wizard, false)
+      |> assign(:show_split_wizard, false)
+      |> assign(:split_mode, "every_n")
+      |> assign(:split_n, "5")
+      |> assign(:split_level, "1")
+      |> assign(:split_ranges, "")
+      |> assign(:split_size, "1mb")
+      |> assign(:split_extract, "")
+      |> assign(:split_running, false)
+      |> assign(:split_error, nil)
       |> assign(:merge_files, [])
       |> assign(:merge_numbering, true)
       |> assign(:merge_bookmarks, "keep")
@@ -2526,6 +2535,12 @@ defmodule QuireWeb.WorkspaceLive do
             phx-click="open_merge_wizard"
             tooltip="Combine multiple PDFs — drag to reorder, per-file page ranges, bookmarks and forms options"
           />
+          <.ribbon_button
+            icon="hero-scissors"
+            label="Split"
+            phx-click="open_split_wizard"
+            tooltip="Split the document into a ZIP — every N pages, at bookmarks, by ranges, by file size, or extract selected pages"
+          />
         </.ribbon_group>
 
         <.ribbon_group :if={@clipboard_fallback} label="Paste target">
@@ -3972,6 +3987,203 @@ defmodule QuireWeb.WorkspaceLive do
   defp merge_upload_error(:too_many_files), do: "Too many files (max 12)"
   defp merge_upload_error(:not_accepted), do: "Only PDF files are accepted"
   defp merge_upload_error(_), do: "Upload failed"
+
+  # ── Split wizard (T-082) ──────────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_split_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_split_wizard, true)
+     |> assign(:split_mode, "every_n")
+     |> assign(:split_n, "5")
+     |> assign(:split_level, "1")
+     |> assign(:split_ranges, "")
+     |> assign(:split_size, "1mb")
+     |> assign(:split_extract, "")
+     |> assign(:split_running, false)
+     |> assign(:split_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_split_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_split_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("split_set_mode", %{"mode" => mode}, socket) do
+    {:noreply, socket |> assign(:split_mode, mode) |> assign(:split_error, nil)}
+  end
+
+  @impl true
+  def handle_event("split_set_param", params, socket) do
+    socket =
+      Enum.reduce(params, socket, fn
+        {"n", value}, acc -> assign(acc, :split_n, value)
+        {"level", value}, acc -> assign(acc, :split_level, value)
+        {"ranges", value}, acc -> assign(acc, :split_ranges, value)
+        {"size", value}, acc -> assign(acc, :split_size, value)
+        {"extract", value}, acc -> assign(acc, :split_extract, value)
+        _, acc -> acc
+      end)
+
+    {:noreply, assign(socket, :split_error, nil)}
+  end
+
+  @impl true
+  def handle_event("split_submit", _params, socket) do
+    {:noreply, run_split(socket)}
+  end
+
+  defp run_split(socket) do
+    socket = socket |> assign(:split_running, true) |> assign(:split_error, nil)
+
+    with {:ok, doc} <-
+           Quire.Documents.get_document(
+             socket.assigns.active_document_id,
+             socket.assigns.current_scope
+           ),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         ref when not is_nil(ref) <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, mode} <- build_split_mode(socket.assigns),
+         {:ok, outputs} <-
+           Quire.Split.split(bytes, mode, name: split_prefix(socket.assigns.split_mode)),
+         {:ok, zip_bytes} <- Quire.Split.zip_outputs(outputs, "split.zip") do
+      journal_doc_split(doc, mode, length(outputs))
+
+      socket
+      |> assign(:split_running, false)
+      |> assign(:show_split_wizard, false)
+      |> push_event("download", %{
+        content: Base.encode64(zip_bytes),
+        filename: "split.zip",
+        content_type: "application/zip"
+      })
+      |> put_flash(:info, "Split into #{length(outputs)} PDF(s) — split.zip downloaded")
+    else
+      {:error, reason} ->
+        message = split_error_message(reason)
+
+        socket
+        |> assign(:split_running, false)
+        |> assign(:split_error, message)
+        |> put_flash(:error, message)
+
+      nil ->
+        socket
+        |> assign(:split_running, false)
+        |> assign(:split_error, "No current document to split")
+        |> put_flash(:error, "No current document to split")
+    end
+  end
+
+  defp build_split_mode(assigns) do
+    case assigns.split_mode do
+      "every_n" ->
+        case Integer.parse(assigns.split_n) do
+          {n, ""} when n >= 1 -> {:ok, {:every_n, n}}
+          _ -> {:error, "Enter a positive page count (every N pages)"}
+        end
+
+      "bookmarks" ->
+        case Integer.parse(assigns.split_level) do
+          {level, ""} when level >= 1 -> {:ok, {:bookmarks, level}}
+          _ -> {:error, "Enter a positive bookmark level"}
+        end
+
+      "ranges" ->
+        with {:ok, count} <- split_page_count(assigns),
+             {:ok, groups} <- Quire.Split.parse_range_groups(assigns.split_ranges, count) do
+          {:ok, {:ranges, groups}}
+        end
+
+      "file_size" ->
+        case split_size_bytes(assigns.split_size) do
+          {:ok, bytes} -> {:ok, {:file_size, bytes}}
+          {:error, _} -> {:error, "Choose a target file size"}
+        end
+
+      "extract" ->
+        with {:ok, count} <- split_page_count(assigns) do
+          case parse_page_list(assigns.split_extract, count) do
+            {:ok, pages} -> {:ok, {:extract, pages}}
+            {:error, message} -> {:error, message}
+          end
+        end
+
+      other ->
+        {:error, "Unknown split mode: #{other}"}
+    end
+  end
+
+  defp split_page_count(assigns) do
+    with {:ok, doc} <-
+           Quire.Documents.get_document(assigns.active_document_id, assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         ref when not is_nil(ref) <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, pdf_doc} <- ExPdfium.open(bytes) do
+      ExPdfium.page_count(pdf_doc)
+    else
+      _ -> {:error, :no_document}
+    end
+  end
+
+  # comma-separated 1-based pages → 0-based indices
+  defp parse_page_list(spec, count) do
+    trimmed = String.trim(spec)
+
+    if trimmed == "" do
+      {:error, "Enter the pages to extract (e.g. 1,4,7)"}
+    else
+      trimmed
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reduce_while({:ok, []}, fn part, {:ok, acc} ->
+        case Integer.parse(part) do
+          {n, ""} when n >= 1 and n <= count -> {:cont, {:ok, acc ++ [n - 1]}}
+          {n, ""} -> {:halt, {:error, "page #{n} is out of range (document has #{count} pages)"}}
+          _ -> {:halt, {:error, "invalid page number \"#{part}\""}}
+        end
+      end)
+    end
+  end
+
+  defp split_size_bytes("100kb"), do: {:ok, 100_000}
+  defp split_size_bytes("500kb"), do: {:ok, 500_000}
+  defp split_size_bytes("1mb"), do: {:ok, 1_000_000}
+  defp split_size_bytes("5mb"), do: {:ok, 5_000_000}
+  defp split_size_bytes("10mb"), do: {:ok, 10_000_000}
+  defp split_size_bytes("50mb"), do: {:ok, 50_000_000}
+  defp split_size_bytes(_), do: {:error, :unknown_size}
+
+  defp split_prefix("extract"), do: "extract"
+  defp split_prefix(_), do: "part"
+
+  defp split_error_message({:no_bookmarks, _}), do: "The document has no bookmarks at that level"
+
+  defp split_error_message({:page_out_of_bounds, _, count}),
+    do: "Page selection out of range (document has #{count} pages)"
+
+  defp split_error_message({:unknown_mode, mode}), do: "Unknown split mode: #{inspect(mode)}"
+  defp split_error_message({:zip_failed, reason}), do: "ZIP packaging failed: #{inspect(reason)}"
+  defp split_error_message(:empty_ranges), do: "Enter at least one page range"
+  defp split_error_message(:no_document), do: "No current document to split"
+  defp split_error_message(reason), do: "Split failed: #{inspect(reason)}"
+
+  # Best-effort doc.split journal entry on the source document's session.
+  defp journal_doc_split(doc, mode, output_count) do
+    with {:ok, session} <- Quire.Editing.open_session(doc.id, doc.user_id) do
+      op = %{
+        kind: "doc.split",
+        data: %{mode: mode, output_count: output_count},
+        inverse: {:restore_revision, nil}
+      }
+
+      Quire.Editing.apply_for_server(session, op)
+    end
+  end
 
   @impl true
   def handle_info({:close_camera_modal}, socket) do

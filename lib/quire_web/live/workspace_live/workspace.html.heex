@@ -522,6 +522,144 @@
     </.modal>
 
     <.modal
+      :if={@show_split_wizard}
+      title="Split PDF"
+      on_close="close_split_wizard"
+      open={@show_split_wizard}
+    >
+      <div id="split-wizard" class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5">
+            Split mode
+          </label>
+          <select
+            id="split-mode"
+            phx-change="split_set_mode"
+            class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          >
+            <option value="every_n" selected={@split_mode == "every_n"}>Every N pages</option>
+            <option value="bookmarks" selected={@split_mode == "bookmarks"}>At bookmarks</option>
+            <option value="ranges" selected={@split_mode == "ranges"}>By page ranges</option>
+            <option value="file_size" selected={@split_mode == "file_size"}>By file size</option>
+            <option value="extract" selected={@split_mode == "extract"}>
+              Extract selected pages
+            </option>
+          </select>
+        </div>
+
+        <div :if={@split_mode == "every_n"} id="split-param-every-n">
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="split-n">
+            Pages per part
+          </label>
+          <input
+            id="split-n"
+            type="number"
+            min="1"
+            value={@split_n}
+            phx-change="split_set_param"
+            name="n"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          />
+        </div>
+
+        <div :if={@split_mode == "bookmarks"} id="split-param-bookmarks">
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="split-level">
+            Bookmark level
+          </label>
+          <select
+            id="split-level"
+            phx-change="split_set_param"
+            name="level"
+            class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          >
+            <option value="1" selected={@split_level == "1"}>Top level</option>
+            <option value="2" selected={@split_level == "2"}>Second level</option>
+            <option value="3" selected={@split_level == "3"}>Third level</option>
+          </select>
+          <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            Each top-level bookmark starts a new part.
+          </p>
+        </div>
+
+        <div :if={@split_mode == "ranges"} id="split-param-ranges">
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="split-ranges">
+            Page ranges (one part per range)
+          </label>
+          <input
+            id="split-ranges"
+            type="text"
+            value={@split_ranges}
+            phx-change="split_set_param"
+            name="ranges"
+            placeholder="e.g. 1-3,5,7-9"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          />
+        </div>
+
+        <div :if={@split_mode == "file_size"} id="split-param-size">
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="split-size">
+            Target size per part
+          </label>
+          <select
+            id="split-size"
+            phx-change="split_set_param"
+            name="size"
+            class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          >
+            <option value="100kb" selected={@split_size == "100kb"}>100 KB</option>
+            <option value="500kb" selected={@split_size == "500kb"}>500 KB</option>
+            <option value="1mb" selected={@split_size == "1mb"}>1 MB</option>
+            <option value="5mb" selected={@split_size == "5mb"}>5 MB</option>
+            <option value="10mb" selected={@split_size == "10mb"}>10 MB</option>
+            <option value="50mb" selected={@split_size == "50mb"}>50 MB</option>
+          </select>
+        </div>
+
+        <div :if={@split_mode == "extract"} id="split-param-extract">
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="split-extract">
+            Pages to extract
+          </label>
+          <input
+            id="split-extract"
+            type="text"
+            value={@split_extract}
+            phx-change="split_set_param"
+            name="extract"
+            placeholder="e.g. 1,4,7"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          />
+          <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            Each selected page becomes its own PDF in the ZIP.
+          </p>
+        </div>
+
+        <div :if={@split_error} class="text-sm text-red-500" role="alert">
+          {@split_error}
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_split_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="split-submit-btn"
+            phx-click="split_submit"
+            disabled={@split_running}
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <.icon :if={@split_running} name="hero-arrow-path" class="size-4 animate-spin" />
+            <span>Split to ZIP</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
       :if={@show_camera_capture}
       title="Scan to PDF"
       on_close="close_camera_capture"
