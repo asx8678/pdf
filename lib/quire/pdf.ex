@@ -211,9 +211,36 @@ defmodule Quire.Pdf do
 
   Returns `{:error, :invalid_pdf}` for anything that is not a readable PDF, and
   `{:error, :password_error}` for one that needs a password.
+
+  The underlying `lopdf` 0.44 parser is spec-strict: it insists cross-reference
+  entries be exactly 20 bytes ending in a space then newline, and that the file
+  end with `%%EOF`. PDFium and qpdf read real-world documents that violate
+  those details, so the happy path here is fast strictly-parseable PDFs only.
+  When the direct parse fails with `:invalid_pdf`, the bytes are round-tripped
+  through PDFium (which tolerates the quirks and re-emits a canonical document)
+  and the parse is retried. The normalization is cheap and gated to a parse
+  failure; an encrypted PDF still surfaces as `:password_error` untouched.
   """
   @spec open(binary()) :: {:ok, t()} | {:error, atom()}
-  def open(bytes) when is_binary(bytes), do: Native.open(bytes)
+  def open(bytes) when is_binary(bytes) do
+    case Native.open(bytes) do
+      {:error, :invalid_pdf} -> open_via_pdfium(bytes)
+      other -> other
+    end
+  end
+
+  # lopdf's strict xref/EOF checks reject spec-nonconforming documents that
+  # PDFium reads happily (see module doc). ExPdfium normalizes them, so on a
+  # plain parse failure we round-trip through it and retry. Mirrors the pattern
+  # PdfA.normalize uses. The cost is only paid when Native.open/1 fails.
+  defp open_via_pdfium(bytes) do
+    with {:ok, doc} <- ExPdfium.open(bytes),
+         {:ok, normalized} <- ExPdfium.save_to_bytes(doc) do
+      Native.open(normalized)
+    else
+      _ -> {:error, :invalid_pdf}
+    end
+  end
 
   @doc """
   Parse a PDF from disk.

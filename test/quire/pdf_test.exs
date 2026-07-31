@@ -32,6 +32,19 @@ defmodule Quire.PdfTest do
     test "rejects something that is not a PDF" do
       assert {:error, :invalid_pdf} = Quire.Pdf.open("this is not a PDF")
     end
+
+    test "parses spec-nonconforming bytes via the PDFium fallback" do
+      # simple_texts.pdf suffers the two quirks lopdf 0.44 is strict about but
+      # PDFium and qpdf tolerate: cross-reference entries that are not exactly
+      # 20 bytes (they end in a bare newline) and a file that ends in %%%%EOF
+      # instead of %%EOF. A naive parse must fail; the normalization fallback
+      # must make it readable again.
+      bytes = File.read!(Path.expand("../fixtures/pdfs/simple_texts.pdf", __DIR__))
+
+      assert {:error, :invalid_pdf} = Quire.Pdf.Native.open(bytes)
+      assert {:ok, doc} = Quire.Pdf.open(bytes)
+      assert {:ok, 1} = Quire.Pdf.page_count(doc)
+    end
   end
 
   describe "open_file/1" do
