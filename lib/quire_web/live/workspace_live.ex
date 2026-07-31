@@ -1179,6 +1179,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("set_scroll_mode", %{"scroll_mode" => current}, socket)
       when current in ~w(vertical horizontal wrapped) do
     mode = next_scroll_mode(String.to_existing_atom(current))
+
     {:noreply,
      socket
      |> assign(:scroll_mode, mode)
@@ -1192,6 +1193,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("set_spread_mode", %{"spread_mode" => current}, socket)
       when current in ~w(none single odd even) do
     mode = next_spread_mode(String.to_existing_atom(current))
+
     {:noreply,
      socket
      |> assign(:spread_mode, mode)
@@ -1206,6 +1208,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("set_fit_mode", %{"fit_mode" => current}, socket)
       when current in ~w(fit_page fit_width actual_size) do
     mode = next_fit_mode(String.to_existing_atom(current))
+
     {:noreply,
      socket
      |> assign(:fit_mode, mode)
@@ -1770,7 +1773,8 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  defp fetch_rect([x0, y0, x1, y1]) when is_number(x0) and is_number(y0) and is_number(x1) and is_number(y1) do
+  defp fetch_rect([x0, y0, x1, y1])
+       when is_number(x0) and is_number(y0) and is_number(x1) and is_number(y1) do
     if x1 > x0 and y1 > y0 do
       {:ok, [x0 * 1.0, y0 * 1.0, x1 * 1.0, y1 * 1.0]}
     else

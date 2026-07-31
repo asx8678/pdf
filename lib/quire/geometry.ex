@@ -248,5 +248,4 @@ defmodule Quire.Geometry do
   def add_crop_origin(x, y, crop_x, crop_y) do
     {x - crop_x, y - crop_y}
   end
-
 end

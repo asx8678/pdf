@@ -87,7 +87,14 @@ defmodule Quire.Pdf.SignatureFlattenTest do
       assert {:ok, page} = Quire.Pdf.get_object(doc, {kid, 0})
       assert {:ok, res_num} = Quire.Pdf.allocate_object_id(doc)
       assert :ok = Quire.Pdf.set_object(doc, {res_num, 0}, Map.get(page, "/Resources", %{}))
-      assert :ok = Quire.Pdf.set_object(doc, {kid, 0}, Map.put(page, "/Resources", {:ref, res_num, 0}))
+
+      assert :ok =
+               Quire.Pdf.set_object(
+                 doc,
+                 {kid, 0},
+                 Map.put(page, "/Resources", {:ref, res_num, 0})
+               )
+
       assert {:ok, indirect} = Quire.Pdf.save(doc)
 
       assert {:ok, placed} = SignatureFlatten.place(indirect, 0, [72.0, 72.0, 200.0, 100.0], png)
@@ -97,6 +104,7 @@ defmodule Quire.Pdf.SignatureFlattenTest do
       assert {:ok, doc} = Quire.Pdf.open(placed)
       assert {:ok, resources} = Quire.Pdf.get_object(doc, {res_num, 0})
       assert {:ref, img_num, _} = get_in(resources, ["/XObject", "/ImSig1"])
+
       assert {:ok, {:stream, %{"/Subtype" => {:name, "Image"}}, _}} =
                Quire.Pdf.get_object(doc, {img_num, 0})
     end

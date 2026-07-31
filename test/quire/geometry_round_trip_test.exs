@@ -45,7 +45,8 @@ defmodule Quire.GeometryRoundTripTest do
 
       # In MediaBox frame, the text should exceed the CropBox origin
       assert mx > 72
-      assert my > -1_000  # bottom can be negative in CropBox frame
+      # bottom can be negative in CropBox frame
+      assert my > -1_000
 
       # Round trip: back to CropBox frame
       {cx, cy} = Geometry.add_crop_origin(mx, my, crop_origin_x, crop_origin_y)

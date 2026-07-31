@@ -30,6 +30,7 @@ defmodule Quire.Editing.Ops.SignaturePlaceTest do
 
     test "rejects missing fields", %{pdf: pdf} do
       assert {:error, "pdf_bytes is required"} = SignaturePlace.apply(%{}, %{})
+
       assert {:error, "page_index is required"} =
                SignaturePlace.apply(%{pdf_bytes: pdf}, %{})
 
