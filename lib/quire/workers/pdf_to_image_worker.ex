@@ -105,27 +105,30 @@ defmodule Quire.Workers.PdfToImageWorker do
   # ── Page rendering ─────────────────────────────────────────────────────
 
   defp render_pages(ref, pages, format, dpi, multipage_tiff, operation_id, doc_id, total) do
-    completed = :atomics.new(1, [])
-    :atomics.put(completed, 1, 0)
-
-    stream_result =
+    result =
       pages
       |> Task.async_stream(
         fn page_num ->
-          result = render_single_page(ref, page_num, dpi, format)
-          # Report progress after each page completes (any order)
-          done = :atomics.add_get(completed, 1, 1)
-          pct = floor(done * 100 / total)
-          report_progress(operation_id, doc_id, pct)
-          {page_num, result}
+          # Tasks only render — progress is reported by the single consumer
+          # process below so broadcasts stay strictly monotonic. Reporting
+          # from inside the tasks would let a task that finished early
+          # broadcast its % ahead of an earlier page's (the increment and
+          # the broadcast are not atomic — a task can be preempted between
+          # them), producing a non-monotonic stream under load.
+          {page_num, render_single_page(ref, page_num, dpi, format)}
         end,
         max_concurrency: 4,
         timeout: :infinity,
         ordered: true
       )
-      |> Enum.reduce_while({:ok, []}, fn
-        {:ok, {_page_num, {:ok, binary}}}, {:ok, acc} ->
-          {:cont, {:ok, [binary | acc]}}
+      |> Enum.reduce_while({:ok, [], 0}, fn
+        {:ok, {_page_num, {:ok, binary}}}, {:ok, acc, done} ->
+          done = done + 1
+          # ordered: true ⇒ results arrive in input order, so `done` — and
+          # the percentage derived from it — is monotonic by construction
+          # and emitted from a single process (the ordered reduce).
+          report_progress(operation_id, doc_id, floor(done * 100 / total))
+          {:cont, {:ok, [binary | acc], done}}
 
         {:ok, {_page_num, {:error, reason}}}, _acc ->
           {:halt, {:error, reason}}
@@ -134,8 +137,8 @@ defmodule Quire.Workers.PdfToImageWorker do
           {:halt, {:error, "Render task failed: #{inspect(reason)}"}}
       end)
 
-    case stream_result do
-      {:ok, page_binaries} ->
+    case result do
+      {:ok, page_binaries, _done} ->
         page_binaries = Enum.reverse(page_binaries)
 
         if multipage_tiff do

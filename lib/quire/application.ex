@@ -18,7 +18,12 @@ defmodule Quire.Application do
       {Quire.Editing.EditSessionSupervisor, []},
       # chromic_pdf looks up the instance by the module name (ChromicPDF), so
       # the supervisor must register under that name — not a custom one.
-      {ChromicPDF, []},
+      # Options come from `config :quire, :chromic_pdf_opts` (dev.exs sets
+      # `on_demand: true`): each print job spawns a temporary headless Chrome
+      # which ConvertWorker.print_to_pdf_safely/2 terminates when the job
+      # finishes (ChromicPDF's own teardown leaves the Chrome binary running
+      # on macOS until the whole VM exits).
+      {ChromicPDF, Application.get_env(:quire, :chromic_pdf_opts, [])},
       # Start a worker by calling: Quire.Worker.start_link(arg)
       # {Quire.Worker, arg},
       # Start to serve requests, typically the last entry
@@ -42,6 +47,19 @@ defmodule Quire.Application do
         # both system-installed and downloaded packs (§T-141).
         unless System.get_env("QUIRE_SKIP_TESSDATA_INIT") do
           Quire.Ocr.Tessdata.init!()
+        end
+
+        # Reap orphaned on-demand Chrome instances from a crashed previous
+        # run (worker killed mid-print etc.) plus their leftover profile
+        # dirs. No-op unless dev's on-demand mode left tagged instances
+        # behind; never touches the GUI Chrome. Best-effort: a sweep
+        # failure must never fail the whole boot.
+        try do
+          Quire.Workers.ConvertWorker.sweep_stale_chromium()
+        rescue
+          e ->
+            require Logger
+            Logger.warning("boot chrome sweep failed: #{Exception.message(e)}")
         end
 
         {:ok, pid}

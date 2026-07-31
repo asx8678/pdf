@@ -100,7 +100,12 @@ defmodule Quire.EngineTest do
   describe "Quire.Engine trace/4" do
     setup context do
       test_pid = self()
-      handler_id = "engine-test-#{context.line}-#{inspect(test_pid)}"
+      # One unique handler id per test line. attach_many on the shared
+      # [:quire, :engine, ...] events is process-global: under full-suite
+      # load, concurrent async tests (and the pdf→image worker's own
+      # Render.render_page traces) emit events on the same names, and the
+      # handler forwards them all to this test's mailbox.
+      handler_id = "engine-test-#{context.line}-#{System.unique_integer([:positive])}"
 
       handler = fn event, measurements, metadata, _config ->
         send(test_pid, {:telemetry, handler_id, event, measurements, metadata})
@@ -118,7 +123,10 @@ defmodule Quire.EngineTest do
       )
 
       on_exit(fn ->
-        :telemetry.detach(handler_id)
+        # Tolerates the handler already being detached (e.g. after a
+        # telemetry handler failure event removed it).
+        _ = :telemetry.detach(handler_id)
+        :ok
       end)
 
       %{handler_id: handler_id}
@@ -127,6 +135,9 @@ defmodule Quire.EngineTest do
     test "emits start and stop on success", %{handler_id: handler_id} do
       assert {:ok, 42} = Quire.Engine.trace(Quire.Render, :page_count, [ref: "doc"], fn -> 42 end)
 
+      # Events are forwarded for ALL engines/operations; filter by metadata
+      # so a concurrent render_page trace or a :save/:sign event can never
+      # satisfy these assertions.
       assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], measurements, metadata}
       assert metadata.engine == Quire.Render
       assert metadata.operation == :page_count
@@ -134,6 +145,7 @@ defmodule Quire.EngineTest do
 
       assert_receive {:telemetry, ^handler_id, [:quire, :engine, :stop], measurements, metadata}
       assert metadata.engine == Quire.Render
+      assert metadata.operation == :page_count
       assert is_integer(measurements.duration)
     end
 
@@ -143,12 +155,14 @@ defmodule Quire.EngineTest do
                  raise ArgumentError, "bad arg"
                end)
 
-      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], _, _}
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], _, metadata}
+      assert metadata.operation == :page_count
 
       assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], measurements,
                       metadata}
 
       assert metadata.engine == Quire.Render
+      assert metadata.operation == :page_count
       assert is_integer(measurements.duration)
     end
 
@@ -163,6 +177,7 @@ defmodule Quire.EngineTest do
 
       assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], _, metadata}
       assert metadata.engine == Quire.Pdf
+      assert metadata.operation == :save
     end
   end
 

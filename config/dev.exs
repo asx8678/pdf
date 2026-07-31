@@ -88,4 +88,23 @@ config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
 # Disable swoosh api client as it is only required for production adapters.
+# Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# ── ChromicPDF on-demand mode (§3.6.6) ─────────────────────────────────────
+#
+# Instead of keeping a persistent headless Chrome alive for the whole app
+# session (the library default), every print job spawns a temporary browser
+# and is shut down the moment the job finishes — no Chrome process lingers
+# between conversions.
+#
+# ConvertWorker.print_to_pdf_safely/2 gives each on-demand instance a
+# unique per-job --user-data-dir profile and reaps exactly that process
+# tree after the job (ChromicPDF's own teardown leaves the Chrome binary
+# running on macOS until the whole VM exits). The GUI Chrome is never
+# touched: it has no --headless/--remote-debugging-pipe and never carries
+# a job profile marker.
+#
+# Trade-off: each conversion pays Chrome's startup cost (~1 s). Set to []
+# to restore the persistent pool (prod default).
+config :quire, chromic_pdf_opts: [on_demand: true]

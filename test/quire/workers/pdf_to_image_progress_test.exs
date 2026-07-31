@@ -65,21 +65,14 @@ defmodule Quire.Workers.PdfToImageProgressTest do
 
       assert result == :ok
 
-      # collect the progress broadcasts and assert they are monotonic
-      progresses =
-        Stream.repeatedly(fn ->
-          receive do
-            {:operation_progress, _op_id, pct} -> pct
-            {:operation_completed, op_id, _doc_id} -> {:completed, op_id}
-          after
-            10_000 -> :timeout
-          end
-        end)
-        |> Enum.take_while(fn
-          {:completed, _} -> false
-          :timeout -> false
-          _ -> true
-        end)
+      # collect the progress broadcasts and assert they are monotonic.
+      # Collect until the operation completes (not just a fixed receive
+      # window): under full-suite load the conversion takes longer than
+      # the old 10 s window and the partial prefix misled the assertion.
+      # The 10 s per-message timeout only trips if the worker goes silent
+      # mid-conversion, which is a real failure.
+      assert {:completed, progresses, _op_id} = collect_until_completed([]),
+             "conversion never completed within the receive window"
 
       assert progresses != []
       assert progresses == Enum.sort(progresses), "progress must be monotonic"
@@ -99,6 +92,22 @@ defmodule Quire.Workers.PdfToImageProgressTest do
 
       # telemetry was emitted for the duration
       assert_receive {:telemetry_event, [:quire, :operation, :completed]}, 5_000
+    end
+  end
+
+  # Drains the document topic until the operation-completed broadcast.
+  # Returns `{:completed, pcts, op_id}` on success, `{:timed_out, pcts}` if
+  # the worker goes silent mid-conversion (a real stall, not a partial
+  # prefix to assert on).
+  defp collect_until_completed(acc) do
+    receive do
+      {:operation_progress, _op_id, pct} ->
+        collect_until_completed([pct | acc])
+
+      {:operation_completed, op_id, _doc_id} ->
+        {:completed, Enum.reverse(acc), op_id}
+    after
+      10_000 -> {:timed_out, Enum.reverse(acc)}
     end
   end
 end

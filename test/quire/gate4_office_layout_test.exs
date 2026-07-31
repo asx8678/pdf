@@ -41,7 +41,7 @@ defmodule Quire.Gate4OfficeLayoutTest do
 
     opts = [discard_stderr: true, page_size: :A4, offline: true]
 
-    case ChromicPDF.print_to_pdf({:html, html}, opts) do
+    case Quire.Workers.ConvertWorker.print_to_pdf_safely({:html, html}, opts) do
       {:ok, base64} -> {:ok, layout, Base.decode64!(base64)}
       other -> other
     end

@@ -46,6 +46,12 @@ config :logger, level: :warning
 # Run Oban in testing mode — skip plugins and queues, allow inserting jobs
 config :quire, Oban, testing: :manual, plugins: false
 
+# ChromicPDF on-demand mode (same as dev): each print job spawns a temporary
+# headless Chrome which ConvertWorker.print_to_pdf_safely/2 reaps when the
+# job finishes. Without this, test runs (gate4_office_layout etc.) keep a
+# persistent pool Chrome alive across test runs with no cleanup.
+config :quire, chromic_pdf_opts: [on_demand: true]
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 

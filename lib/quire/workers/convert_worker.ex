@@ -1,4 +1,6 @@
 defmodule Quire.Workers.ConvertWorker do
+  require Logger
+
   @moduledoc ~S"""
   Oban worker for HTML/URL to PDF conversion via chromic_pdf (§T-072).
 
@@ -9,6 +11,13 @@ defmodule Quire.Workers.ConvertWorker do
   ## Queue
 
   Runs on the `:convert` queue, serialised (concurrency 1, §7.2).
+
+  The per-job Chrome reaping (prepare_job_profile/0 + reap_chromium/1) relies
+  on this serialisation: exactly one job at a time mutates the on-demand
+  Agent's `:chrome_args` and owns the marker. The `:convert` queue
+  concurrency MUST stay 1 — raising it lets concurrent jobs clobber each
+  other's markers and defeat cleanup. (FileToPdfWorker also fires on
+  `:convert`, so it inherits the guarantee.)
 
   ## Job args
 
@@ -143,10 +152,255 @@ defmodule Quire.Workers.ConvertWorker do
   # plain-language cause so the operations row (`Operations.fail/3`) and the
   # UI toast surface something a user can act on — never an engine dump.
   def print_to_pdf_safely(source, opts) do
-    ChromicPDF.print_to_pdf(source, opts)
+    {marker, restore} = prepare_job_profile()
+
+    try do
+      ChromicPDF.print_to_pdf(source, opts)
+    rescue
+      e in [ChromicPDF.ChromeError] -> {:error, chrome_error_message(e)}
+      e -> {:error, generic_chrome_message(e)}
+    after
+      # Best-effort cleanup on every exit path. In on-demand mode ChromicPDF
+      # shuts down its own supervision tree after the job but leaves the
+      # spawned Chrome binary running on macOS until the whole VM exits — so
+      # reap exactly the instance spawned for this job, tagged with a unique
+      # per-job --user-data-dir profile. The GUI Chrome and other tools'
+      # instances never carry the marker and are never touched. Safe() keeps
+      # this from crashing the worker or masking a produced PDF.
+      safe(fn -> restore.() end)
+      safe(fn -> reap_chromium(marker) end)
+    end
+  end
+
+  # Never let cleanup crash the worker or mask an already-produced PDF on any
+  # path. restore.() and reap_chromium/1 are best-effort/idempotent and must
+  # survive ps / kill / Agent weirdness, including an Agent that died in a
+  # concurrent (unserialised) launch config update.
+  defp safe(fun) do
+    fun.()
   rescue
-    e in [ChromicPDF.ChromeError] -> {:error, chrome_error_message(e)}
-    e -> {:error, generic_chrome_message(e)}
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+    :throw, _ -> :ok
+  end
+
+  # Give this job's temporary Chrome a unique --user-data-dir profile so the
+  # reaper can identify and terminate exactly the process tree it spawned.
+  # Only on-demand mode holds an Agent with the launch config to update; in
+  # pool mode (prod default) the shared instance must never be touched, so
+  # the marker stays nil and reaping is a no-op. (test.exs does enable
+  # on_demand, so "pool mode" here really means "no on-demand Agent yet".)
+  #
+  # The marker is MERGED into the existing :chrome_args — it never clobbers
+  # other operator-configured flags (e.g. --no-sandbox) — and restore puts
+  # the prior value back verbatim, so nothing leaks across jobs.
+  defp prepare_job_profile do
+    case find_on_demand_agent() do
+      nil ->
+        maybe_warn_missing_agent()
+        {nil, nil}
+
+      agent ->
+        marker =
+          Path.join(
+            System.tmp_dir!(),
+            "quire-chrome-" <> Base.url_encode64(:crypto.strong_rand_bytes(8), padding: false)
+          )
+
+        try do
+          prior = Agent.get(agent, &Keyword.get(&1, :chrome_args))
+
+          Agent.update(agent, fn cfg ->
+            Keyword.update(cfg, :chrome_args, new_chrome_args(marker), &add_marker(&1, marker))
+          end)
+
+          {marker, fn -> restore_chrome_args(agent, prior) end}
+        rescue
+          # Agent died (supervisor restarting): fall back to no marker — the
+          # job still runs, only precise per-job reaping is lost.
+          _ -> {nil, nil}
+        end
+    end
+  end
+
+  # chromic_pdf's :chrome_args is a binary, a keyword list (:append / :remove),
+  # or absent. Build a fresh keyword that appends only our marker without
+  # assuming any prior shape.
+  defp new_chrome_args(marker), do: [append: ["--user-data-dir=" <> marker]]
+
+  # Add our marker to any existing :append list, keeping prior entries intact.
+  defp add_marker(existing, marker) do
+    kw =
+      case existing do
+        bin when is_binary(bin) -> [append: List.wrap(bin)]
+        kw when is_list(kw) -> kw
+        _ -> []
+      end
+
+    marker_arg = "--user-data-dir=" <> marker
+
+    Keyword.update(kw, :append, [marker_arg], fn appends ->
+      (List.wrap(appends) ++ [marker_arg]) |> Enum.uniq()
+    end)
+  end
+
+  # Put the launch config back to exactly what it was before the job —
+  # including any pre-existing :chrome_args the job had to merge into.
+  defp restore_chrome_args(agent, prior) do
+    Agent.update(agent, fn cfg ->
+      case prior do
+        value when value in [nil, []] -> Keyword.delete(cfg, :chrome_args)
+        value -> Keyword.put(cfg, :chrome_args, value)
+      end
+    end)
+  end
+
+  # If on-demand mode is configured but the Agent can't be found (e.g. a
+  # chromic_pdf upgrade restructured its internals), per-job reaping silently
+  # degrades to a no-op and Chrome would leak again — surface that loudly.
+  defp maybe_warn_missing_agent do
+    if Keyword.get(Application.get_env(:quire, :chromic_pdf_opts, []), :on_demand, false) do
+      Logger.warning(
+        "ChromicPDF is configured with on_demand: true but no on-demand Agent was found; " <>
+          "per-job Chrome reaping is DISABLED. Check find_on_demand_agent/0 against " <>
+          "chromic_pdf internals (pinned == 1.17.1)."
+      )
+    end
+  end
+
+  defp find_on_demand_agent do
+    with pid when is_pid(pid) <- Process.whereis(ChromicPDF) do
+      pid
+      |> Supervisor.which_children()
+      |> Enum.find_value(fn
+        {Agent, agent_pid, :worker, _} -> agent_pid
+        _ -> nil
+      end)
+    else
+      _ -> nil
+    end
+  end
+
+  # Terminate the headless Chrome instance spawned for this job. Identified
+  # by its unique per-job --user-data-dir marker (see prepare_job_profile/0),
+  # so we only ever kill exactly the process tree we spawned. TERM first
+  # (Chrome exits gracefully), then KILL stragglers.
+  defp reap_chromium(marker) when is_binary(marker) do
+    for pid <- chromium_pids(marker) do
+      System.cmd("kill", ["-TERM", to_string(pid)], stderr_to_stdout: true)
+    end
+
+    wait_for_chromium_exit(marker)
+
+    for pid <- chromium_pids(marker) do
+      System.cmd("kill", ["-9", to_string(pid)], stderr_to_stdout: true)
+    end
+
+    File.rm_rf(marker)
+  end
+
+  defp reap_chromium(_), do: :ok
+
+  @doc false
+  # Boot-time cleanup: terminate orphaned on-demand Chrome instances left
+  # behind by a crashed previous run (worker killed mid-print, VM killed,
+  # ...). Matches only instances Quire spawned — they all carry a
+  # --user-data-dir=.../quire-chrome-... profile — so the GUI Chrome and
+  # any other tool's instances are never touched. Also removes leftover
+  # per-job profile dirs.
+  def sweep_stale_chromium do
+    # Orphans from a dead BEAM get reparented to launchd (ppid 1). A live
+    # concurrent BEAM's Chrome (e.g. `mix test` next to `mix phx.server`)
+    # keeps its BEAM as parent — ppid != 1 — and must never be touched.
+    for {pid, ppid} <- chromium_processes("quire-chrome-"), ppid == 1 do
+      System.cmd("kill", ["-9", to_string(pid)], stderr_to_stdout: true)
+    end
+
+    # Remove leftover profile dirs — but only those no longer claimed by a
+    # live owner. After the kill above, all surviving marker processes are
+    # live (ppid != 1) instances of a different concurrent BEAM sharing the
+    # same tmp root; deleting their in-flight profile dir (SessionState /
+    # singleton lock) would corrupt that active conversion. Skip rm_rf for
+    # any dir whose name token appears in a live (ppid != 1) marker argv.
+    live = live_marker_argv()
+
+    for dir <- Path.wildcard(Path.join(System.tmp_dir!(), "quire-chrome-*")) do
+      token = Path.basename(dir)
+
+      unless Enum.any?(live, &String.contains?(&1, token)) do
+        File.rm_rf(dir)
+      end
+    end
+
+    :ok
+  end
+
+  # {pid, ppid} pairs whose argv carries this marker as a --user-data-dir.
+  # Requiring the --user-data-dir= prefix means a random unrelated process
+  # that merely mentions the marker substring is never matched. Lines that
+  # fail to parse (ps output can be briefly inconsistent) are skipped, never
+  # raised on — the reaper must survive any ps weirdness.
+  defp chromium_processes(marker) do
+    {out, _} = System.cmd("ps", ["-eo", "pid=,ppid=,args="])
+
+    out
+    |> String.split("\n")
+    |> Enum.flat_map(fn line ->
+      with [_, pid, ppid] <- Regex.run(~r/^\s*(\d+)\s+(\d+)\s+/, line),
+           # Require both a --user-data-dir= and the marker token so a random
+           # unrelated process that merely mentions the token is never matched,
+           # while both the per-job full-path marker and the sweep's bare
+           # "quire-chrome-" token are correctly found.
+           true <- String.contains?(line, "--user-data-dir="),
+           true <- String.contains?(line, marker) do
+        [{String.to_integer(pid), String.to_integer(ppid)}]
+      else
+        _ -> []
+      end
+    end)
+  end
+
+  # argv of live marker Chrome processes owned by a live (ppid != 1) process
+  # — a different concurrent BEAM sharing the tmp root, whose profile dir a
+  # parallel boot sweep must not delete.
+  defp live_marker_argv do
+    {out, _} = System.cmd("ps", ["-eo", "ppid=,args="])
+
+    out
+    |> String.split("\n")
+    |> Enum.reduce([], fn line, acc ->
+      case Regex.run(~r/^\s*(\d+)\s+(.*)/, line) do
+        [_, ppid, args] ->
+          if String.to_integer(ppid) != 1 and String.contains?(args, "--user-data-dir=") and
+               String.contains?(args, "quire-chrome-") do
+            [args | acc]
+          else
+            acc
+          end
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp chromium_pids(marker) do
+    for {pid, _ppid} <- chromium_processes(marker), do: pid
+  end
+
+  # Poll up to ~2 s for the instance to exit after TERM.
+  defp wait_for_chromium_exit(marker, tries \\ 50)
+
+  defp wait_for_chromium_exit(_marker, 0), do: :ok
+
+  defp wait_for_chromium_exit(marker, tries) do
+    if chromium_pids(marker) == [] do
+      :ok
+    else
+      Process.sleep(40)
+      wait_for_chromium_exit(marker, tries - 1)
+    end
   end
 
   defp chrome_error_message(%{error: "net::ERR_" <> code}) do
