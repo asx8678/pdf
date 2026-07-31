@@ -16,7 +16,9 @@ defmodule Quire.Application do
       {DNSCluster, query: Application.get_env(:quire, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Quire.PubSub},
       {Quire.Editing.EditSessionSupervisor, []},
-      {ChromicPDF, [name: ChromicPDF.Supervisor]},
+      # chromic_pdf looks up the instance by the module name (ChromicPDF), so
+      # the supervisor must register under that name — not a custom one.
+      {ChromicPDF, []},
       # Start a worker by calling: Quire.Worker.start_link(arg)
       # {Quire.Worker, arg},
       # Start to serve requests, typically the last entry

@@ -66,8 +66,15 @@ config :quire, QuireWeb.Endpoint,
   live_view: [signing_salt: "kAfh3PPB"]
 
 # Chromium executable path for chromic_pdf (§3.6.6).
-# Override with CHROME_EXECUTABLE env var or per-environment config.
-config :chromic_pdf, chrome_executable: System.get_env("CHROME_EXECUTABLE") || "/usr/bin/chromium"
+# Override with CHROME_EXECUTABLE env var or per-environment config. On
+# macOS the engine ships with the app bundle; on Linux /usr/bin/chromium.
+config :chromic_pdf,
+  chrome_executable:
+    System.get_env("CHROME_EXECUTABLE") ||
+      if(File.exists?("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        do: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        else: "/usr/bin/chromium"
+      )
 
 # Configure LiveView
 config :phoenix_live_view,
