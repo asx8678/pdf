@@ -101,7 +101,18 @@ defmodule QuireWeb.HomeLive do
       |> assign(:pending_bytes, nil)
       |> assign(:pending_title, nil)
       |> assign(:password_form, to_form(%{}))
+      |> assign(:show_batch, false)
+      |> assign(:batch_steps, [])
+      |> assign(:batch_name, "")
+      |> assign(:batch_recipes, [])
+      |> assign(:batch_error, nil)
+      |> assign(:batch_running, false)
       |> allow_upload(:pdf, accept: ~w(.pdf), max_entries: 1, max_file_size: 500_000_000)
+      |> allow_upload(:batch_files,
+        accept: ~w(.pdf .png .jpg .jpeg),
+        max_entries: 20,
+        max_file_size: 50_000_000
+      )
 
     {:ok, socket}
   end
@@ -128,6 +139,7 @@ defmodule QuireWeb.HomeLive do
                 cond do
                   tile.id == "open" -> "open_pdf"
                   tile.id == "customize" -> "open_customize"
+                  tile.id == "batch" -> "open_batch"
                   true -> nil
                 end
               }
@@ -188,6 +200,124 @@ defmodule QuireWeb.HomeLive do
           }
         }
       </script>
+      <.modal
+        :if={@show_batch}
+        title="Batch — recipe builder"
+        on_close="close_batch"
+        open={@show_batch}
+        size="large"
+      >
+        <div id="batch-wizard" class="space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="batch-name">
+                Recipe name
+              </label>
+              <input
+                id="batch-name"
+                type="text"
+                value={@batch_name}
+                phx-change="batch_set_name"
+                name="name"
+                placeholder="e.g. Shrink and archive"
+                class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+              />
+            </div>
+            <div>
+              <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="batch-load">
+                Load saved recipe
+              </label>
+              <select
+                id="batch-load"
+                phx-change="batch_load_recipe"
+                name="recipe"
+                class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+              >
+                <option value="">— select —</option>
+                <option :for={recipe <- @batch_recipes} value={recipe.id}>{recipe.name}</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <span class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5">Steps</span>
+            <div class="flex flex-wrap gap-1.5">
+              <button
+                :for={step <- Quire.Batch.steps_catalog()}
+                type="button"
+                phx-click="batch_add_step"
+                phx-value-step={step.id}
+                class="px-2.5 py-1 rounded-full border border-chrome-border dark:border-gray-600 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              >
+                + {step.label}
+              </button>
+            </div>
+            <div id="batch-steps" class="mt-2 space-y-1.5">
+              <div
+                :for={{step, idx} <- Enum.with_index(@batch_steps)}
+                class="flex items-center justify-between rounded-lg border border-chrome-border dark:border-gray-700 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200"
+              >
+                <span>{idx + 1}. {step_label(step.id)}</span>
+                <button
+                  type="button"
+                  phx-click="batch_remove_step"
+                  phx-value-index={idx}
+                  aria-label={"Remove step " <> Integer.to_string(idx + 1)}
+                  class="p-1 rounded text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+                >
+                  <.icon name="hero-x-mark" class="size-4" />
+                </button>
+              </div>
+              <p :if={@batch_steps == []} class="text-xs text-gray-400 dark:text-gray-500">
+                No steps yet — add one above. Each step runs on every selected file.
+              </p>
+            </div>
+          </div>
+
+          <div>
+            <span class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5">Files</span>
+            <div
+              phx-drop-target={@uploads.batch_files.ref}
+              class="flex items-center justify-center rounded-xl border-2 border-dashed border-chrome-border dark:border-gray-600 px-4 py-5 text-center text-sm text-gray-500 dark:text-gray-400"
+            >
+              <.live_file_input upload={@uploads.batch_files} class="sr-only" />
+              Drop files here or click to browse (up to 20)
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button
+              type="button"
+              phx-click="batch_save_recipe"
+              class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              Save recipe
+            </button>
+            <div :if={@batch_error} class="text-sm text-red-500" role="alert">
+              {@batch_error}
+            </div>
+          </div>
+
+          <div class="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              phx-click="close_batch"
+              class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              id="batch-run-btn"
+              phx-click="batch_run"
+              disabled={@batch_running || @batch_steps == []}
+              class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50"
+            >
+              <span>Run batch</span>
+            </button>
+          </div>
+        </div>
+      </.modal>
     </Layouts.app>
     """
   end
@@ -287,6 +417,131 @@ defmodule QuireWeb.HomeLive do
        |> put_flash(:error, "Password-protected PDF support is not yet available")}
     else
       {:noreply, assign(socket, :show_password_prompt, false)}
+    end
+  end
+
+  # ── Batch (T-087) ──────────────────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_batch", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_batch, true)
+     |> assign(:batch_steps, [])
+     |> assign(:batch_name, "")
+     |> assign(:batch_recipes, Quire.Batch.list_recipes(current_user_id(socket)))
+     |> assign(:batch_error, nil)
+     |> assign(:batch_running, false)}
+  end
+
+  @impl true
+  def handle_event("close_batch", _params, socket) do
+    {:noreply, assign(socket, :show_batch, false)}
+  end
+
+  @impl true
+  def handle_event("batch_add_step", %{"step" => step_id}, socket) do
+    step = Enum.find(Quire.Batch.steps_catalog(), &(&1.id == step_id))
+    steps = socket.assigns.batch_steps ++ [%{id: step.id, opts: step.opts}]
+    {:noreply, assign(socket, :batch_steps, steps)}
+  end
+
+  @impl true
+  def handle_event("batch_remove_step", %{"index" => index}, socket) do
+    steps = List.delete_at(socket.assigns.batch_steps, String.to_integer(index))
+    {:noreply, assign(socket, :batch_steps, steps)}
+  end
+
+  @impl true
+  def handle_event("batch_set_name", %{"name" => name}, socket) do
+    {:noreply, assign(socket, :batch_name, name)}
+  end
+
+  @impl true
+  def handle_event("batch_save_recipe", _params, socket) do
+    steps = Enum.map(socket.assigns.batch_steps, fn s -> %{"id" => s.id} end)
+
+    case Quire.Batch.create_recipe(current_user_id(socket), socket.assigns.batch_name, steps) do
+      {:ok, _recipe} ->
+        {:noreply,
+         socket
+         |> assign(:batch_recipes, Quire.Batch.list_recipes(current_user_id(socket)))
+         |> put_flash(:info, "Recipe saved")}
+
+      {:error, changeset} ->
+        {:noreply,
+         assign(socket, :batch_error, "Could not save recipe: #{inspect(changeset.errors)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("batch_load_recipe", %{"recipe" => recipe_id}, socket) do
+    case Quire.Batch.get_recipe(recipe_id, current_user_id(socket)) do
+      {:ok, recipe} ->
+        {:noreply,
+         socket
+         |> assign(:batch_name, recipe.name)
+         |> assign(
+           :batch_steps,
+           Enum.map(recipe.steps, &%{id: &1["id"], opts: Map.get(&1, "opts", [])})
+         )}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :batch_error, "Could not load recipe: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("batch_run", _params, socket) do
+    {:noreply, run_batch(socket)}
+  end
+
+  defp run_batch(socket) do
+    socket = socket |> assign(:batch_running, true) |> assign(:batch_error, nil)
+
+    steps = Enum.map(socket.assigns.batch_steps, &%{"id" => &1.id})
+
+    if steps == [] do
+      socket
+      |> assign(:batch_running, false)
+      |> assign(:batch_error, "Add at least one step to the recipe")
+    else
+      files =
+        consume_uploaded_entries(socket, :batch_files, fn file_meta, entry ->
+          %{name: entry.client_name, bytes: File.read!(file_meta.path)}
+        end)
+
+      if files == [] do
+        socket
+        |> assign(:batch_running, false)
+        |> assign(:batch_error, "Choose at least one file to process")
+      else
+        case Quire.Batch.run_recipe(
+               current_user_id(socket),
+               socket.assigns.batch_name,
+               steps,
+               files
+             ) do
+          {:ok, count} ->
+            socket
+            |> assign(:batch_running, false)
+            |> put_flash(:info, "Queued #{count} batch job(s) on the batch queue")
+
+          {:error, reason} ->
+            socket
+            |> assign(:batch_running, false)
+            |> assign(:batch_error, "Batch failed: #{inspect(reason)}")
+        end
+      end
+    end
+  end
+
+  defp current_user_id(socket), do: socket.assigns.current_scope.user.id
+
+  defp step_label(id) do
+    case Enum.find(Quire.Batch.steps_catalog(), &(&1.id == id)) do
+      nil -> id
+      step -> step.label
     end
   end
 
