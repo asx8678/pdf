@@ -36,7 +36,10 @@ defmodule Quire.Pdf.Outline do
 
   1. Current dest outline is read and kept unchanged.
   2. Source outline is read, every `page` index incremented by `page_offset`.
-  3. The combined outline is written back via `Pdf.set_outline/2`.
+  3. The combined outline is written back. Because the source pages "arrive"
+     with the merge, a shifted source entry may point beyond the destination's
+     current (pre-merge) page count; that is allowed here — the merged page it
+     references exists once the source pages are appended.
 
   No-op when the source has no outline (empty list). Entries with `page: nil`
   (no destination of their own) are kept as-is — they inherit their descendant's
@@ -60,7 +63,7 @@ defmodule Quire.Pdf.Outline do
       else
         {:ok, dest_entries} = Pdf.outline(dest_doc)
         adjusted = adjust_entries(source_entries, page_offset)
-        Pdf.set_outline(dest_doc, dest_entries ++ adjusted)
+        Pdf.set_outline_merge(dest_doc, dest_entries ++ adjusted)
       end
     end
   end

@@ -502,8 +502,33 @@ fn set_outline(
     doc: ResourceArc<DocumentResource>,
     entries: Vec<OutlineEntry>,
 ) -> Result<Atom, Atom> {
+    set_outline_impl(doc, entries, false)
+}
+
+/// Like `set_outline`, but page indices are not validated against the
+/// destination's current page count.
+///
+/// `Outline.transfer/3` merges a source outline into a destination *as if the
+/// source's pages had already been appended*. A source entry shifted by the
+/// page offset may therefore point at a page that lives beyond the
+/// destination's pre-merge page tree — it will resolve once the merge's source
+/// pages are present. Skipping the bounds check (depth/size checks still run)
+/// is what makes that merge semantics hold.
+#[rustler::nif(schedule = "DirtyCpu")]
+fn set_outline_relaxed(
+    doc: ResourceArc<DocumentResource>,
+    entries: Vec<OutlineEntry>,
+) -> Result<Atom, Atom> {
+    set_outline_impl(doc, entries, true)
+}
+
+fn set_outline_impl(
+    doc: ResourceArc<DocumentResource>,
+    entries: Vec<OutlineEntry>,
+    relax_bounds: bool,
+) -> Result<Atom, Atom> {
     let mut guard = lock(&doc)?;
-    write_outline(&mut guard.doc, &entries)?;
+    write_outline(&mut guard.doc, &entries, relax_bounds)?;
     Ok(atoms::ok())
 }
 
@@ -581,14 +606,20 @@ fn read_siblings(
     entries
 }
 
-fn write_outline(doc: &mut Document, entries: &[OutlineEntry]) -> Result<(), Atom> {
+fn write_outline(
+    doc: &mut Document,
+    entries: &[OutlineEntry],
+    relax_bounds: bool,
+) -> Result<(), Atom> {
     // Ordered by page number, so index 0 is the first page.
     let pages: Vec<ObjectId> = doc.get_pages().into_values().collect();
 
     // Validate before mutating anything, so a rejected outline leaves the
-    // document exactly as it was.
+    // document exactly as it was. `relax_bounds` (outline transfer after a
+    // merge) lets shifted source entries point past the destination's
+    // pre-merge page count — those pages arrive with the merged source.
     let mut budget = MAX_OUTLINE_NODES;
-    check_entries(entries, pages.len(), 0, &mut budget)?;
+    check_entries(entries, pages.len(), 0, &mut budget, relax_bounds)?;
 
     for id in stale_outline_ids(doc) {
         doc.objects.remove(&id);
@@ -599,6 +630,10 @@ fn write_outline(doc: &mut Document, entries: &[OutlineEntry]) -> Result<(), Ato
     doc.bookmarks.clear();
     doc.bookmark_table.clear();
     doc.max_bookmark_id = 0;
+
+    if relax_bounds {
+        return write_relaxed_outline(doc, entries);
+    }
 
     add_entries(doc, entries, None, &pages);
 
@@ -626,12 +661,125 @@ fn write_outline(doc: &mut Document, entries: &[OutlineEntry]) -> Result<(), Ato
 
     Ok(())
 }
+/// Write an outline whose shifted entries may point at pages that do not yet
+/// exist in this (pre-merge) destination. lopdf's bookmark builder can only
+/// emit destinations as page-object references, which lose that page number
+/// when the object is absent — so for `Outline.transfer/3`* we build the outline
+/// directly and encode every `/Dest` as the explicit page *index*.
+///
+/// `Quire.Pdf.outline/1` reads an integer first element of `/Dest` back as the
+/// page index (`entry_page`), so the merge's shifted indices round-trip even
+/// though those pages only arrive with the appended source.
+fn write_relaxed_outline(
+    doc: &mut Document,
+    entries: &[OutlineEntry],
+) -> Result<(), Atom> {
+    if entries.is_empty() {
+        doc.catalog_mut()
+            .map_err(|_| atoms::no_catalog())?
+            .remove(b"Outlines");
+        return Ok(());
+    }
+
+    let mut maxid = doc.max_id + 1;
+    let outline_id = maxid;
+    // Node ids start after the root outline object.
+    maxid += 1;
+
+    let (first, last) = write_relaxed_siblings(doc, entries, outline_id, &mut maxid)?;
+
+    let mut outline = Dictionary::new();
+    if let Some(first) = first {
+        outline.set("First", (first, 0));
+    }
+    if let Some(last) = last {
+        outline.set("Last", (last, 0));
+    }
+    outline.set("Count", Object::Integer(entries.len() as i64));
+    doc.objects.insert((outline_id, 0), outline.into());
+    doc.max_id = maxid;
+
+    doc.catalog_mut()
+        .map_err(|_| atoms::no_catalog())?
+        .set("Outlines", Object::Reference((outline_id, 0)));
+
+    Ok(())
+}
+
+fn write_relaxed_siblings(
+    doc: &mut Document,
+    entries: &[OutlineEntry],
+    parent: u32,
+    maxid: &mut u32,
+) -> Result<(Option<u32>, Option<u32>), Atom> {
+    let mut first: Option<u32> = None;
+    let mut last: Option<u32> = None;
+
+    for entry in entries {
+        *maxid += 1;
+        let id = *maxid;
+
+        let (c_first, c_last) = write_relaxed_siblings(doc, &entry.children, id, maxid)?;
+
+        let mut node = Dictionary::new();
+        // Colour black and format 0 (plain), matching the non-relaxed path.
+        node.set("Parent", Object::Reference((parent, 0)));
+        node.set("F", Object::Integer(0));
+        node.set(
+            "C",
+            vec![0.0f32.into(), 0.0f32.into(), 0.0f32.into()],
+        );
+        node.set("Title", Object::string_literal(title_bytes(&entry.title)));
+
+        if let Some(index) = entry.page {
+            node.set(
+                "Dest",
+                vec![Object::Integer(index as i64), Object::Name("Fit".into())],
+            );
+        }
+
+        if let Some(c_first) = c_first {
+            node.set("First", (c_first, 0));
+        }
+        if let Some(c_last) = c_last {
+            node.set("Last", (c_last, 0));
+        }
+        node.set("Count", Object::Integer(entry.children.len() as i64));
+
+        if let Some(prev) = last {
+            node.set("Prev", (prev, 0));
+            if let Ok(prev_dict) = doc.get_dictionary_mut((prev, 0)) {
+                prev_dict.set("Next", (id, 0));
+            }
+        }
+
+        doc.objects.insert((id, 0), node.into());
+
+        if first.is_none() {
+            first = Some(id);
+        }
+        last = Some(id);
+    }
+
+    Ok((first, last))
+}
+
+fn title_bytes(title: &str) -> Vec<u8> {
+    if title.is_ascii() {
+        title.as_bytes().to_vec()
+    } else {
+        let mut bom = vec![0xFE, 0xFF];
+        bom.extend(title.encode_utf16().flat_map(u16::to_be_bytes));
+        bom
+    }
+}
 
 fn check_entries(
     entries: &[OutlineEntry],
     page_count: usize,
     depth: usize,
     budget: &mut usize,
+    relax_bounds: bool,
 ) -> Result<(), Atom> {
     if depth >= MAX_OUTLINE_DEPTH {
         return Err(atoms::outline_too_deep());
@@ -644,12 +792,12 @@ fn check_entries(
         *budget -= 1;
 
         if let Some(index) = entry.page {
-            if index as usize >= page_count {
+            if !relax_bounds && index as usize >= page_count {
                 return Err(atoms::page_out_of_bounds());
             }
         }
 
-        check_entries(&entry.children, page_count, depth + 1, budget)?;
+        check_entries(&entry.children, page_count, depth + 1, budget, relax_bounds)?;
     }
 
     Ok(())

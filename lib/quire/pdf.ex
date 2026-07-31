@@ -355,13 +355,27 @@ defmodule Quire.Pdf do
   """
   @spec set_outline(t(), [outline_entry()]) :: :ok | {:error, atom()}
   def set_outline(doc, entries) when is_reference(doc) and is_list(entries) do
+    set_outline(doc, entries, false)
+  end
+
+  @doc false
+  # Outline transfer needs to write a merged outline whose shifted source
+  # entries may point past the destination's *pre-merge* page count (the source
+  # pages arrive with the merge).
+  def set_outline_merge(doc, entries) when is_reference(doc) and is_list(entries) do
+    set_outline(doc, entries, true)
+  end
+
+  defp set_outline(doc, entries, relax_bounds) do
     # Validate in Elixir first. rustler's derived decoder raises ErlangError on
     # a shape it cannot decode, which would break this function's contract —
     # a negative :page is an ordinary caller slip (the classic 0-based/1-based
     # confusion), not an exceptional condition, so it gets {:error, _} like
     # every other bad input here.
+    native = if relax_bounds, do: &Native.set_outline_relaxed/2, else: &Native.set_outline/2
+
     with :ok <- validate(entries, 0),
-         {:ok, :ok} <- Native.set_outline(doc, normalise(entries)) do
+         {:ok, :ok} <- native.(doc, normalise(entries)) do
       :ok
     else
       {:error, reason} -> {:error, reason}

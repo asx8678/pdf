@@ -37,6 +37,7 @@ defmodule Quire.Pdf.Native do
 
   def outline(_doc), do: :erlang.nif_error(:nif_not_loaded)
   def set_outline(_doc, _entries), do: :erlang.nif_error(:nif_not_loaded)
+  def set_outline_relaxed(_doc, _entries), do: :erlang.nif_error(:nif_not_loaded)
 
   def catalog(_doc), do: :erlang.nif_error(:nif_not_loaded)
   def get_object(_doc, _obj_num, _gen_num), do: :erlang.nif_error(:nif_not_loaded)

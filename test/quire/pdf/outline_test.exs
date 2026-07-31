@@ -8,7 +8,6 @@ defmodule Quire.Pdf.OutlineTest do
   alias Quire.Pdf
 
   describe "transfer/3" do
-    @tag :broken
     test "appends source outline entries with page offset" do
       dest = blank_pdf(3)
       {:ok, dest_doc} = Pdf.open(dest)
@@ -55,7 +54,6 @@ defmodule Quire.Pdf.OutlineTest do
       assert entries == [%{title: "Dest Only", page: 0, children: []}]
     end
 
-    @tag :broken
     test "works with nested outlines" do
       dest = blank_pdf(5)
       {:ok, dest_doc} = Pdf.open(dest)

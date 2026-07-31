@@ -44,15 +44,20 @@ defmodule Quire.SchemaTest do
              "expected id #{inspect(id)} to be UUID v7"
     end
 
-    @tag :broken
     test "UUID v7 encodes a usable timestamp" do
-      before = DateTime.utc_now()
+      # UUID v7 embeds the time as milliseconds, so the embedded timestamp
+      # cannot be more precise than millisecond granularity. The wall-clock
+      # readings that bracket it must be truncated to the same precision —
+      # otherwise a registration that lands mid-millisecond produces a UUID
+      # whose (asserted) timestamp appears a few hundred microseconds "before"
+      # the `before` snapshot and the test flakes under load.
+      before = DateTime.utc_now() |> DateTime.truncate(:millisecond)
 
       {:ok, user} =
         %{email: "v7-timestamp@example.com"}
         |> then(fn attrs -> Quire.Accounts.register_user(attrs) end)
 
-      after_ = DateTime.utc_now()
+      after_ = DateTime.utc_now() |> DateTime.truncate(:millisecond)
 
       id_dt = Ecto.UUID.to_datetime(user.id)
 
