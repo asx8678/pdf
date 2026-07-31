@@ -27,7 +27,8 @@ defmodule Quire.Editing.Ops.TextEdit do
     # Backward-compatible: when called without the fields needed for the
     # RunIdentifier/RunRewriter pipeline (e.g. property tests), fall back
     # to the original stub behavior.
-    if op_data[:new_text] and (op_data[:run] or op_data[:ref]) do
+    # NB: `and` requires a boolean left operand — use explicit nil checks.
+    if !is_nil(op_data[:new_text]) and (!is_nil(op_data[:run]) or !is_nil(op_data[:ref])) do
       do_apply(op_data)
     else
       {:ok, op_data}
