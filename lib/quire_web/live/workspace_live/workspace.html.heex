@@ -827,6 +827,81 @@
     </.modal>
 
     <.modal
+      :if={@show_pdfa_wizard}
+      title="PDF/A — best-effort conversion"
+      on_close="close_pdfa_wizard"
+      open={@show_pdfa_wizard}
+      size="large"
+    >
+      <div id="pdfa-wizard" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-300">
+          This is a <span class="font-medium">best-effort conversion</span> to PDF/A-2b:
+          the product never claims ISO certification. The structural conformance
+          report below lists what was fixed and what could not be verified.
+        </p>
+
+        <div :if={@pdfa_error} class="text-sm text-red-500" role="alert">
+          {@pdfa_error}
+        </div>
+
+        <div
+          :if={@pdfa_report}
+          id="pdfa-report"
+          class="rounded-xl border border-chrome-border dark:border-gray-700 overflow-hidden"
+        >
+          <div class="px-4 py-2 border-b border-chrome-border dark:border-gray-700 bg-gray-50 dark:bg-gray-900 flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-200">
+              Conformance report — PDF/A-{@pdfa_report.level}
+            </span>
+            <span class="text-[11px] text-gray-400 uppercase tracking-wide">best-effort</span>
+          </div>
+          <ul class="divide-y divide-chrome-border dark:divide-gray-700">
+            <li
+              :for={check <- @pdfa_report.checks}
+              class="flex items-start gap-3 px-4 py-2.5 text-sm"
+            >
+              <span class={[
+                "mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                check.status == :pass &&
+                  "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
+                check.status == :fail &&
+                  "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+                check.status == :not_verified &&
+                  "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300"
+              ]}>
+                {check.status |> to_string() |> String.replace("_", " ")}
+              </span>
+              <div class="min-w-0">
+                <p class="font-medium text-gray-800 dark:text-gray-100">{check.name}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">{check.detail}</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_pdfa_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            id="pdfa-convert-btn"
+            phx-click="pdfa_convert"
+            disabled={@pdfa_running}
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <.icon :if={@pdfa_running} name="hero-arrow-path" class="size-4 animate-spin" />
+            <span>Convert to PDF/A</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
       :if={@show_camera_capture}
       title="Scan to PDF"
       on_close="close_camera_capture"

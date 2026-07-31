@@ -194,6 +194,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_provider_label, provider_label())
       |> assign(:translate_results, [])
       |> assign(:show_merge_wizard, false)
+      |> assign(:show_pdfa_wizard, false)
+      |> assign(:pdfa_running, false)
+      |> assign(:pdfa_error, nil)
+      |> assign(:pdfa_report, nil)
       |> assign(:show_compress_wizard, false)
       |> assign(:compress_preset, "medium")
       |> assign(:compress_custom_quality, "60")
@@ -2555,6 +2559,12 @@ defmodule QuireWeb.WorkspaceLive do
             phx-click="open_compress_wizard"
             tooltip="Recompress embedded images (Low/Medium/High/Custom) with a before/after size comparison and page preview"
           />
+          <.ribbon_button
+            icon="hero-document-check"
+            label="PDF/A"
+            phx-click="open_pdfa_wizard"
+            tooltip="Best-effort PDF/A-2b conversion with a structural conformance report"
+          />
         </.ribbon_group>
 
         <.ribbon_group :if={@clipboard_fallback} label="Paste target">
@@ -4453,6 +4463,134 @@ defmodule QuireWeb.WorkspaceLive do
     do: "Custom quality and max width must be positive numbers"
 
   defp compress_error_message(reason), do: "Compress failed: #{inspect(reason)}"
+
+  # ── PDF/A wizard (T-084) ──────────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_pdfa_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_pdfa_wizard, true)
+     |> assign(:pdfa_running, false)
+     |> assign(:pdfa_error, nil)
+     |> assign(:pdfa_report, nil)}
+  end
+
+  @impl true
+  def handle_event("close_pdfa_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_pdfa_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("pdfa_convert", _params, socket) do
+    {:noreply, run_pdfa_convert(socket)}
+  end
+
+  defp run_pdfa_convert(socket) do
+    socket =
+      socket
+      |> assign(:pdfa_running, true)
+      |> assign(:pdfa_error, nil)
+      |> assign(:pdfa_report, nil)
+
+    with {:ok, doc} <-
+           Quire.Documents.get_document(
+             socket.assigns.active_document_id,
+             socket.assigns.current_scope
+           ),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         ref when not is_nil(ref) <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref) do
+      case Quire.PdfA.convert(bytes) do
+        {:ok, out, report} ->
+          case save_pdfa_revision(doc, out) do
+            {:ok, %{rev: new_rev}} ->
+              journal_doc_convert(doc, "pdfa", report)
+
+              socket
+              |> assign(:pdfa_running, false)
+              |> assign(:pdfa_report, report)
+              |> assign(:document_url, "/documents/#{doc.id}/pdf?rev=#{new_rev.id}")
+              |> put_flash(
+                :info,
+                "PDF/A conversion saved as a new revision — review the conformance report below"
+              )
+
+            {:error, reason} ->
+              socket
+              |> assign(:pdfa_running, false)
+              |> assign(:pdfa_report, report)
+              |> assign(:pdfa_error, "Saved as new revision failed: #{inspect(reason)}")
+          end
+
+        {:error, reason} ->
+          # Report shown on failure too — validate to show what is missing
+          report =
+            case Quire.PdfA.validate(bytes) do
+              {:ok, %{checks: checks}} ->
+                %{level: "2b", best_effort: true, checks: checks, error: inspect(reason)}
+
+              _ ->
+                %{level: "2b", best_effort: true, checks: [], error: inspect(reason)}
+            end
+
+          socket
+          |> assign(:pdfa_running, false)
+          |> assign(:pdfa_report, report)
+          |> assign(
+            :pdfa_error,
+            "Conversion failed: #{inspect(reason)} — conformance report shown for the original document"
+          )
+      end
+    else
+      _ ->
+        socket
+        |> assign(:pdfa_running, false)
+        |> assign(:pdfa_error, "No current document to convert")
+    end
+  end
+
+  defp save_pdfa_revision(doc, out_bytes) do
+    with {:ok, new_ref} <-
+           Quire.Storage.put(out_bytes,
+             name: doc.title,
+             content_type: "application/pdf"
+           ) do
+      source_map = %{
+        "storage_ref" => %{
+          "adapter" => to_string(new_ref.adapter),
+          "key" => new_ref.key,
+          "name" => new_ref.name,
+          "content_type" => new_ref.content_type,
+          "byte_size" => new_ref.byte_size
+        },
+        "source_revision" => doc.current_revision_id,
+        "note" => "PDF/A conversion"
+      }
+
+      with {:ok, new_rev} <-
+             Quire.Documents.create_revision(doc, label: "PDF/A", source: source_map) do
+        {:ok, linked} =
+          doc
+          |> Ecto.Changeset.change(%{current_revision_id: new_rev.id})
+          |> Quire.Repo.update()
+
+        {:ok, %{rev: new_rev, doc: linked}}
+      end
+    end
+  end
+
+  defp journal_doc_convert(doc, format, report) do
+    with {:ok, session} <- Quire.Editing.open_session(doc.id, doc.user_id) do
+      op = %{
+        kind: "doc.convert",
+        data: %{format: format, checks: Enum.map(report.checks, & &1.status)},
+        inverse: {:restore_revision, nil}
+      }
+
+      Quire.Editing.apply_for_server(session, op)
+    end
+  end
 
   @impl true
   def handle_info({:close_camera_modal}, socket) do
