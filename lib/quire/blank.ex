@@ -101,7 +101,9 @@ defmodule Quire.Blank do
            ExPdfium.draw_rectangle(
              doc,
              0,
-             %{left: 50.0, bottom: 50.0, right: w - 100.0, top: h - 100.0}, fill: {51, 102, 204}),
+             %{left: 50.0, bottom: 50.0, right: w - 100.0, top: h - 100.0},
+             fill: {51, 102, 204}
+           ),
          {:ok, doc} <-
            ExPdfium.draw_text(doc, 0, {w / 2 - 150.0, h / 2}, "Report title",
              font: :helvetica,
