@@ -3557,7 +3557,8 @@ defmodule QuireWeb.WorkspaceLive do
          |> put_flash(:info, "URL to PDF started for #{url}")}
       else
         {:error, reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to start URL conversion: #{inspect(reason)}")}
+          {:noreply,
+           put_flash(socket, :error, "Failed to start URL conversion: #{inspect(reason)}")}
       end
     else
       false ->
@@ -3726,7 +3727,6 @@ defmodule QuireWeb.WorkspaceLive do
          |> put_flash(:error, "Failed to start conversion: #{inspect(reason)}")}
     end
   end
-
 
   defp check_form_fields(socket) do
     doc_id = socket.assigns.active_document_id

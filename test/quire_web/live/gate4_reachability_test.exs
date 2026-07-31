@@ -104,9 +104,10 @@ defmodule QuireWeb.Gate4ReachabilityTest do
   end
 
   describe "§9.2 entrypoints exist in the Create & Convert tab" do
-    test "File to PDF, Clipboard, Merge, Split, Compress, PDF/A and Export buttons are present", %{
-      conn: conn
-    } do
+    test "File to PDF, Clipboard, Merge, Split, Compress, PDF/A and Export buttons are present",
+         %{
+           conn: conn
+         } do
       {:ok, lv, _html} = open_workspace(conn)
       open_create_tab(lv)
 
@@ -124,7 +125,11 @@ defmodule QuireWeb.Gate4ReachabilityTest do
       assert has_element?(lv, ~s{button[phx-click="convert_to_office"][phx-value-format="pptx"]})
       assert has_element?(lv, ~s{button[phx-click="convert_to_html"][phx-value-mode="overlay"]})
       assert has_element?(lv, ~s{button[phx-click="convert_to_html"][phx-value-mode="text_only"]})
-      assert has_element?(lv, ~s{button[id="export-image-btn"][phx-click="open_export_image_wizard"]})
+
+      assert has_element?(
+               lv,
+               ~s{button[id="export-image-btn"][phx-click="open_export_image_wizard"]}
+             )
 
       # New ▾ menu covers the remaining New entries
       lv |> element(~s{button[id="new-menu-btn"]}) |> render_click()
@@ -315,6 +320,7 @@ defmodule QuireWeb.Gate4ReachabilityTest do
       lv |> element(~s{button[phx-click="open_merge_wizard"]}) |> render_click()
       assert has_element?(lv, ~s{div[role="dialog"][aria-label="Merge PDFs"]})
       assert has_element?(lv, "#merge-submit-btn")
+
       lv
       |> element(~s{button[phx-click="close_merge_wizard"][aria-label="Close"]})
       |> render_click()
@@ -322,6 +328,7 @@ defmodule QuireWeb.Gate4ReachabilityTest do
       lv |> element(~s{button[phx-click="open_split_wizard"]}) |> render_click()
       assert has_element?(lv, ~s{div[role="dialog"][aria-label="Split PDF"]})
       assert has_element?(lv, "#split-submit-btn")
+
       lv
       |> element(~s{button[phx-click="close_split_wizard"][aria-label="Close"]})
       |> render_click()
@@ -329,6 +336,7 @@ defmodule QuireWeb.Gate4ReachabilityTest do
       lv |> element(~s{button[phx-click="open_compress_wizard"]}) |> render_click()
       assert has_element?(lv, ~s{div[role="dialog"][aria-label="Compress PDF"]})
       assert has_element?(lv, "#compress-commit-btn")
+
       lv
       |> element(~s{button[phx-click="close_compress_wizard"][aria-label="Close"]})
       |> render_click()
@@ -441,7 +449,13 @@ defmodule QuireWeb.Gate4ReachabilityTest do
       # The §9.2 launcher tiles carry phx-click="open_pdf" (they open the
       # file picker → ingest → land in the workspace where the conversion
       # ribbon lives). Only the non-conversion tiles keep no click handler.
-      for title <- ["Clipboard to PDF", "Merge files", "Convert to PDF", "PDF to Word", "PDF to Excel"] do
+      for title <- [
+            "Clipboard to PDF",
+            "Merge files",
+            "Convert to PDF",
+            "PDF to Word",
+            "PDF to Excel"
+          ] do
         assert has_element?(lv, ~s{div[phx-click="open_pdf"]}, title),
                "conversion tile #{title} must launch the open-pipeline"
       end
