@@ -7,16 +7,23 @@ defmodule Quire.Repo.Migrations.AddThresholdToOcrResults do
   use Ecto.Migration
 
   def up do
-    alter table(:ocr_results) do
-      add :threshold, :float, default: 80.0
-      add :options, :map, default: %{}
-    end
+    execute """
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ocr_results' AND column_name = 'threshold') THEN
+        ALTER TABLE ocr_results ADD COLUMN threshold float DEFAULT 80.0;
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'ocr_results' AND column_name = 'options') THEN
+        ALTER TABLE ocr_results ADD COLUMN options jsonb DEFAULT '{}'::jsonb;
+      END IF;
+    END $$;
+    """
   end
 
   def down do
-    alter table(:ocr_results) do
-      remove :threshold
-      remove :options
-    end
+    execute """
+    ALTER TABLE ocr_results
+      DROP COLUMN IF EXISTS threshold,
+      DROP COLUMN IF EXISTS options;
+    """
   end
 end
