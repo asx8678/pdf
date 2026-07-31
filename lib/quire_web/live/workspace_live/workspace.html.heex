@@ -29,6 +29,8 @@
       form_detect_running={@form_detect_running}
       form_detect_progress={@form_detect_progress}
       form_detections={@form_detections}
+      clipboard_fallback={@clipboard_fallback}
+      clipboard_fallback_msg={@clipboard_fallback_msg}
     />
 
     <.ocr_options_panel
@@ -425,26 +427,25 @@
       }
     </script>
     <script :type={Phoenix.LiveView.ColocatedHook} name=".DownloadFile">
-            export default {
-              mounted() {
-                this.handleEvent("download", ({ content, filename, content_type }) => {
-                  const byteString = atob(content);
-                  const ab = new ArrayBuffer(byteString.length);
-                  const ia = new Uint8Array(ab);
-                  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-                  const blob = new Blob([ab], { type: content_type || "application/octet-stream" });
-                  const url = URL.createObjectURL(blob);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = filename;
-                  document.body.appendChild(a);
-                  a.click();
-                  document.body.removeChild(a);
-                  URL.revokeObjectURL(url);
-                });
-              }
-            }
-      >
+      export default {
+        mounted() {
+          this.handleEvent("download", ({ content, filename, content_type }) => {
+            const byteString = atob(content);
+            const ab = new ArrayBuffer(byteString.length);
+            const ia = new Uint8Array(ab);
+            for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+            const blob = new Blob([ab], { type: content_type || "application/octet-stream" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          });
+        }
+      }
     </script>
 
     <script :type={Phoenix.LiveView.ColocatedHook} name=".CameraCapture">

@@ -144,6 +144,7 @@ defmodule Quire.Forms.AutoCreateTest do
   # ── helpers ────────────────────────────────────────────────────────────
 
   defp rect_near?([x0, y0, x1, y1], [ex0, ey0, ex1, ey1]) do
-    abs(x0 - ex0) <= 1.0 and abs(y0 - ey0) <= 1.0 and abs(x1 - ex1) <= 1.0 and abs(y1 - ey1) <= 1.0
+    abs(x0 - ex0) <= 1.0 and abs(y0 - ey0) <= 1.0 and abs(x1 - ex1) <= 1.0 and
+      abs(y1 - ey1) <= 1.0
   end
 end

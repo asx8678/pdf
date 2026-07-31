@@ -185,6 +185,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:form_detect_progress, nil)
       |> assign(:form_detect_operation_id, nil)
       |> assign(:form_detections, nil)
+      |> assign(:clipboard_fallback, false)
+      |> assign(:clipboard_fallback_msg, nil)
       |> assign(:translate_source, "detect")
       |> assign(:translate_target, "en")
       |> assign(:translate_mode, "overlay")
@@ -1606,6 +1608,115 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   @doc """
+  T-079 Clipboard to PDF: receives base64 PDF bytes built client-side from
+  clipboard text/image (via `@cantoo/pdf-lib`), ingests them as a new
+  document (revision 1), and navigates to it in the workspace.
+  """
+  def handle_event("clipboard_pdf_ready", params, socket) do
+    scope = socket.assigns.current_scope
+    filename = Map.get(params, "filename", "")
+
+    case params do
+      %{"bytes" => b64} ->
+        case Base.decode64(b64) do
+          {:ok, bytes} ->
+            title =
+              if is_binary(filename) and filename != "", do: filename, else: "Clipboard.pdf"
+
+            case Quire.Documents.ingest(bytes, scope, title: title) do
+              {:ok, %{document: doc}} ->
+                {:noreply,
+                 socket
+                 |> assign(:clipboard_fallback, false)
+                 |> assign(:clipboard_fallback_msg, nil)
+                 |> put_flash(:info, "Clipboard PDF created — #{title}")
+                 |> push_navigate(to: ~p"/workspace/#{doc.id}")}
+
+              {:error, :invalid_pdf} ->
+                {:noreply,
+                 socket
+                 |> assign(:clipboard_fallback, true)
+                 |> assign(
+                   :clipboard_fallback_msg,
+                   "The clipboard content couldn't be turned into a valid PDF. Paste text or an image instead."
+                 )}
+
+              {:error, :password_required} ->
+                {:noreply,
+                 socket
+                 |> assign(:clipboard_fallback, true)
+                 |> assign(
+                   :clipboard_fallback_msg,
+                   "The clipboard PDF is password-protected and can't be opened."
+                 )}
+
+              {:error, reason} ->
+                {:noreply,
+                 socket
+                 |> assign(:clipboard_fallback, true)
+                 |> assign(
+                   :clipboard_fallback_msg,
+                   "Couldn't create the PDF from clipboard content (#{inspect(reason)}). Paste text or an image instead."
+                 )}
+            end
+
+          :error ->
+            {:noreply,
+             socket
+             |> assign(:clipboard_fallback, true)
+             |> assign(
+               :clipboard_fallback_msg,
+               "The clipboard content couldn't be decoded. Try copying the text or image again."
+             )}
+        end
+
+      _ ->
+        {:noreply,
+         socket
+         |> assign(:clipboard_fallback, true)
+         |> assign(
+           :clipboard_fallback_msg,
+           "The clipboard content couldn't be decoded. Try copying the text or image again."
+         )}
+    end
+  end
+
+  @doc """
+  T-079: clipboard read failed (permission denied, empty, or unsupported
+  format). Show the paste-target fallback with a plain-language message.
+  """
+  def handle_event("clipboard_pdf_error", %{"code" => code}, socket) do
+    {fallback, msg} =
+      case code do
+        "permission" ->
+          {true,
+           "Clipboard access was denied by the browser. Paste your text or image into the box below instead."}
+
+        "empty" ->
+          {true, "The clipboard is empty. Copy some text or an image first, then try again."}
+
+        "unsupported" ->
+          {true,
+           "The clipboard contains a format that can't become a PDF — only text and PNG/JPEG images are supported."}
+
+        _ ->
+          {true,
+           "Couldn't read the clipboard. Paste your text or image into the box below instead."}
+      end
+
+    {:noreply,
+     socket |> assign(:clipboard_fallback, fallback) |> assign(:clipboard_fallback_msg, msg)}
+  end
+
+  @doc """
+  T-079: dismiss the paste-target fallback panel.
+  """
+  def handle_event("clipboard_pdf_cancel", _params, socket) do
+    {:noreply,
+     socket |> assign(:clipboard_fallback, false) |> assign(:clipboard_fallback_msg, nil)}
+  end
+
+  @doc """
   Delivers a finished HTML export as a browser download and clears the
   convert-progress state.
   """
@@ -2143,6 +2254,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:convert_running, fn -> false end)
       |> assign_new(:convert_format, fn -> nil end)
       |> assign_new(:convert_error, fn -> nil end)
+      |> assign_new(:clipboard_fallback, fn -> false end)
+      |> assign_new(:clipboard_fallback_msg, fn -> nil end)
       |> assign_new(:has_form_fields, fn -> false end)
       |> assign_new(:translate_source, fn -> "detect" end)
       |> assign_new(:translate_target, fn -> "en" end)
@@ -2386,6 +2499,52 @@ defmodule QuireWeb.WorkspaceLive do
 
       <!-- Create & Convert tab ribbon (T-074 / pdf-wyh.1) -->
       <div :if={@active_tab == "create-convert"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Create from…">
+          <.ribbon_button
+            icon="hero-clipboard-document-list"
+            label="Clipboard"
+            phx-hook="ClipboardPdf"
+            id="clipboard-pdf-btn"
+            tooltip="Create a PDF from the text or image on your clipboard"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group :if={@clipboard_fallback} label="Paste target">
+          <div
+            id="clipboard-paste-target"
+            phx-hook="ClipboardPasteTarget"
+            class="w-72 px-2 py-1"
+          >
+            <p class="text-[10px] text-gray-400 dark:text-gray-500 mb-1 leading-tight">
+              {@clipboard_fallback_msg}
+            </p>
+            <textarea
+              id="clipboard-paste-textarea"
+              rows="3"
+              phx-update="ignore"
+              class="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 p-2 text-xs text-gray-700 dark:text-gray-200 resize-none"
+              placeholder="Paste text or an image here, or type text…"
+            >
+            </textarea>
+            <div class="flex items-center gap-2 mt-1.5">
+              <button
+                type="button"
+                data-clipboard-convert
+                class="px-2.5 py-1 rounded-md bg-accent text-white text-[11px] font-medium hover:opacity-90"
+              >
+                Convert
+              </button>
+              <button
+                type="button"
+                phx-click="clipboard_pdf_cancel"
+                class="px-2.5 py-1 rounded-md text-[11px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </.ribbon_group>
+
         <.ribbon_group label="Export to…">
           <.ribbon_button
             icon="hero-document-text"

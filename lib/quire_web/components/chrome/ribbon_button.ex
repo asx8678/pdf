@@ -15,7 +15,7 @@ defmodule QuireWeb.Chrome.RibbonButton do
   attr :disabled, :boolean, default: false
   attr :has_dropdown, :boolean, default: false
   attr :tooltip, :string, default: nil
-  attr :rest, :global, include: ~w(phx-click phx-value-*)
+  attr :rest, :global, include: ~w(phx-click phx-value-* phx-hook id)
 
   def ribbon_button(assigns) do
     ~H"""

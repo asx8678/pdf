@@ -178,12 +178,12 @@ defmodule Quire.Documents do
       # Step 4: Query page count and page geometry via the render adapter
       {page_count, page_geometries} = query_page_metrics(ref)
 
-      now = DateTime.utc_now()
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       # Step 5a: Insert documents row
       {:ok, doc} =
         Repo.insert(%Document{
-          user_id: scope.id,
+          user_id: scope.user.id,
           title: title,
           source_format: "pdf",
           page_count: page_count,
@@ -224,7 +224,7 @@ defmodule Quire.Documents do
       enqueue_post_ingest_jobs(doc, rev, ref)
 
       # Step 7: Upsert recents
-      upsert_recent(doc.id, scope.id, now)
+      upsert_recent(doc.id, scope.user.id, now)
 
       # Step 8: Return document + viewer URL
       document_url = "/documents/" <> doc.id <> "/pdf"
@@ -256,13 +256,15 @@ defmodule Quire.Documents do
       geometries
       |> Enum.with_index()
       |> Enum.map(fn {geom, idx} ->
+        now = DateTime.utc_now() |> DateTime.truncate(:second)
+
         %{
           revision_id: revision_id,
           page_index: idx,
-          width: geom.width,
-          height: geom.height,
-          inserted_at: DateTime.utc_now(),
-          updated_at: DateTime.utc_now()
+          width: geom.width * 1.0,
+          height: geom.height * 1.0,
+          inserted_at: now,
+          updated_at: now
         }
       end)
 

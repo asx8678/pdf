@@ -568,8 +568,12 @@ defmodule Quire.AccountsTest do
 
     test "delete_saved_initials/2 removes only the target entry" do
       user = user_fixture()
-      {:ok, a} = Accounts.save_initials(user.id, %{"label" => "A", "type" => "type", "data" => "{}"})
-      {:ok, b} = Accounts.save_initials(user.id, %{"label" => "B", "type" => "type", "data" => "{}"})
+
+      {:ok, a} =
+        Accounts.save_initials(user.id, %{"label" => "A", "type" => "type", "data" => "{}"})
+
+      {:ok, b} =
+        Accounts.save_initials(user.id, %{"label" => "B", "type" => "type", "data" => "{}"})
 
       assert {:ok, _} = Accounts.delete_saved_initials(user.id, a["id"])
       assert Accounts.list_saved_initials(user.id) == [b]
@@ -577,7 +581,9 @@ defmodule Quire.AccountsTest do
 
     test "update_initials_label/3 renames the entry" do
       user = user_fixture()
-      {:ok, saved} = Accounts.save_initials(user.id, %{"label" => "Old", "type" => "type", "data" => "{}"})
+
+      {:ok, saved} =
+        Accounts.save_initials(user.id, %{"label" => "Old", "type" => "type", "data" => "{}"})
 
       assert {:ok, _} = Accounts.update_initials_label(user.id, saved["id"], "New")
       [updated] = Accounts.list_saved_initials(user.id)

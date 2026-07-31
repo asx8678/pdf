@@ -3,6 +3,7 @@ defmodule QuireWeb.WorkspaceLiveTest do
 
   import Phoenix.LiveViewTest
   import Quire.AccountsFixtures
+  import Ecto.Query
 
   @pill ~s{button[phx-click="toggle_view_mode"]}
 
@@ -492,6 +493,100 @@ defmodule QuireWeb.WorkspaceLiveTest do
 
       # Exactly the locked layer shows a lock icon
       assert html |> String.split("hero-lock-closed") |> length() == 2
+    end
+  end
+
+  describe "clipboard to PDF (T-079)" do
+    @clipboard_btn ~s{button[id="clipboard-pdf-btn"]}
+    @paste_target ~s{div[id="clipboard-paste-target"]}
+    @scanned Path.expand("../../fixtures/pdfs/scanned_300dpi.pdf", __DIR__)
+
+    test "ribbon button is visible on the Create & Convert tab", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "create-convert")
+
+      assert has_element?(lv, @clipboard_btn, "Clipboard")
+    end
+
+    test "clipboard bytes are ingested as a new document with revision 1", %{conn: conn} do
+      user = user_fixture()
+      {:ok, lv, _html} = open_doc_conn(conn, user)
+      select_tab(lv, "create-convert")
+
+      bytes = File.read!(@scanned)
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               render_hook(lv, "clipboard_pdf_ready", %{
+                 "bytes" => Base.encode64(bytes),
+                 "filename" => "clipboard.pdf"
+               })
+
+      doc = Quire.Repo.one!(from d in Quire.Documents.Document, where: d.title == "clipboard.pdf")
+      assert to == ~p"/workspace/#{doc.id}"
+      assert doc.user_id == user.id
+      assert doc.page_count == 1
+
+      rev = Quire.Repo.get!(Quire.Documents.Revision, doc.current_revision_id)
+      assert rev.document_id == doc.id
+      assert get_in(rev.source, ["filename"]) == "clipboard.pdf"
+    end
+
+    test "non-PDF clipboard bytes show a plain-language error", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "create-convert")
+
+      html =
+        render_hook(lv, "clipboard_pdf_ready", %{
+          "bytes" => Base.encode64("not a pdf at all"),
+          "filename" => "clipboard.pdf"
+        })
+
+      assert html =~ "turned into a valid PDF"
+      assert has_element?(lv, @paste_target)
+    end
+
+    test "undecodable bytes show a plain-language error", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "create-convert")
+
+      html = render_hook(lv, "clipboard_pdf_ready", %{"bytes" => "!!not base64!!"})
+      assert html =~ "Try copying the text or image again"
+      assert has_element?(lv, @paste_target)
+    end
+
+    test "permission failure shows the paste-target fallback with a message", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "create-convert")
+
+      html = render_hook(lv, "clipboard_pdf_error", %{"code" => "permission"})
+      assert html =~ "Clipboard access was denied"
+      assert html =~ "Paste your text or image into the box below instead"
+
+      html = render_hook(lv, "clipboard_pdf_error", %{"code" => "empty"})
+      assert html =~ "The clipboard is empty"
+
+      html = render_hook(lv, "clipboard_pdf_error", %{"code" => "unsupported"})
+      assert html =~ "only text and PNG/JPEG images are supported"
+    end
+
+    test "cancel dismisses the paste-target fallback", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "create-convert")
+
+      render_hook(lv, "clipboard_pdf_error", %{"code" => "permission"})
+      assert has_element?(lv, @paste_target)
+
+      lv
+      |> element(~s{button[phx-click="clipboard_pdf_cancel"]})
+      |> render_click()
+
+      refute has_element?(lv, @paste_target)
+    end
+
+    defp open_doc_conn(conn, user) do
+      conn
+      |> log_in_user(user)
+      |> live(~p"/workspace/doc-1")
     end
   end
 end

@@ -23,7 +23,12 @@ defmodule Quire.Forms.DetectTest do
     off = (y * bmp.width + x) * 4
     data = bmp.data
 
-    %{bmp | data: binary_part(data, 0, off) <> <<0, 0, 0, 255>> <> binary_part(data, off + 4, byte_size(data) - off - 4)}
+    %{
+      bmp
+      | data:
+          binary_part(data, 0, off) <>
+            <<0, 0, 0, 255>> <> binary_part(data, off + 4, byte_size(data) - off - 4)
+    }
   end
 
   defp stroke(bmp, x0, y0, x1, y1) do
@@ -62,7 +67,7 @@ defmodule Quire.Forms.DetectTest do
 
       assert field.kind == :text
       assert field.page_index == 0
-      assert_rect field.rect, [60, 120, 120, 160]
+      assert_rect(field.rect, [60, 120, 120, 160])
     end
 
     test "small hollow square becomes a checkbox" do
@@ -70,7 +75,7 @@ defmodule Quire.Forms.DetectTest do
       [field] = Detect.detect_page(bmp, info(), 0, dpi: 72)
 
       assert field.kind == :checkbox
-      assert_rect field.rect, [60, 76, 84, 100]
+      assert_rect(field.rect, [60, 76, 84, 100])
     end
 
     test "standalone long horizontal line becomes an underline text field" do
@@ -79,7 +84,7 @@ defmodule Quire.Forms.DetectTest do
 
       assert field.kind == :text
       # 30px detection band above the line (dpi 72 → 30pt)
-      assert_rect field.rect, [40, 49, 160, 80]
+      assert_rect(field.rect, [40, 49, 160, 80])
     end
 
     test "nested boxes are deduped to the largest" do
@@ -91,7 +96,7 @@ defmodule Quire.Forms.DetectTest do
       fields = Detect.detect_page(bmp, info(), 0, dpi: 72)
 
       assert length(fields) == 1
-      assert_rect hd(fields).rect, [50, 90, 150, 150]
+      assert_rect(hd(fields).rect, [50, 90, 150, 150])
     end
 
     test "90-degree rotated page maps rects back to content space" do
@@ -101,7 +106,7 @@ defmodule Quire.Forms.DetectTest do
       [field] = Detect.detect_page(bmp, info, 0, dpi: 72)
 
       assert field.kind == :text
-      assert_rect field.rect, [20, 60, 40, 120]
+      assert_rect(field.rect, [20, 60, 40, 120])
     end
   end
 

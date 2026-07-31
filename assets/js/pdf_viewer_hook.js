@@ -456,7 +456,7 @@ const PdfViewerHook = {
       this._hideFormatBar();
     };
     document.addEventListener("pointerdown", this._formatBarAutoHideHandler, true);
-  }
+  },
 
   /** Show the format bar positioned above the active editor. */
   _showFormatBar() {
@@ -472,7 +472,7 @@ const PdfViewerHook = {
     const styles = this._collectEditorStyles(editor);
 
     this._formatBar.show(rect, styles);
-  }
+  },
 
   /** Hide the format bar. */
   _hideFormatBar() {
@@ -480,7 +480,7 @@ const PdfViewerHook = {
       this._formatBar.hide();
     }
     this._activeEditor = null;
-  }
+  },
 
   /** Sync the format bar controls from the active editor's current state. */
   _syncFormatBarFromEditor() {
@@ -490,7 +490,7 @@ const PdfViewerHook = {
     this._activeEditor = editor;
     const styles = this._collectEditorStyles(editor);
     this._formatBar.updateStyles(styles);
-  }
+  },
 
   /**
    * Read all style properties from a FreeText editor into a plain object.
@@ -522,7 +522,7 @@ const PdfViewerHook = {
         : "#ffff00",
       alignment:      style.textAlign || "left",
     };
-  }
+  },
 
   /**
    * Handle a style change from the format bar.
@@ -602,7 +602,7 @@ const PdfViewerHook = {
         this._hideFormatBar();
         break;
     }
-  }
+  },
 
   /**
    * Dispatch a pdf.js annotation editor param update via eventBus.
@@ -616,7 +616,7 @@ const PdfViewerHook = {
       type,
       value,
     });
-  }
+  },
 
   /**
    * Apply a CSS style to the active editor's contenteditable div.
@@ -624,7 +624,7 @@ const PdfViewerHook = {
   _applyEditorStyle(prop, value) {
     if (!this._activeEditor || !this._activeEditor.editorDiv) return;
     this._activeEditor.editorDiv.style[prop] = value;
-  }
+  },
 
   /**
    * Toggle a text-decoration line value on/off.
@@ -641,7 +641,7 @@ const PdfViewerHook = {
       if (idx !== -1) lines.splice(idx, 1);
     }
     div.style.textDecorationLine = lines.join(" ");
-  }
+  },
 
   /**
    * Adjust the left padding of the editor to simulate indent/outdent.
@@ -653,7 +653,7 @@ const PdfViewerHook = {
     const cur = parseFloat(div.style.paddingLeft) || 0;
     const step = 20;
     div.style.paddingLeft = `${Math.max(0, cur + dir * step)}px`;
-  }
+  },
 
   /**
    * Insert an anchor/link into the editor content.
@@ -674,7 +674,7 @@ const PdfViewerHook = {
       link.target = "_blank";
       div.appendChild(link);
     }
-  }
+  },
 
   /**
    * Prompt for a value and apply as a CSS property.
@@ -684,7 +684,7 @@ const PdfViewerHook = {
     if (val !== null) {
       this._applyEditorStyle(prop, val);
     }
-  }
+  },
 
   /**
    * Cycle text-transform through none → uppercase → capitalize → none.
@@ -696,7 +696,7 @@ const PdfViewerHook = {
     const order = ["", "uppercase", "capitalize"];
     const idx = order.indexOf(cur);
     div.style.textTransform = order[(idx + 1) % order.length];
-  }
+  },
 
   /** Convert an rgb/rgba string to hex. */
   _rgbToHex(rgb) {
@@ -706,7 +706,7 @@ const PdfViewerHook = {
     const g = parseInt(m[2], 10).toString(16).padStart(2, "0");
     const b = parseInt(m[3], 10).toString(16).padStart(2, "0");
     return `#${r}${g}${b}`;
-  }
+  },
 
   // Serialize committed editors (FreeText etc.) from annotationStorage
   // and push the data to the server as a free_text_committed event.
