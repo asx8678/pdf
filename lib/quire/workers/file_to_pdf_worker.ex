@@ -105,47 +105,13 @@ defmodule Quire.Workers.FileToPdfWorker do
     {:error, "Unsupported format: #{ext}"}
   end
 
-  # ── Image → PDF (Vix → ExPdfium) ─────────────────────────────────────
+  # ── Image → PDF (via Quire.Scan, §9.2 T-080) ─────────────────────────
+  #
+  # The shared image→PDF core lives in Quire.Scan so the camera-capture and
+  # file-input scan paths (§9.2) feed the exact same pipeline as this worker.
 
   defp convert_image(image_bytes, _title) do
-    with {:ok, img} <- Vix.Vips.Image.new_from_buffer(image_bytes),
-         {:ok, srgb} <- Vix.Vips.Operation.colourspace(img, :VIPS_INTERPRETATION_sRGB) do
-      width = Vix.Vips.Image.width(srgb)
-      height = Vix.Vips.Image.height(srgb)
-
-      # Build ExPdfium Bitmap from Vix sRGB data
-      bitmap = vips_to_pdfium_bitmap(srgb, width, height)
-
-      {:ok, doc} = ExPdfium.new()
-      {:ok, doc} = ExPdfium.add_page(doc, {width * 1.0, height * 1.0})
-
-      {:ok, doc} =
-        ExPdfium.draw_image(doc, 0, bitmap,
-          at: %{left: 0.0, bottom: 0.0, right: width * 1.0, top: height * 1.0}
-        )
-
-      result = ExPdfium.save_to_bytes(doc)
-      ExPdfium.close(doc)
-      result
-    end
-  end
-
-  # Vix sRGB → ExPdfium.Bitmap (BGR byte order)
-  defp vips_to_pdfium_bitmap(img, width, height) do
-    {:ok, raw_data} = Vix.Vips.Image.write_to_binary(img)
-    bgr_data = swap_rb_3(raw_data)
-
-    %ExPdfium.Bitmap{
-      data: bgr_data,
-      width: width,
-      height: height,
-      stride: width * 3,
-      format: :bgr
-    }
-  end
-
-  defp swap_rb_3(data) do
-    for <<r::8, g::8, b::8 <- data>>, into: <<>>, do: <<b::8, g::8, r::8>>
+    Quire.Scan.image_to_pdf(image_bytes, deskew: false, contrast: :none)
   end
 
   # ── Office → HTML → PDF ──────────────────────────────────────────────
