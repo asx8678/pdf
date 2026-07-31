@@ -1047,44 +1047,6 @@ defmodule QuireWeb.WorkspaceLive do
     enqueue_ocr(socket, default_opts)
   end
 
-  defp enqueue_ocr(socket, options, page_range \\ nil) do
-    doc_id = socket.assigns.active_document_id
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
-         {:ok, rev} <- Quire.Documents.current_revision(doc) do
-      args =
-        %{
-          "doc_id" => doc_id,
-          "revision_id" => rev.id,
-          "options" => options
-        }
-
-      # Pass page_range when re-running selected pages
-      args =
-        if page_range do
-          Map.put(args, "page_range", page_range)
-        else
-          args
-        end
-
-      args
-      |> Quire.Workers.OcrWorker.new([])
-      |> Oban.insert!()
-
-      {:noreply,
-       socket
-       |> assign(:ocr_running, true)
-       |> assign(:ocr_progress, %{pct: 0})
-       |> assign(:show_ocr_options, false)
-       |> put_flash(:info, "OCR started on #{doc.title}")}
-    else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start OCR: #{reason}")}
-    end
-  end
-
-  # Attachments panel (T-107) — download/extract an embedded file attachment.
-  # File bytes are retrieved from Quire.Storage via the attachment_ref.
   def handle_event("preview_attachment", %{"name" => _name}, socket) do
     {:noreply, socket}
   end
@@ -1093,8 +1055,6 @@ defmodule QuireWeb.WorkspaceLive do
     # T-107: serve bytes through a download route or direct push
     {:noreply, socket}
   end
-
-  # ── Custom stamp event handlers (T-107) ────────────────────────────────
 
   def handle_event("save_custom_stamp", params, socket) do
     user_id = socket.assigns.current_scope.user.id
@@ -1141,8 +1101,6 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  # Thumbnails panel (T-046) — clamp into range and push to the viewer
-  # hook so pdf.js scrolls to the page.
   def handle_event("navigate_page", %{"page" => page}, socket) do
     case Integer.parse(to_string(page)) do
       {page, _} ->
@@ -1192,9 +1150,6 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :zoom, zoom)}
   end
 
-  # Flush pending client edits (pdf-7ov): the hook returned saved bytes.
-  # Create an intermediate revision, clear the pending op, and either
-  # retry the pending server op or just acknowledge.
   def handle_event("document_saved", %{"bytes" => base64}, socket) do
     bytes = Base.decode64!(base64)
     document_id = socket.assigns.document_id
@@ -1223,8 +1178,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> put_flash(:error, "Could not save pending edits: #{reason}")}
   end
 
-  # DocMutateHook (T-088): a client-side mutation was applied optimistically
-  # and the result bytes are ready. Store the inverse for potential revert.
   def handle_event("document_mutated", %{"kind" => kind, "data" => data}, socket) do
     op = %{kind: kind, data: data}
     document_id = socket.assigns.document_id
@@ -1259,10 +1212,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> push_event("set_scroll_mode", %{mode: mode})}
   end
 
-  defp next_scroll_mode(:vertical), do: :horizontal
-  defp next_scroll_mode(:horizontal), do: :wrapped
-  defp next_scroll_mode(:wrapped), do: :vertical
-
   def handle_event("set_spread_mode", %{"spread_mode" => current}, socket)
       when current in ~w(none single odd even) do
     mode = next_spread_mode(String.to_existing_atom(current))
@@ -1272,11 +1221,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> assign(:spread_mode, mode)
      |> push_event("set_spread_mode", %{mode: mode})}
   end
-
-  defp next_spread_mode(:none), do: :single
-  defp next_spread_mode(:single), do: :odd
-  defp next_spread_mode(:odd), do: :even
-  defp next_spread_mode(:even), do: :none
 
   def handle_event("set_fit_mode", %{"fit_mode" => current}, socket)
       when current in ~w(fit_page fit_width actual_size) do
@@ -1288,10 +1232,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> push_event("set_fit_mode", %{mode: mode})}
   end
 
-  defp next_fit_mode(:fit_page), do: :fit_width
-  defp next_fit_mode(:fit_width), do: :actual_size
-  defp next_fit_mode(:actual_size), do: :fit_page
-
   def handle_event("document_error", %{"message" => msg}, socket) do
     {:noreply, put_flash(socket, :error, "Document error: #{msg}")}
   end
@@ -1300,11 +1240,6 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, put_flash(socket, :error, "An unknown document error occurred")}
   end
 
-  # ── Search panel event handlers (T-048) ──────────────────────────────────
-
-  # Debounced keydown from the search input. A non-empty query is pushed
-  # to the PdfViewerHook, which runs pdf.js's find controller and answers
-  # with "search_results"; an empty query clears the panel locally.
   def handle_event("search", %{"value" => query}, socket) do
     {:noreply, socket |> assign(:search_query, query) |> run_search()}
   end
@@ -1327,11 +1262,6 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
-  # The viewer hook's answer to "find": a flat list of matches across
-  # pages, each %{"page" => n, "text" => snippet}. Rendered through a
-  # LiveView stream (§14.2 "phx-update=stream for all long lists") so only
-  # changed rows cross the wire; search_pages (small integer list) keeps
-  # next/prev navigation indexable.
   def handle_event("search_results", %{"results" => results, "total" => total}, socket) do
     results =
       results
@@ -1376,8 +1306,6 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("search_prev", _params, socket) do
     {:noreply, step_search(socket, -1)}
   end
-
-  # ── Measurement / Calibration event handlers (T-108) ────────────────────
 
   def handle_event("calibrate_scale", _params, socket) do
     {:noreply,
@@ -1503,8 +1431,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> push_event("read_aloud", %{action: "stop"})}
   end
 
-  # ── Pre-existing event handlers ──────────────────────────────────────────
-
   @impl true
   def handle_event("select_tab", %{"tab" => tab}, socket) do
     socket =
@@ -1560,8 +1486,6 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :rotation, 0) |> push_event("rotate", %{rotation: 0})}
   end
 
-  # ── Whiteout event handlers (T-109) ──────────────────────────────────────
-
   def handle_event("whiteout_committed", %{"data" => data}, socket) do
     document_id = socket.assigns.active_document_id
     user_id = socket.assigns.current_scope.user.id
@@ -1590,7 +1514,6 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :whiteout_warning_visible, false)}
   end
 
-  # Dismisses the OCR prompt for the current session.
   def handle_event("dismiss_ocr_prompt", _params, socket) do
     {:noreply,
      socket
@@ -1598,9 +1521,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> assign(:ocr_prompt_dismissed, true)}
   end
 
-  # ── Convert-to-Office handler (T-074 / pdf-wyh.1) ─────────────────────
-
-  # Enqueues PdfToOfficeWorker for the selected format.
   def handle_event("convert_to_office", %{"format" => format}, socket) do
     doc_id = socket.assigns.active_document_id
 
@@ -1628,13 +1548,10 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  @doc """
-  Generates a self-contained HTML export (T-078) in a background task.
-
-  `mode` is `"overlay"` (page WebP images + positioned selectable text) or
-  `"text_only"` (semantic reflow, no images). The result is delivered as a
-  browser download via the `{:download, ...}` handle_info.
-  """
+  # Generates a self-contained HTML export (T-078) in a background task.
+  # `mode` is `"overlay"` (page WebP images + positioned selectable text) or
+  # `"text_only"` (semantic reflow, no images). The result is delivered as a
+  # browser download via the `{:download, ...}` handle_info.
   def handle_event("convert_to_html", %{"mode" => mode}, socket) do
     doc_id = socket.assigns.active_document_id
     scope = socket.assigns.current_scope
@@ -1678,9 +1595,6 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  # T-079 Clipboard to PDF: receives base64 PDF bytes built client-side from
-  # clipboard text/image (via `@cantoo/pdf-lib`), ingests them as a new
-  # document (revision 1), and navigates to it in the workspace.
   def handle_event("clipboard_pdf_ready", params, socket) do
     scope = socket.assigns.current_scope
     filename = Map.get(params, "filename", "")
@@ -1750,8 +1664,6 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  # T-079: clipboard read failed (permission denied, empty, or unsupported
-  # format). Show the paste-target fallback with a plain-language message.
   def handle_event("clipboard_pdf_error", %{"code" => code}, socket) do
     {fallback, msg} =
       case code do
@@ -1775,63 +1687,9 @@ defmodule QuireWeb.WorkspaceLive do
      socket |> assign(:clipboard_fallback, fallback) |> assign(:clipboard_fallback_msg, msg)}
   end
 
-  # T-079: dismiss the paste-target fallback panel.
   def handle_event("clipboard_pdf_cancel", _params, socket) do
     {:noreply,
      socket |> assign(:clipboard_fallback, false) |> assign(:clipboard_fallback_msg, nil)}
-  end
-
-  # Delivers a finished HTML export as a browser download and clears the
-  # convert-progress state.
-  def handle_info({:html_export_done, filename, html}, socket) do
-    {:noreply,
-     socket
-     |> assign(:convert_running, false)
-     |> assign(:convert_format, nil)
-     |> assign(:convert_error, nil)
-     |> push_event("download", %{
-       content: Base.encode64(html),
-       filename: filename,
-       content_type: "text/html; charset=utf-8"
-     })
-     |> put_flash(:info, "HTML export ready — #{filename} downloaded")}
-  end
-
-  # Marks a finished HTML export as complete (download already delivered).
-  def handle_info({:convert_html_error, reason}, socket) do
-    {:noreply,
-     socket
-     |> assign(:convert_running, false)
-     |> assign(:convert_format, nil)
-     |> assign(:convert_error, "HTML export failed: #{reason}")
-     |> put_flash(:error, "HTML export failed")}
-  end
-
-  # Checks whether the document has any extractable text and assigns
-  # `show_ocr_prompt` if all pages lack a text layer.
-  defp check_text_layer(socket) do
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-         {:ok, rev} <- Quire.Documents.current_revision(doc) do
-      has_any_text =
-        Quire.Repo.all(
-          from(p in Quire.Documents.Page,
-            where: p.revision_id == ^rev.id and p.has_text == true,
-            select: p.id,
-            limit: 1
-          )
-        ) != []
-
-      if has_any_text do
-        assign(socket, :show_ocr_prompt, false)
-      else
-        assign(socket, :show_ocr_prompt, true)
-      end
-    else
-      _ -> assign(socket, :show_ocr_prompt, false)
-    end
   end
 
   def handle_event("dismiss_whiteout_permanently", _params, socket) do
@@ -1851,8 +1709,6 @@ defmodule QuireWeb.WorkspaceLive do
      |> assign(:whiteout_warning_visible, false)
      |> push_event("toggle_annot_mode", %{mode: "redact"})}
   end
-
-  # ── Signature capture event handlers (T-114) ────────────────────────────
 
   def handle_event("save_signature", params, socket) do
     user_id = socket.assigns.current_scope.user.id
@@ -1897,8 +1753,6 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  # ── Initials capture handlers (T-116) ───────────────────────────────────
-
   def handle_event("save_initials", params, socket) do
     user_id = socket.assigns.current_scope.user.id
 
@@ -1941,8 +1795,6 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  # ── Text-stamp handlers (T-116): signer name + signing date ──────────────
-
   def handle_event("name_stamp_use", _params, socket) do
     name = signer_name(socket)
     {:noreply, push_event(socket, "enable_name_stamp_placement", %{text: name})}
@@ -1961,18 +1813,6 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, push_event(socket, "enable_date_stamp_placement", %{text: text})}
   end
 
-  defp signer_name(socket) do
-    case socket.assigns do
-      %{signer_name: name} when is_binary(name) and name != "" -> name
-      _ -> socket.assigns.current_scope.user.email
-    end
-  end
-
-  # Handles a committed signature placement (T-115): the client rasterised the
-  # signature to PNG at the chosen box size and reports the rect in PDF points.
-  # The server embeds the signature as a flattened XObject via the
-  # `signature.place` op, journals it, flushes a new revision, and tells the
-  # client to reload the document.
   def handle_event("signature_placed", params, socket) do
     doc_id = socket.assigns.active_document_id
     user_id = socket.assigns.current_scope.user.id
@@ -2018,6 +1858,1315 @@ defmodule QuireWeb.WorkspaceLive do
          push_event(socket, "signature_placement_failed", %{reason: "Could not load document"})}
     end
   end
+
+  @impl true
+  def handle_event("dismiss_op_toast", %{"id" => id}, socket) do
+    {:noreply, assign(socket, :op_toasts, Map.delete(socket.assigns.op_toasts, id))}
+  end
+
+  @impl true
+  def handle_event("upload_image_ocr", _params, socket) do
+    {:noreply, push_event(socket, "trigger_image_picker", %{})}
+  end
+
+  @impl true
+  def handle_event("insert_from_file", _params, socket) do
+    {:noreply, push_event(socket, "trigger_insert_pdf_picker", %{})}
+  end
+
+  @impl true
+  def handle_event("insert_pdf_submit", _params, socket) do
+    [%{meta: meta, bytes: insert_bytes}] =
+      consume_uploaded_entries(socket, :insert_pdf, fn meta, entry ->
+        %{meta: meta, bytes: File.read!(entry.path)}
+      end)
+
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    case insert_pages_into_document(doc_id, scope, insert_bytes, meta.name) do
+      {:ok, _rev} ->
+        {:noreply,
+         socket
+         |> put_flash(:info, "Pages from #{meta.name} inserted")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Insert failed: #{reason}")}
+    end
+  end
+
+  @impl true
+  def handle_event("file_to_pdf_pick", _params, socket) do
+    {:noreply, push_event(socket, "trigger_file_to_pdf_picker", %{})}
+  end
+
+  @impl true
+  def handle_event("file_to_pdf_submit", _params, socket) do
+    [file] =
+      consume_uploaded_entries(socket, :file_to_pdf, fn meta, entry ->
+        {:ok, %{name: entry.client_name, bytes: File.read!(meta.path)}}
+      end)
+
+    %{name: name, bytes: file_bytes} = file
+
+    ext = name |> Path.extname() |> String.downcase()
+    title = Path.rootname(name)
+
+    case Quire.Workers.FileToPdfWorker.classify_ext(ext) do
+      :unknown ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Unsupported file type #{ext || "(no extension)"} — convert an image, text, HTML or Office document instead"
+         )}
+
+      _category ->
+        args = %{
+          "bytes" => Base.encode64(file_bytes),
+          "filename" => name,
+          "title" => title,
+          "scope_id" => socket.assigns.current_scope.user.id
+        }
+
+        args
+        |> Quire.Workers.FileToPdfWorker.new([])
+        |> Oban.insert!()
+
+        {:noreply,
+         socket
+         |> assign(:convert_running, true)
+         |> assign(:convert_format, "file")
+         |> assign(:convert_error, nil)
+         |> put_flash(:info, "Converting #{name} to PDF — this runs in the background")}
+    end
+  end
+
+  @impl true
+  def handle_event("toggle_advanced_menu", _params, socket) do
+    {:noreply, update(socket, :show_advanced_menu, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("convert_to_txt", _params, socket) do
+    enqueue_convert_worker(socket, "pdf_to_txt", Quire.Workers.PdfToTxtWorker, %{
+      "mode" => "layout"
+    })
+  end
+
+  @impl true
+  def handle_event("convert_to_rtf", _params, socket) do
+    enqueue_convert_worker(socket, "rtf", Quire.Workers.PdfToRtfWorker, %{})
+  end
+
+  @impl true
+  def handle_event("open_url_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_advanced_menu, false)
+     |> assign(:show_url_wizard, true)
+     |> assign(:url_value, "")
+     |> assign(:url_running, false)
+     |> assign(:url_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_url_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_url_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("url_set", %{"url" => url}, socket) do
+    {:noreply, assign(socket, :url_value, url)}
+  end
+
+  @impl true
+  def handle_event("url_convert", _params, socket) do
+    url = String.trim(socket.assigns.url_value)
+
+    with true <- url != "",
+         :ok <- Quire.SsrfGuard.check(url) do
+      doc_id = socket.assigns.active_document_id
+
+      with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+           {:ok, rev} <- Quire.Documents.current_revision(doc) do
+        args = %{
+          "source_type" => "url",
+          "url" => url,
+          "doc_id" => doc_id,
+          "revision_id" => rev.id,
+          "operation_id" => Ecto.UUID.generate()
+        }
+
+        args
+        |> Quire.Workers.ConvertWorker.new([])
+        |> Oban.insert!()
+
+        {:noreply,
+         socket
+         |> assign(:show_url_wizard, false)
+         |> assign(:convert_running, true)
+         |> assign(:convert_format, "url")
+         |> assign(:convert_error, nil)
+         |> put_flash(:info, "URL to PDF started for #{url}")}
+      else
+        {:error, reason} ->
+          {:noreply,
+           put_flash(socket, :error, "Failed to start URL conversion: #{inspect(reason)}")}
+      end
+    else
+      false ->
+        {:noreply, assign(socket, :url_error, "Enter a URL to convert")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :url_error, reason)}
+    end
+  end
+
+  @impl true
+  def handle_event("open_export_image_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_export_image_wizard, true)
+     |> assign(:export_image_format, "png")
+     |> assign(:export_image_dpi, "150")
+     |> assign(:export_image_range, "all")
+     |> assign(:export_image_multipage, false)
+     |> assign(:export_image_running, false)
+     |> assign(:export_image_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_export_image_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_export_image_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("export_image_set_format", %{"format" => format}, socket) do
+    {:noreply,
+     socket
+     |> assign(:export_image_format, format)
+     |> assign(:export_image_multipage, false)
+     |> assign(:export_image_error, nil)}
+  end
+
+  @impl true
+  def handle_event("export_image_set_dpi", %{"dpi" => dpi}, socket) do
+    {:noreply, assign(socket, :export_image_dpi, dpi)}
+  end
+
+  @impl true
+  def handle_event("export_image_set_range", %{"range" => range}, socket) do
+    {:noreply, assign(socket, :export_image_range, range)}
+  end
+
+  @impl true
+  def handle_event("export_image_toggle_multipage", _params, socket) do
+    {:noreply, update(socket, :export_image_multipage, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("export_image_submit", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      {dpi, _} = Integer.parse(socket.assigns.export_image_dpi)
+      dpi = dpi |> max(72) |> min(600)
+
+      multipage = socket.assigns.export_image_multipage
+      format = socket.assigns.export_image_format
+
+      if multipage and format != "tiff" do
+        {:noreply,
+         assign(socket, :export_image_error, "Multipage output is only available for TIFF")}
+      else
+        page_range =
+          case socket.assigns.export_image_range do
+            "all" -> nil
+            spec -> parse_page_range(spec)
+          end
+
+        args =
+          %{
+            "doc_id" => doc_id,
+            "revision_id" => rev.id,
+            "format" => format,
+            "dpi" => dpi,
+            "page_range" => page_range,
+            "multipage_tiff" => multipage,
+            "operation_id" => Ecto.UUID.generate()
+          }
+
+        args
+        |> Quire.Workers.PdfToImageWorker.new([])
+        |> Oban.insert!()
+
+        {:noreply,
+         socket
+         |> assign(:show_export_image_wizard, false)
+         |> assign(:convert_running, true)
+         |> assign(:convert_format, "image")
+         |> assign(:convert_error, nil)
+         |> put_flash(:info, "PDF to Image started — #{format |> String.upcase()} at #{dpi} DPI")}
+      end
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start image export: #{inspect(reason)}")}
+    end
+  end
+
+  @impl true
+  def handle_event("translate_set_source", %{"value" => source}, socket) do
+    {:noreply, assign(socket, :translate_source, source)}
+  end
+
+  @impl true
+  def handle_event("translate_set_target", %{"value" => target}, socket) do
+    {:noreply, assign(socket, :translate_target, target)}
+  end
+
+  @impl true
+  def handle_event("translate_set_mode", %{"mode" => mode}, socket) do
+    {:noreply, assign(socket, :translate_mode, mode)}
+  end
+
+  @impl true
+  def handle_event("translate_document", _params, socket) do
+    source = socket.assigns.translate_source
+    target = socket.assigns.translate_target
+    mode = socket.assigns.translate_mode
+
+    provider = Quire.Translation.Provider.configured()
+
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    socket =
+      with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+           {:ok, rev} <- Quire.Documents.current_revision(doc),
+           %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev) do
+        case Quire.Render.extract_text(ref, []) do
+          {:ok, page_results} ->
+            translations =
+              Enum.map(page_results, fn page_result ->
+                text =
+                  page_result.spans
+                  |> Enum.map(& &1.text)
+                  |> Enum.join("")
+
+                if text != "" do
+                  case provider.translate(text, source, target) do
+                    {:ok, result} ->
+                      %{
+                        page: page_result.page + 1,
+                        original: text,
+                        translated: result.translated_text,
+                        banner: result.banner
+                      }
+
+                    {:error, reason} ->
+                      %{
+                        page: page_result.page + 1,
+                        original: text,
+                        translated: nil,
+                        error: reason
+                      }
+                  end
+                else
+                  %{page: page_result.page + 1, original: "", translated: "", error: nil}
+                end
+              end)
+
+            total = length(translations)
+            ok = Enum.count(translations, &(not is_nil(&1.translated)))
+            errors = Enum.count(translations, &(not is_nil(&1.error)))
+
+            socket =
+              socket
+              |> assign(:translate_provider_label, provider_label())
+              |> assign(:translate_results, translations)
+              |> assign(:right_panel, :translate)
+              |> put_flash(:info, "Translation: #{ok}/#{total} pages done, #{errors} errors")
+
+            case mode do
+              "replace" ->
+                source_map = %{
+                  "source_revision" => rev.id,
+                  "note" => "Translated #{source}→#{target}",
+                  "mode" => mode,
+                  "translations" => translations
+                }
+
+                with {:ok, doc_bytes} <- Quire.Storage.get(ref),
+                     {:ok, new_ref} <-
+                       Quire.Storage.put(doc_bytes,
+                         name: doc.title,
+                         content_type: "application/pdf"
+                       ) do
+                  source_map =
+                    Map.put(source_map, "storage_ref", %{
+                      "adapter" => to_string(new_ref.adapter),
+                      "key" => new_ref.key,
+                      "name" => new_ref.name,
+                      "content_type" => new_ref.content_type,
+                      "byte_size" => new_ref.byte_size
+                    })
+
+                  {:ok, _new_rev} =
+                    Quire.Documents.create_revision(doc,
+                      label: "Translated (#{source}→#{target})",
+                      source: source_map
+                    )
+
+                  socket
+                  |> push_event("open_document", %{
+                    url: socket.assigns.document_url,
+                    password: nil
+                  })
+                  |> put_flash(:info, "New revision saved with translation")
+                else
+                  {:error, reason} ->
+                    put_flash(socket, :error, "Replace failed: #{reason}")
+                end
+
+              "overlay" ->
+                overlay_data =
+                  Enum.map(translations, fn t ->
+                    %{page: t.page, translated: t.translated, error: t.error}
+                  end)
+
+                push_event(socket, "translate_overlay", %{pages: overlay_data})
+
+              "sidecar" ->
+                put_flash(
+                  socket,
+                  :info,
+                  "Sidecar mode coming soon — results in the Translate panel"
+                )
+
+              _ ->
+                socket
+            end
+
+          {:error, reason} ->
+            put_flash(socket, :error, "Text extraction failed: #{reason}")
+        end
+      else
+        _ ->
+          put_flash(socket, :error, "Could not load document for translation")
+      end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("reset_form", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, doc_bytes} <- Quire.Storage.get(ref) do
+      case Quire.FormData.reset(doc_bytes) do
+        {:ok, reset_bytes} when is_binary(reset_bytes) ->
+          {:ok, new_ref} =
+            Quire.Storage.put(reset_bytes,
+              name: doc.title,
+              content_type: "application/pdf"
+            )
+
+          source_map = %{
+            "storage_ref" => %{
+              "adapter" => to_string(new_ref.adapter),
+              "key" => new_ref.key,
+              "name" => new_ref.name,
+              "content_type" => new_ref.content_type,
+              "byte_size" => new_ref.byte_size
+            },
+            "source_revision" => rev.id,
+            "note" => "Form reset to defaults"
+          }
+
+          {:ok, _new_rev} =
+            Quire.Documents.create_revision(doc,
+              label: "Form reset",
+              source: source_map
+            )
+
+          {:noreply,
+           socket
+           |> push_event("open_document", %{
+             url: socket.assigns.document_url,
+             password: nil
+           })
+           |> put_flash(:info, "Form fields reset to defaults")}
+
+        _ ->
+          {:noreply, put_flash(socket, :error, "No form fields found to reset")}
+      end
+    else
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not load document for reset")}
+    end
+  end
+
+  def handle_event("auto_create_fields", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      operation_id = Ecto.UUID.generate()
+
+      args = %{
+        "doc_id" => doc_id,
+        "revision_id" => rev.id,
+        "operation_id" => operation_id
+      }
+
+      args
+      |> Quire.Workers.AutoCreateFieldsWorker.new([])
+      |> Oban.insert!()
+
+      {:noreply,
+       socket
+       |> assign(:form_detect_running, true)
+       |> assign(:form_detect_progress, %{pct: 0})
+       |> assign(:form_detect_operation_id, operation_id)
+       |> assign(:form_detections, nil)
+       |> put_flash(:info, "Field detection started on #{doc.title}")}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start detection: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("accept_detected_fields", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+    detections = socket.assigns.form_detections
+
+    with true <- detections != nil,
+         {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, %{revision: _rev}} <-
+           Quire.Forms.AutoCreate.commit_revision(doc, detections.fields) do
+      {:noreply,
+       socket
+       |> clear_form_detection()
+       |> put_flash(:info, "Created #{detections.total} form field(s)")}
+    else
+      false ->
+        {:noreply, put_flash(socket, :error, "No detections to commit")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> clear_form_detection()
+         |> put_flash(:error, "Failed to create fields: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("discard_detected_fields", _params, socket) do
+    {:noreply,
+     socket
+     |> clear_form_detection()
+     |> put_flash(:info, "Detection discarded")}
+  end
+
+  @impl true
+  def handle_event("upload_image_ocr_submit", _params, socket) do
+    [%{meta: meta, bytes: image_bytes}] =
+      consume_uploaded_entries(socket, :image, fn meta, entry ->
+        %{meta: meta, bytes: File.read!(entry.path)}
+      end)
+
+    title = Path.rootname(meta.name, Path.extname(meta.name))
+
+    socket =
+      socket
+      |> assign(:image_ocr_uploading, true)
+      |> assign(:image_ocr_error, nil)
+
+    socket =
+      case Quire.Workers.ImageOcrWorker.process(image_bytes, title, socket.assigns.current_scope) do
+        {:ok, %{document: doc}} ->
+          push_navigate(socket, to: ~p"/workspace/#{doc.id}")
+
+        {:error, {:invalid_image, msg}} ->
+          socket
+          |> assign(:image_ocr_uploading, false)
+          |> assign(:image_ocr_error, {:invalid_image, msg})
+          |> put_flash(:error, msg)
+
+        {:error, reason} ->
+          socket
+          |> assign(:image_ocr_uploading, false)
+          |> assign(:image_ocr_error, {:pipeline_error, inspect(reason)})
+          |> put_flash(:error, "Image OCR failed: #{inspect(reason)}")
+      end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("open_camera_capture", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_camera_capture, true)
+     |> assign(:scan_job_id, nil)
+     |> assign(:scan_progress, nil)
+     |> assign(:scan_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_camera_capture", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_camera_capture, false)}
+  end
+
+  @impl true
+  def handle_event("cancel_scan", _params, socket) do
+    socket = cancel_scan_job(socket)
+
+    {:noreply,
+     socket
+     |> assign(:scan_job_id, nil)
+     |> assign(:scan_progress, nil)
+     |> assign(:scan_error, nil)
+     |> put_flash(:info, "Scan cancelled.")}
+  end
+
+  @impl true
+  def handle_event("camera_captured", %{"dataUrl" => data_url}, socket) do
+    send_update(QuireWeb.CameraCaptureComponent,
+      id: "camera-capture",
+      phase: :captured,
+      captured_data_url: data_url
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("camera_ready_event", _params, socket) do
+    send_update(QuireWeb.CameraCaptureComponent,
+      id: "camera-capture",
+      phase: :capturing
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("camera_error_event", %{"message" => msg}, socket) do
+    send_update(QuireWeb.CameraCaptureComponent,
+      id: "camera-capture",
+      phase: :error,
+      error_message: msg
+    )
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("scan_file_ready", params, socket) do
+    image_bytes = decode_data_url(params["dataUrl"])
+
+    opts = %{
+      deskew: params["deskew"] != "false",
+      contrast: params["contrast"] || "auto",
+      ocr: params["ocr"] == "true"
+    }
+
+    {:noreply, process_scan(socket, image_bytes, params["title"] || "Scan", opts)}
+  end
+
+  @merge_max_files 12
+
+  @impl true
+  def handle_event("open_merge_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_merge_wizard, true)
+     |> assign(:merge_error, nil)
+     |> assign(:merge_running, false)}
+  end
+
+  @impl true
+  def handle_event("close_merge_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_merge_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("merge_files", _params, socket) do
+    entries =
+      consume_uploaded_entries(socket, :merge_files, fn file_meta, entry ->
+        %{name: entry.client_name, bytes: File.read!(file_meta.path)}
+      end)
+
+    socket =
+      Enum.reduce_while(entries, socket, fn file, acc ->
+        cond do
+          length(acc.assigns.merge_files) >= @merge_max_files ->
+            {:halt, put_flash(acc, :error, "Merge supports at most #{@merge_max_files} files")}
+
+          true ->
+            pages =
+              case ExPdfium.open(file.bytes) do
+                {:ok, doc} ->
+                  case ExPdfium.page_count(doc) do
+                    {:ok, n} -> n
+                    _ -> 0
+                  end
+
+                _ ->
+                  0
+              end
+
+            if pages == 0 do
+              {:halt, put_flash(acc, :error, "#{file.name} is not a readable PDF")}
+            else
+              item = %{
+                id: Ecto.UUID.generate(),
+                name: file.name,
+                bytes: file.bytes,
+                pages: pages,
+                range: ""
+              }
+
+              {:cont,
+               acc
+               |> assign(:merge_files, acc.assigns.merge_files ++ [item])
+               |> assign(:merge_error, nil)}
+            end
+        end
+      end)
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_event("merge_set_range", params, socket) do
+    {id, range} =
+      case Map.to_list(params) do
+        [{id, range}] -> {id, range}
+        _ -> {nil, nil}
+      end
+
+    if is_binary(id) and is_binary(range) do
+      files =
+        Enum.map(
+          socket.assigns.merge_files,
+          &if(&1.id == id, do: %{&1 | range: range}, else: &1)
+        )
+
+      {:noreply, socket |> assign(:merge_files, files) |> assign(:merge_error, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("merge_move_file", %{"id" => id, "dir" => dir}, socket) do
+    {:noreply, move_merge_file(socket, id, dir)}
+  end
+
+  @impl true
+  def handle_event("merge_move_file", %{"id" => id, "dir" => "to", "target" => target}, socket) do
+    files = socket.assigns.merge_files
+    ids = Enum.map(files, & &1.id)
+
+    with true <- id in ids,
+         true <- target in ids,
+         from when is_integer(from) <- Enum.find_index(ids, &(&1 == id)),
+         to when is_integer(to) <- Enum.find_index(ids, &(&1 == target)) do
+      {item, rest} = List.pop_at(files, from)
+      moved = List.insert_at(rest, to, item)
+      {:noreply, assign(socket, :merge_files, moved)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("merge_remove_file", %{"id" => id}, socket) do
+    files = Enum.reject(socket.assigns.merge_files, &(&1.id == id))
+    {:noreply, socket |> assign(:merge_files, files) |> assign(:merge_error, nil)}
+  end
+
+  @impl true
+  def handle_event("merge_toggle_numbering", _params, socket) do
+    {:noreply, update(socket, :merge_numbering, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("merge_set_bookmarks", %{"bookmarks" => value}, socket) do
+    {:noreply, assign(socket, :merge_bookmarks, value)}
+  end
+
+  @impl true
+  def handle_event("merge_set_forms", %{"forms" => value}, socket) do
+    {:noreply, assign(socket, :merge_forms, value)}
+  end
+
+  @impl true
+  def handle_event("merge_submit", _params, socket) do
+    if socket.assigns.merge_files == [] do
+      {:noreply, put_flash(socket, :error, "Add at least one PDF to merge")}
+    else
+      {:noreply, run_merge(socket)}
+    end
+  end
+
+  @impl true
+  def handle_event("open_split_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_split_wizard, true)
+     |> assign(:split_mode, "every_n")
+     |> assign(:split_n, "5")
+     |> assign(:split_level, "1")
+     |> assign(:split_ranges, "")
+     |> assign(:split_size, "1mb")
+     |> assign(:split_extract, "")
+     |> assign(:split_running, false)
+     |> assign(:split_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_split_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_split_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("split_set_mode", %{"mode" => mode}, socket) do
+    {:noreply, socket |> assign(:split_mode, mode) |> assign(:split_error, nil)}
+  end
+
+  @impl true
+  def handle_event("split_set_param", params, socket) do
+    socket =
+      Enum.reduce(params, socket, fn
+        {"n", value}, acc -> assign(acc, :split_n, value)
+        {"level", value}, acc -> assign(acc, :split_level, value)
+        {"ranges", value}, acc -> assign(acc, :split_ranges, value)
+        {"size", value}, acc -> assign(acc, :split_size, value)
+        {"extract", value}, acc -> assign(acc, :split_extract, value)
+        _, acc -> acc
+      end)
+
+    {:noreply, assign(socket, :split_error, nil)}
+  end
+
+  @impl true
+  def handle_event("split_submit", _params, socket) do
+    {:noreply, run_split(socket)}
+  end
+
+  @impl true
+  def handle_event("open_compress_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_compress_wizard, true)
+     |> assign(:compress_preset, "medium")
+     |> assign(:compress_custom_quality, "60")
+     |> assign(:compress_custom_max_width, "2048")
+     |> assign(:compress_remove_a11y, false)
+     |> assign(:compress_running, false)
+     |> assign(:compress_error, nil)
+     |> assign(:compress_preview, nil)}
+  end
+
+  @impl true
+  def handle_event("close_compress_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_compress_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("compress_set_preset", %{"preset" => preset}, socket) do
+    {:noreply,
+     socket
+     |> assign(:compress_preset, preset)
+     |> assign(:compress_error, nil)
+     |> assign(:compress_preview, nil)}
+  end
+
+  @impl true
+  def handle_event("compress_set_param", params, socket) do
+    socket =
+      Enum.reduce(params, socket, fn
+        {"quality", value}, acc -> assign(acc, :compress_custom_quality, value)
+        {"max_width", value}, acc -> assign(acc, :compress_custom_max_width, value)
+        _, acc -> acc
+      end)
+
+    {:noreply, socket |> assign(:compress_error, nil) |> assign(:compress_preview, nil)}
+  end
+
+  @impl true
+  def handle_event("compress_toggle_a11y", _params, socket) do
+    {:noreply, update(socket, :compress_remove_a11y, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("compress_preview", _params, socket) do
+    {:noreply, run_compress_preview(socket)}
+  end
+
+  @impl true
+  def handle_event("compress_commit", _params, socket) do
+    {:noreply, run_compress_commit(socket)}
+  end
+
+  @impl true
+  def handle_event("open_pdfa_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_pdfa_wizard, true)
+     |> assign(:pdfa_running, false)
+     |> assign(:pdfa_error, nil)
+     |> assign(:pdfa_report, nil)}
+  end
+
+  @impl true
+  def handle_event("close_pdfa_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_pdfa_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("pdfa_convert", _params, socket) do
+    {:noreply, run_pdfa_convert(socket)}
+  end
+
+  @impl true
+  def handle_event("toggle_new_menu", _params, socket) do
+    {:noreply, update(socket, :show_new_menu, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("close_new_menu", _params, socket) do
+    {:noreply, assign(socket, :show_new_menu, false)}
+  end
+
+  @impl true
+  def handle_event("new_blank", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_new_menu, false)
+     |> assign(:show_blank_wizard, true)
+     |> assign(:blank_size, "a4")
+     |> assign(:blank_orientation, "portrait")
+     |> assign(:blank_error, nil)}
+  end
+
+  @impl true
+  def handle_event("new_template", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_new_menu, false)
+     |> assign(:show_template_wizard, true)
+     |> assign(:template_id, "letter")
+     |> assign(:template_error, nil)}
+  end
+
+  @impl true
+  def handle_event("new_from_scanner", _params, socket) do
+    # Reuses the T-080 scan-to-PDF flow
+    {:noreply,
+     socket
+     |> assign(:show_new_menu, false)
+     |> assign(:show_camera_capture, true)
+     |> assign(:scan_job_id, nil)
+     |> assign(:scan_progress, nil)
+     |> assign(:scan_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_blank_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_blank_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("blank_set_size", %{"size" => size}, socket) do
+    {:noreply, assign(socket, :blank_size, size)}
+  end
+
+  @impl true
+  def handle_event("blank_set_orientation", %{"orientation" => orientation}, socket) do
+    {:noreply, assign(socket, :blank_orientation, orientation)}
+  end
+
+  @impl true
+  def handle_event("blank_create", _params, socket) do
+    {:noreply, create_blank_document(socket)}
+  end
+
+  @impl true
+  def handle_event("close_template_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_template_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("template_set", %{"template" => template_id}, socket) do
+    {:noreply, assign(socket, :template_id, template_id)}
+  end
+
+  @impl true
+  def handle_event("template_create", _params, socket) do
+    {:noreply, create_template_document(socket)}
+  end
+
+  defp enqueue_ocr(socket, options, page_range \\ nil) do
+    doc_id = socket.assigns.active_document_id
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      args =
+        %{
+          "doc_id" => doc_id,
+          "revision_id" => rev.id,
+          "options" => options
+        }
+
+      # Pass page_range when re-running selected pages
+      args =
+        if page_range do
+          Map.put(args, "page_range", page_range)
+        else
+          args
+        end
+
+      args
+      |> Quire.Workers.OcrWorker.new([])
+      |> Oban.insert!()
+
+      {:noreply,
+       socket
+       |> assign(:ocr_running, true)
+       |> assign(:ocr_progress, %{pct: 0})
+       |> assign(:show_ocr_options, false)
+       |> put_flash(:info, "OCR started on #{doc.title}")}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start OCR: #{reason}")}
+    end
+  end
+
+  # Attachments panel (T-107) — download/extract an embedded file attachment.
+  # File bytes are retrieved from Quire.Storage via the attachment_ref.
+
+  # ── Custom stamp event handlers (T-107) ────────────────────────────────
+
+  # Thumbnails panel (T-046) — clamp into range and push to the viewer
+  # hook so pdf.js scrolls to the page.
+
+  # Flush pending client edits (pdf-7ov): the hook returned saved bytes.
+  # Create an intermediate revision, clear the pending op, and either
+  # retry the pending server op or just acknowledge.
+
+  # DocMutateHook (T-088): a client-side mutation was applied optimistically
+  # and the result bytes are ready. Store the inverse for potential revert.
+
+  defp next_scroll_mode(:vertical), do: :horizontal
+  defp next_scroll_mode(:horizontal), do: :wrapped
+  defp next_scroll_mode(:wrapped), do: :vertical
+
+  defp next_spread_mode(:none), do: :single
+  defp next_spread_mode(:single), do: :odd
+  defp next_spread_mode(:odd), do: :even
+  defp next_spread_mode(:even), do: :none
+
+  defp next_fit_mode(:fit_page), do: :fit_width
+  defp next_fit_mode(:fit_width), do: :actual_size
+  defp next_fit_mode(:actual_size), do: :fit_page
+
+  # ── Search panel event handlers (T-048) ──────────────────────────────────
+
+  # Debounced keydown from the search input. A non-empty query is pushed
+  # to the PdfViewerHook, which runs pdf.js's find controller and answers
+  # with "search_results"; an empty query clears the panel locally.
+
+  # The viewer hook's answer to "find": a flat list of matches across
+  # pages, each %{"page" => n, "text" => snippet}. Rendered through a
+  # LiveView stream (§14.2 "phx-update=stream for all long lists") so only
+  # changed rows cross the wire; search_pages (small integer list) keeps
+  # next/prev navigation indexable.
+
+  # ── Measurement / Calibration event handlers (T-108) ────────────────────
+
+  # ── Pre-existing event handlers ──────────────────────────────────────────
+
+  # ── Whiteout event handlers (T-109) ──────────────────────────────────────
+
+  # Dismisses the OCR prompt for the current session.
+
+  # ── Convert-to-Office handler (T-074 / pdf-wyh.1) ─────────────────────
+
+  # Enqueues PdfToOfficeWorker for the selected format.
+
+  # T-079 Clipboard to PDF: receives base64 PDF bytes built client-side from
+  # clipboard text/image (via `@cantoo/pdf-lib`), ingests them as a new
+  # document (revision 1), and navigates to it in the workspace.
+
+  # T-079: clipboard read failed (permission denied, empty, or unsupported
+  # format). Show the paste-target fallback with a plain-language message.
+
+  # T-079: dismiss the paste-target fallback panel.
+
+  # Delivers a finished HTML export as a browser download and clears the
+  # convert-progress state.
+  def handle_info({:html_export_done, filename, html}, socket) do
+    {:noreply,
+     socket
+     |> assign(:convert_running, false)
+     |> assign(:convert_format, nil)
+     |> assign(:convert_error, nil)
+     |> push_event("download", %{
+       content: Base.encode64(html),
+       filename: filename,
+       content_type: "text/html; charset=utf-8"
+     })
+     |> put_flash(:info, "HTML export ready — #{filename} downloaded")}
+  end
+
+  # Marks a finished HTML export as complete (download already delivered).
+  def handle_info({:convert_html_error, reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:convert_running, false)
+     |> assign(:convert_format, nil)
+     |> assign(:convert_error, "HTML export failed: #{reason}")
+     |> put_flash(:error, "HTML export failed")}
+  end
+
+  @impl true
+  def handle_info({:revision, rev}, socket) do
+    socket =
+      socket
+      |> assign(:ocr_running, false)
+      |> assign(:ocr_progress, nil)
+      |> assign(:convert_running, false)
+      |> assign(:convert_format, nil)
+      |> assign(:convert_error, nil)
+      |> clear_form_detection()
+      |> push_event("revision_updated", %{revision_id: rev.id})
+
+    # Fetch confidence data for this revision to show the confidence panel.
+    ocr_result = OcrResults.by_revision(rev.id)
+
+    socket =
+      if ocr_result do
+        socket
+        |> assign(:show_ocr_confidence, true)
+        |> assign(:ocr_confidence_result, ocr_result)
+      else
+        socket
+      end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:operation_progress, operation_id, pct}, socket) do
+    # Form-field detection jobs carry an operation_id; OCR jobs broadcast
+    # with nil (never sent) — keep the legacy assign for compatibility.
+    socket =
+      if operation_id == socket.assigns.form_detect_operation_id do
+        assign(socket, :form_detect_progress, %{pct: pct})
+      else
+        assign(socket, :ocr_progress, %{pct: pct})
+      end
+
+    # T-086: live progress toasts + status strip, driven by PubSub broadcasts
+    toasts =
+      Map.update(
+        socket.assigns.op_toasts,
+        operation_id,
+        %{
+          message: "Conversion in progress",
+          pct: pct,
+          status: "running"
+        },
+        fn toast -> Map.merge(toast, %{pct: pct}) end
+      )
+
+    {:noreply, assign(socket, :op_toasts, toasts)}
+  end
+
+  @impl true
+  def handle_info({:operation_completed, operation_id, _doc_id}, socket) do
+    toasts =
+      Map.put(socket.assigns.op_toasts, operation_id, %{
+        message: "Conversion complete",
+        pct: 100,
+        status: "success"
+      })
+
+    {:noreply, assign(socket, :op_toasts, toasts)}
+  end
+
+  @impl true
+  def handle_info({:operation_failed, operation_id, _doc_id, reason}, socket) do
+    toasts =
+      Map.put(socket.assigns.op_toasts, operation_id, %{
+        message: reason,
+        pct: 100,
+        status: "error"
+      })
+
+    {:noreply, assign(socket, :op_toasts, toasts)}
+  end
+
+  @impl true
+  def handle_info({:auto_create_detections, operation_id, detections}, socket) do
+    if operation_id == socket.assigns.form_detect_operation_id do
+      {:noreply,
+       socket
+       |> assign(:form_detect_running, false)
+       |> assign(:form_detect_progress, %{pct: 100})
+       |> assign(:form_detections, detections)
+       |> push_event("form_detection_preview", %{fields: detections.fields})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info({:run_ocr, options}, socket) do
+    # Options from the LiveComponent have atom keys; convert to string keys
+    # for Oban job args (JSON serialisation).
+    options =
+      options
+      |> Enum.map(fn
+        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+        {k, v} -> {k, v}
+      end)
+      |> Map.new()
+
+    enqueue_ocr(socket, options)
+  end
+
+  @impl true
+  def handle_info({:rerun_ocr, page_list, options}, socket) do
+    # Options from the LiveComponent may have atom or string keys;
+    # normalise to string keys for Oban job args.
+    options =
+      options
+      |> Enum.map(fn
+        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+        {k, v} -> {k, v}
+      end)
+      |> Map.new()
+
+    enqueue_ocr(socket, options, page_list)
+  end
+
+  @impl true
+  def handle_info({:navigate_to_annotation, page_index, rect}, socket) do
+    page = (page_index + 1) |> max(1) |> min(socket.assigns.total_pages)
+
+    {:noreply,
+     socket
+     |> assign(:page, page)
+     |> push_event("navigate_page", %{page: page})
+     |> push_event("select_annotation", %{rect: rect, page_index: page_index})}
+  end
+
+  @impl true
+  def handle_info({:dismiss_ocr_confidence}, socket) do
+    {:noreply, assign(socket, :show_ocr_confidence, false)}
+  end
+
+  @impl true
+  def handle_info({:download, filename, content, content_type}, socket) do
+    {:noreply,
+     push_event(socket, "download", %{
+       content: Base.encode64(content),
+       filename: filename,
+       content_type: content_type
+     })}
+  end
+
+  @impl true
+  def handle_info({:import_complete, count}, socket) do
+    {:noreply, put_flash(socket, :info, "Imported #{count} annotations from XFDF")}
+  end
+
+  @impl true
+  def handle_info({:export_error, reason}, socket) do
+    {:noreply, put_flash(socket, :error, reason)}
+  end
+
+  @impl true
+  def handle_info({:scan_image, data_url, title, opts}, socket) do
+    image_bytes = decode_data_url(data_url)
+    {:noreply, process_scan(socket, image_bytes, title || "Scan", opts)}
+  end
+
+  @impl true
+  def handle_info({:scan_image, data_url, title}, socket) do
+    image_bytes = decode_data_url(data_url)
+    {:noreply, process_scan(socket, image_bytes, title || "Scan", %{})}
+  end
+
+  @impl true
+  def handle_info({:close_camera_modal}, socket) do
+    {:noreply, assign(socket, :show_camera_capture, false)}
+  end
+
+  @impl true
+  def handle_info({:request_camera}, socket) do
+    {:noreply, push_event(socket, "start_camera", %{})}
+  end
+
+  # Checks whether the document has any extractable text and assigns
+  # `show_ocr_prompt` if all pages lack a text layer.
+  defp check_text_layer(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      has_any_text =
+        Quire.Repo.all(
+          from(p in Quire.Documents.Page,
+            where: p.revision_id == ^rev.id and p.has_text == true,
+            select: p.id,
+            limit: 1
+          )
+        ) != []
+
+      if has_any_text do
+        assign(socket, :show_ocr_prompt, false)
+      else
+        assign(socket, :show_ocr_prompt, true)
+      end
+    else
+      _ -> assign(socket, :show_ocr_prompt, false)
+    end
+  end
+
+  # ── Signature capture event handlers (T-114) ────────────────────────────
+
+  # ── Initials capture handlers (T-116) ───────────────────────────────────
+
+  # ── Text-stamp handlers (T-116): signer name + signing date ──────────────
+
+  defp signer_name(socket) do
+    case socket.assigns do
+      %{signer_name: name} when is_binary(name) and name != "" -> name
+      _ -> socket.assigns.current_scope.user.email
+    end
+  end
+
+  # Handles a committed signature placement (T-115): the client rasterised the
+  # signature to PNG at the chosen box size and reports the rect in PDF points.
+  # The server embeds the signature as a flattened XObject via the
+  # `signature.place` op, journals it, flushes a new revision, and tells the
+  # client to reload the document.
 
   defp fetch_int(params, key) do
     case Integer.parse(to_string(Map.get(params, key, ""))) do
@@ -3230,439 +4379,28 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── PubSub handlers (T-139) ──────────────────────────────────────────
 
-  @impl true
-  def handle_info({:revision, rev}, socket) do
-    socket =
-      socket
-      |> assign(:ocr_running, false)
-      |> assign(:ocr_progress, nil)
-      |> assign(:convert_running, false)
-      |> assign(:convert_format, nil)
-      |> assign(:convert_error, nil)
-      |> clear_form_detection()
-      |> push_event("revision_updated", %{revision_id: rev.id})
-
-    # Fetch confidence data for this revision to show the confidence panel.
-    ocr_result = OcrResults.by_revision(rev.id)
-
-    socket =
-      if ocr_result do
-        socket
-        |> assign(:show_ocr_confidence, true)
-        |> assign(:ocr_confidence_result, ocr_result)
-      else
-        socket
-      end
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_info({:operation_progress, operation_id, pct}, socket) do
-    # Form-field detection jobs carry an operation_id; OCR jobs broadcast
-    # with nil (never sent) — keep the legacy assign for compatibility.
-    socket =
-      if operation_id == socket.assigns.form_detect_operation_id do
-        assign(socket, :form_detect_progress, %{pct: pct})
-      else
-        assign(socket, :ocr_progress, %{pct: pct})
-      end
-
-    # T-086: live progress toasts + status strip, driven by PubSub broadcasts
-    toasts =
-      Map.update(
-        socket.assigns.op_toasts,
-        operation_id,
-        %{
-          message: "Conversion in progress",
-          pct: pct,
-          status: "running"
-        },
-        fn toast -> Map.merge(toast, %{pct: pct}) end
-      )
-
-    {:noreply, assign(socket, :op_toasts, toasts)}
-  end
-
-  @impl true
-  def handle_info({:operation_completed, operation_id, _doc_id}, socket) do
-    toasts =
-      Map.put(socket.assigns.op_toasts, operation_id, %{
-        message: "Conversion complete",
-        pct: 100,
-        status: "success"
-      })
-
-    {:noreply, assign(socket, :op_toasts, toasts)}
-  end
-
-  @impl true
-  def handle_info({:operation_failed, operation_id, _doc_id, reason}, socket) do
-    toasts =
-      Map.put(socket.assigns.op_toasts, operation_id, %{
-        message: reason,
-        pct: 100,
-        status: "error"
-      })
-
-    {:noreply, assign(socket, :op_toasts, toasts)}
-  end
-
-  @impl true
-  def handle_event("dismiss_op_toast", %{"id" => id}, socket) do
-    {:noreply, assign(socket, :op_toasts, Map.delete(socket.assigns.op_toasts, id))}
-  end
-
-  @impl true
-  def handle_info({:auto_create_detections, operation_id, detections}, socket) do
-    if operation_id == socket.assigns.form_detect_operation_id do
-      {:noreply,
-       socket
-       |> assign(:form_detect_running, false)
-       |> assign(:form_detect_progress, %{pct: 100})
-       |> assign(:form_detections, detections)
-       |> push_event("form_detection_preview", %{fields: detections.fields})}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_info({:run_ocr, options}, socket) do
-    # Options from the LiveComponent have atom keys; convert to string keys
-    # for Oban job args (JSON serialisation).
-    options =
-      options
-      |> Enum.map(fn
-        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-        {k, v} -> {k, v}
-      end)
-      |> Map.new()
-
-    enqueue_ocr(socket, options)
-  end
-
-  @impl true
-  def handle_info({:rerun_ocr, page_list, options}, socket) do
-    # Options from the LiveComponent may have atom or string keys;
-    # normalise to string keys for Oban job args.
-    options =
-      options
-      |> Enum.map(fn
-        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-        {k, v} -> {k, v}
-      end)
-      |> Map.new()
-
-    enqueue_ocr(socket, options, page_list)
-  end
-
   # T-110: annotation navigation from the Comments panel LiveComponent.
-  @impl true
-  def handle_info({:navigate_to_annotation, page_index, rect}, socket) do
-    page = (page_index + 1) |> max(1) |> min(socket.assigns.total_pages)
-
-    {:noreply,
-     socket
-     |> assign(:page, page)
-     |> push_event("navigate_page", %{page: page})
-     |> push_event("select_annotation", %{rect: rect, page_index: page_index})}
-  end
-
-  @impl true
-  def handle_info({:dismiss_ocr_confidence}, socket) do
-    {:noreply, assign(socket, :show_ocr_confidence, false)}
-  end
 
   # ── Annotation export / import handlers (T-111) ────────────────────────
 
-  @impl true
-  def handle_info({:download, filename, content, content_type}, socket) do
-    {:noreply,
-     push_event(socket, "download", %{
-       content: Base.encode64(content),
-       filename: filename,
-       content_type: content_type
-     })}
-  end
-
-  @impl true
-  def handle_info({:import_complete, count}, socket) do
-    {:noreply, put_flash(socket, :info, "Imported #{count} annotations from XFDF")}
-  end
-
-  @impl true
-  def handle_info({:export_error, reason}, socket) do
-    {:noreply, put_flash(socket, :error, reason)}
-  end
-
   # ── Image OCR upload handlers (T-143) ─────────────────────────────────
 
-  @impl true
-  def handle_event("upload_image_ocr", _params, socket) do
-    {:noreply, push_event(socket, "trigger_image_picker", %{})}
-  end
-
   # ── Insert-from-file handlers (T-061 / pdf-dfdt) ──────────────────────
-
-  @impl true
-  def handle_event("insert_from_file", _params, socket) do
-    {:noreply, push_event(socket, "trigger_insert_pdf_picker", %{})}
-  end
-
-  @impl true
-  def handle_event("insert_pdf_submit", _params, socket) do
-    [%{meta: meta, bytes: insert_bytes}] =
-      consume_uploaded_entries(socket, :insert_pdf, fn meta, entry ->
-        %{meta: meta, bytes: File.read!(entry.path)}
-      end)
-
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    case insert_pages_into_document(doc_id, scope, insert_bytes, meta.name) do
-      {:ok, _rev} ->
-        {:noreply,
-         socket
-         |> put_flash(:info, "Pages from #{meta.name} inserted")}
-
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Insert failed: #{reason}")}
-    end
-  end
 
   # ── File to PDF (§9.2) ─────────────────────────────────────────────────
 
   # Ribbon button: asks the .FileToPdfTrigger colocated hook to click the
   # hidden live_file_input so the native picker opens.
-  @impl true
-  def handle_event("file_to_pdf_pick", _params, socket) do
-    {:noreply, push_event(socket, "trigger_file_to_pdf_picker", %{})}
-  end
 
   # Uploaded file lands here; it is routed to FileToPdfWorker by extension.
-  @impl true
-  def handle_event("file_to_pdf_submit", _params, socket) do
-    [file] =
-      consume_uploaded_entries(socket, :file_to_pdf, fn meta, entry ->
-        {:ok, %{name: entry.client_name, bytes: File.read!(meta.path)}}
-      end)
-
-    %{name: name, bytes: file_bytes} = file
-
-    ext = name |> Path.extname() |> String.downcase()
-    title = Path.rootname(name)
-
-    case Quire.Workers.FileToPdfWorker.classify_ext(ext) do
-      :unknown ->
-        {:noreply,
-         put_flash(
-           socket,
-           :error,
-           "Unsupported file type #{ext || "(no extension)"} — convert an image, text, HTML or Office document instead"
-         )}
-
-      _category ->
-        args = %{
-          "bytes" => Base.encode64(file_bytes),
-          "filename" => name,
-          "title" => title,
-          "scope_id" => socket.assigns.current_scope.user.id
-        }
-
-        args
-        |> Quire.Workers.FileToPdfWorker.new([])
-        |> Oban.insert!()
-
-        {:noreply,
-         socket
-         |> assign(:convert_running, true)
-         |> assign(:convert_format, "file")
-         |> assign(:convert_error, nil)
-         |> put_flash(:info, "Converting #{name} to PDF — this runs in the background")}
-    end
-  end
 
   # ── Advanced ▾ → PDF to TXT / RTF (§9.2) ───────────────────────────────
 
-  @impl true
-  def handle_event("toggle_advanced_menu", _params, socket) do
-    {:noreply, update(socket, :show_advanced_menu, &(!&1))}
-  end
-
-  @impl true
-  def handle_event("convert_to_txt", _params, socket) do
-    enqueue_convert_worker(socket, "pdf_to_txt", Quire.Workers.PdfToTxtWorker, %{
-      "mode" => "layout"
-    })
-  end
-
-  @impl true
-  def handle_event("convert_to_rtf", _params, socket) do
-    enqueue_convert_worker(socket, "rtf", Quire.Workers.PdfToRtfWorker, %{})
-  end
-
   # ── Advanced ▾ → URL to PDF (§9.2) ─────────────────────────────────────
 
-  @impl true
-  def handle_event("open_url_wizard", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_advanced_menu, false)
-     |> assign(:show_url_wizard, true)
-     |> assign(:url_value, "")
-     |> assign(:url_running, false)
-     |> assign(:url_error, nil)}
-  end
-
-  @impl true
-  def handle_event("close_url_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_url_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("url_set", %{"url" => url}, socket) do
-    {:noreply, assign(socket, :url_value, url)}
-  end
-
   # URL to PDF: enqueues ConvertWorker (SSRF-guarded, chromic_pdf print).
-  @impl true
-  def handle_event("url_convert", _params, socket) do
-    url = String.trim(socket.assigns.url_value)
-
-    with true <- url != "",
-         :ok <- Quire.SsrfGuard.check(url) do
-      doc_id = socket.assigns.active_document_id
-
-      with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
-           {:ok, rev} <- Quire.Documents.current_revision(doc) do
-        args = %{
-          "source_type" => "url",
-          "url" => url,
-          "doc_id" => doc_id,
-          "revision_id" => rev.id,
-          "operation_id" => Ecto.UUID.generate()
-        }
-
-        args
-        |> Quire.Workers.ConvertWorker.new([])
-        |> Oban.insert!()
-
-        {:noreply,
-         socket
-         |> assign(:show_url_wizard, false)
-         |> assign(:convert_running, true)
-         |> assign(:convert_format, "url")
-         |> assign(:convert_error, nil)
-         |> put_flash(:info, "URL to PDF started for #{url}")}
-      else
-        {:error, reason} ->
-          {:noreply,
-           put_flash(socket, :error, "Failed to start URL conversion: #{inspect(reason)}")}
-      end
-    else
-      false ->
-        {:noreply, assign(socket, :url_error, "Enter a URL to convert")}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :url_error, reason)}
-    end
-  end
 
   # ── PDF to Image (§9.2) ────────────────────────────────────────────────
-
-  @impl true
-  def handle_event("open_export_image_wizard", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_export_image_wizard, true)
-     |> assign(:export_image_format, "png")
-     |> assign(:export_image_dpi, "150")
-     |> assign(:export_image_range, "all")
-     |> assign(:export_image_multipage, false)
-     |> assign(:export_image_running, false)
-     |> assign(:export_image_error, nil)}
-  end
-
-  @impl true
-  def handle_event("close_export_image_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_export_image_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("export_image_set_format", %{"format" => format}, socket) do
-    {:noreply,
-     socket
-     |> assign(:export_image_format, format)
-     |> assign(:export_image_multipage, false)
-     |> assign(:export_image_error, nil)}
-  end
-
-  @impl true
-  def handle_event("export_image_set_dpi", %{"dpi" => dpi}, socket) do
-    {:noreply, assign(socket, :export_image_dpi, dpi)}
-  end
-
-  @impl true
-  def handle_event("export_image_set_range", %{"range" => range}, socket) do
-    {:noreply, assign(socket, :export_image_range, range)}
-  end
-
-  @impl true
-  def handle_event("export_image_toggle_multipage", _params, socket) do
-    {:noreply, update(socket, :export_image_multipage, &(!&1))}
-  end
-
-  @impl true
-  def handle_event("export_image_submit", _params, socket) do
-    doc_id = socket.assigns.active_document_id
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
-         {:ok, rev} <- Quire.Documents.current_revision(doc) do
-      {dpi, _} = Integer.parse(socket.assigns.export_image_dpi)
-      dpi = dpi |> max(72) |> min(600)
-
-      multipage = socket.assigns.export_image_multipage
-      format = socket.assigns.export_image_format
-
-      if multipage and format != "tiff" do
-        {:noreply,
-         assign(socket, :export_image_error, "Multipage output is only available for TIFF")}
-      else
-        page_range =
-          case socket.assigns.export_image_range do
-            "all" -> nil
-            spec -> parse_page_range(spec)
-          end
-
-        args =
-          %{
-            "doc_id" => doc_id,
-            "revision_id" => rev.id,
-            "format" => format,
-            "dpi" => dpi,
-            "page_range" => page_range,
-            "multipage_tiff" => multipage,
-            "operation_id" => Ecto.UUID.generate()
-          }
-
-        args
-        |> Quire.Workers.PdfToImageWorker.new([])
-        |> Oban.insert!()
-
-        {:noreply,
-         socket
-         |> assign(:show_export_image_wizard, false)
-         |> assign(:convert_running, true)
-         |> assign(:convert_format, "image")
-         |> assign(:convert_error, nil)
-         |> put_flash(:info, "PDF to Image started — #{format |> String.upcase()} at #{dpi} DPI")}
-      end
-    else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start image export: #{inspect(reason)}")}
-    end
-  end
 
   defp parse_page_range("all"), do: :all
 
@@ -3745,269 +4483,7 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  @impl true
-  def handle_event("translate_set_source", %{"value" => source}, socket) do
-    {:noreply, assign(socket, :translate_source, source)}
-  end
-
-  @impl true
-  def handle_event("translate_set_target", %{"value" => target}, socket) do
-    {:noreply, assign(socket, :translate_target, target)}
-  end
-
-  @impl true
-  def handle_event("translate_set_mode", %{"mode" => mode}, socket) do
-    {:noreply, assign(socket, :translate_mode, mode)}
-  end
-
-  @impl true
-  def handle_event("translate_document", _params, socket) do
-    source = socket.assigns.translate_source
-    target = socket.assigns.translate_target
-    mode = socket.assigns.translate_mode
-
-    provider = Quire.Translation.Provider.configured()
-
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    socket =
-      with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-           {:ok, rev} <- Quire.Documents.current_revision(doc),
-           %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev) do
-        case Quire.Render.extract_text(ref, []) do
-          {:ok, page_results} ->
-            translations =
-              Enum.map(page_results, fn page_result ->
-                text =
-                  page_result.spans
-                  |> Enum.map(& &1.text)
-                  |> Enum.join("")
-
-                if text != "" do
-                  case provider.translate(text, source, target) do
-                    {:ok, result} ->
-                      %{
-                        page: page_result.page + 1,
-                        original: text,
-                        translated: result.translated_text,
-                        banner: result.banner
-                      }
-
-                    {:error, reason} ->
-                      %{
-                        page: page_result.page + 1,
-                        original: text,
-                        translated: nil,
-                        error: reason
-                      }
-                  end
-                else
-                  %{page: page_result.page + 1, original: "", translated: "", error: nil}
-                end
-              end)
-
-            total = length(translations)
-            ok = Enum.count(translations, &(not is_nil(&1.translated)))
-            errors = Enum.count(translations, &(not is_nil(&1.error)))
-
-            socket =
-              socket
-              |> assign(:translate_provider_label, provider_label())
-              |> assign(:translate_results, translations)
-              |> assign(:right_panel, :translate)
-              |> put_flash(:info, "Translation: #{ok}/#{total} pages done, #{errors} errors")
-
-            case mode do
-              "replace" ->
-                source_map = %{
-                  "source_revision" => rev.id,
-                  "note" => "Translated #{source}→#{target}",
-                  "mode" => mode,
-                  "translations" => translations
-                }
-
-                with {:ok, doc_bytes} <- Quire.Storage.get(ref),
-                     {:ok, new_ref} <-
-                       Quire.Storage.put(doc_bytes,
-                         name: doc.title,
-                         content_type: "application/pdf"
-                       ) do
-                  source_map =
-                    Map.put(source_map, "storage_ref", %{
-                      "adapter" => to_string(new_ref.adapter),
-                      "key" => new_ref.key,
-                      "name" => new_ref.name,
-                      "content_type" => new_ref.content_type,
-                      "byte_size" => new_ref.byte_size
-                    })
-
-                  {:ok, _new_rev} =
-                    Quire.Documents.create_revision(doc,
-                      label: "Translated (#{source}→#{target})",
-                      source: source_map
-                    )
-
-                  socket
-                  |> push_event("open_document", %{
-                    url: socket.assigns.document_url,
-                    password: nil
-                  })
-                  |> put_flash(:info, "New revision saved with translation")
-                else
-                  {:error, reason} ->
-                    put_flash(socket, :error, "Replace failed: #{reason}")
-                end
-
-              "overlay" ->
-                overlay_data =
-                  Enum.map(translations, fn t ->
-                    %{page: t.page, translated: t.translated, error: t.error}
-                  end)
-
-                push_event(socket, "translate_overlay", %{pages: overlay_data})
-
-              "sidecar" ->
-                put_flash(
-                  socket,
-                  :info,
-                  "Sidecar mode coming soon — results in the Translate panel"
-                )
-
-              _ ->
-                socket
-            end
-
-          {:error, reason} ->
-            put_flash(socket, :error, "Text extraction failed: #{reason}")
-        end
-      else
-        _ ->
-          put_flash(socket, :error, "Could not load document for translation")
-      end
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("reset_form", _params, socket) do
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-         {:ok, rev} <- Quire.Documents.current_revision(doc),
-         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
-         {:ok, doc_bytes} <- Quire.Storage.get(ref) do
-      case Quire.FormData.reset(doc_bytes) do
-        {:ok, reset_bytes} when is_binary(reset_bytes) ->
-          {:ok, new_ref} =
-            Quire.Storage.put(reset_bytes,
-              name: doc.title,
-              content_type: "application/pdf"
-            )
-
-          source_map = %{
-            "storage_ref" => %{
-              "adapter" => to_string(new_ref.adapter),
-              "key" => new_ref.key,
-              "name" => new_ref.name,
-              "content_type" => new_ref.content_type,
-              "byte_size" => new_ref.byte_size
-            },
-            "source_revision" => rev.id,
-            "note" => "Form reset to defaults"
-          }
-
-          {:ok, _new_rev} =
-            Quire.Documents.create_revision(doc,
-              label: "Form reset",
-              source: source_map
-            )
-
-          {:noreply,
-           socket
-           |> push_event("open_document", %{
-             url: socket.assigns.document_url,
-             password: nil
-           })
-           |> put_flash(:info, "Form fields reset to defaults")}
-
-        _ ->
-          {:noreply, put_flash(socket, :error, "No form fields found to reset")}
-      end
-    else
-      _ ->
-        {:noreply, put_flash(socket, :error, "Could not load document for reset")}
-    end
-  end
-
   # ── Auto-create fields from a scanned form (T-125) ─────────────────────
-
-  def handle_event("auto_create_fields", _params, socket) do
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-         {:ok, rev} <- Quire.Documents.current_revision(doc) do
-      operation_id = Ecto.UUID.generate()
-
-      args = %{
-        "doc_id" => doc_id,
-        "revision_id" => rev.id,
-        "operation_id" => operation_id
-      }
-
-      args
-      |> Quire.Workers.AutoCreateFieldsWorker.new([])
-      |> Oban.insert!()
-
-      {:noreply,
-       socket
-       |> assign(:form_detect_running, true)
-       |> assign(:form_detect_progress, %{pct: 0})
-       |> assign(:form_detect_operation_id, operation_id)
-       |> assign(:form_detections, nil)
-       |> put_flash(:info, "Field detection started on #{doc.title}")}
-    else
-      {:error, reason} ->
-        {:noreply, put_flash(socket, :error, "Failed to start detection: #{inspect(reason)}")}
-
-      _ ->
-        {:noreply, put_flash(socket, :error, "Could not load document for detection")}
-    end
-  end
-
-  def handle_event("accept_detected_fields", _params, socket) do
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-    detections = socket.assigns.form_detections
-
-    with true <- detections != nil,
-         {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-         {:ok, %{revision: _rev}} <-
-           Quire.Forms.AutoCreate.commit_revision(doc, detections.fields) do
-      {:noreply,
-       socket
-       |> clear_form_detection()
-       |> put_flash(:info, "Created #{detections.total} form field(s)")}
-    else
-      false ->
-        {:noreply, put_flash(socket, :error, "No detections to commit")}
-
-      {:error, reason} ->
-        {:noreply,
-         socket
-         |> clear_form_detection()
-         |> put_flash(:error, "Failed to create fields: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("discard_detected_fields", _params, socket) do
-    {:noreply,
-     socket
-     |> clear_form_detection()
-     |> put_flash(:info, "Detection discarded")}
-  end
 
   defp clear_form_detection(socket) do
     socket
@@ -4065,138 +4541,19 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  @impl true
-  def handle_event("upload_image_ocr_submit", _params, socket) do
-    [%{meta: meta, bytes: image_bytes}] =
-      consume_uploaded_entries(socket, :image, fn meta, entry ->
-        %{meta: meta, bytes: File.read!(entry.path)}
-      end)
-
-    title = Path.rootname(meta.name, Path.extname(meta.name))
-
-    socket =
-      socket
-      |> assign(:image_ocr_uploading, true)
-      |> assign(:image_ocr_error, nil)
-
-    socket =
-      case Quire.Workers.ImageOcrWorker.process(image_bytes, title, socket.assigns.current_scope) do
-        {:ok, %{document: doc}} ->
-          push_navigate(socket, to: ~p"/workspace/#{doc.id}")
-
-        {:error, {:invalid_image, msg}} ->
-          socket
-          |> assign(:image_ocr_uploading, false)
-          |> assign(:image_ocr_error, {:invalid_image, msg})
-          |> put_flash(:error, msg)
-
-        {:error, reason} ->
-          socket
-          |> assign(:image_ocr_uploading, false)
-          |> assign(:image_ocr_error, {:pipeline_error, inspect(reason)})
-          |> put_flash(:error, "Image OCR failed: #{inspect(reason)}")
-      end
-
-    {:noreply, socket}
-  end
-
   # ── Scan (camera capture) handlers (T-144) ──────────────────────────────
 
-  @impl true
-  def handle_event("open_camera_capture", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_camera_capture, true)
-     |> assign(:scan_job_id, nil)
-     |> assign(:scan_progress, nil)
-     |> assign(:scan_error, nil)}
-  end
-
-  @impl true
-  def handle_event("close_camera_capture", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_camera_capture, false)}
-  end
-
-  @impl true
-  def handle_event("cancel_scan", _params, socket) do
-    socket = cancel_scan_job(socket)
-
-    {:noreply,
-     socket
-     |> assign(:scan_job_id, nil)
-     |> assign(:scan_progress, nil)
-     |> assign(:scan_error, nil)
-     |> put_flash(:info, "Scan cancelled.")}
-  end
-
   # ── Camera capture event handlers (forwarded from hook → parent LV) ───
-
-  @impl true
-  def handle_event("camera_captured", %{"dataUrl" => data_url}, socket) do
-    send_update(QuireWeb.CameraCaptureComponent,
-      id: "camera-capture",
-      phase: :captured,
-      captured_data_url: data_url
-    )
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("camera_ready_event", _params, socket) do
-    send_update(QuireWeb.CameraCaptureComponent,
-      id: "camera-capture",
-      phase: :capturing
-    )
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_event("camera_error_event", %{"message" => msg}, socket) do
-    send_update(QuireWeb.CameraCaptureComponent,
-      id: "camera-capture",
-      phase: :error,
-      error_message: msg
-    )
-
-    {:noreply, socket}
-  end
 
   # ── Scan processing (T-080): camera capture + file input both land here
   # with the same image bytes and options, and both feed the same image→PDF
   # path (Quire.Scan). The "make searchable" option additionally OCRs (T-144).
   # ─────────────────────────────────────────────────────────────────────
 
-  @impl true
-  def handle_info({:scan_image, data_url, title, opts}, socket) do
-    image_bytes = decode_data_url(data_url)
-    {:noreply, process_scan(socket, image_bytes, title || "Scan", opts)}
-  end
-
   # Camera capture with a plain 3-tuple (legacy callers) — defaults to a
   # plain scan-to-PDF, no OCR.
-  @impl true
-  def handle_info({:scan_image, data_url, title}, socket) do
-    image_bytes = decode_data_url(data_url)
-    {:noreply, process_scan(socket, image_bytes, title || "Scan", %{})}
-  end
 
   # File input with camera capture (the .ScanFileInput colocated hook).
-  @impl true
-  def handle_event("scan_file_ready", params, socket) do
-    image_bytes = decode_data_url(params["dataUrl"])
-
-    opts = %{
-      deskew: params["deskew"] != "false",
-      contrast: params["contrast"] || "auto",
-      ocr: params["ocr"] == "true"
-    }
-
-    {:noreply, process_scan(socket, image_bytes, params["title"] || "Scan", opts)}
-  end
 
   defp process_scan(socket, image_bytes, title, opts) do
     socket =
@@ -4281,146 +4638,12 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── Merge wizard (T-081) ──────────────────────────────────────────────
 
-  @merge_max_files 12
-
-  @impl true
-  def handle_event("open_merge_wizard", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_merge_wizard, true)
-     |> assign(:merge_error, nil)
-     |> assign(:merge_running, false)}
-  end
-
-  @impl true
-  def handle_event("close_merge_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_merge_wizard, false)}
-  end
-
   # auto_upload: true — fired as soon as files are selected/dropped.
-  @impl true
-  def handle_event("merge_files", _params, socket) do
-    entries =
-      consume_uploaded_entries(socket, :merge_files, fn file_meta, entry ->
-        %{name: entry.client_name, bytes: File.read!(file_meta.path)}
-      end)
-
-    socket =
-      Enum.reduce_while(entries, socket, fn file, acc ->
-        cond do
-          length(acc.assigns.merge_files) >= @merge_max_files ->
-            {:halt, put_flash(acc, :error, "Merge supports at most #{@merge_max_files} files")}
-
-          true ->
-            pages =
-              case ExPdfium.open(file.bytes) do
-                {:ok, doc} ->
-                  case ExPdfium.page_count(doc) do
-                    {:ok, n} -> n
-                    _ -> 0
-                  end
-
-                _ ->
-                  0
-              end
-
-            if pages == 0 do
-              {:halt, put_flash(acc, :error, "#{file.name} is not a readable PDF")}
-            else
-              item = %{
-                id: Ecto.UUID.generate(),
-                name: file.name,
-                bytes: file.bytes,
-                pages: pages,
-                range: ""
-              }
-
-              {:cont,
-               acc
-               |> assign(:merge_files, acc.assigns.merge_files ++ [item])
-               |> assign(:merge_error, nil)}
-            end
-        end
-      end)
-
-    {:noreply, socket}
-  end
 
   # The range input is named by the item's id (the browser's change event
   # sends %{item_id => range}); handle the generic shape defensively.
-  @impl true
-  def handle_event("merge_set_range", params, socket) do
-    {id, range} =
-      case Map.to_list(params) do
-        [{id, range}] -> {id, range}
-        _ -> {nil, nil}
-      end
-
-    if is_binary(id) and is_binary(range) do
-      files =
-        Enum.map(
-          socket.assigns.merge_files,
-          &if(&1.id == id, do: %{&1 | range: range}, else: &1)
-        )
-
-      {:noreply, socket |> assign(:merge_files, files) |> assign(:merge_error, nil)}
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_event("merge_move_file", %{"id" => id, "dir" => dir}, socket) do
-    {:noreply, move_merge_file(socket, id, dir)}
-  end
 
   # HTML5 drag-and-drop reorder: move `id` to the position of `target`.
-  @impl true
-  def handle_event("merge_move_file", %{"id" => id, "dir" => "to", "target" => target}, socket) do
-    files = socket.assigns.merge_files
-    ids = Enum.map(files, & &1.id)
-
-    with true <- id in ids,
-         true <- target in ids,
-         from when is_integer(from) <- Enum.find_index(ids, &(&1 == id)),
-         to when is_integer(to) <- Enum.find_index(ids, &(&1 == target)) do
-      {item, rest} = List.pop_at(files, from)
-      moved = List.insert_at(rest, to, item)
-      {:noreply, assign(socket, :merge_files, moved)}
-    else
-      _ -> {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_event("merge_remove_file", %{"id" => id}, socket) do
-    files = Enum.reject(socket.assigns.merge_files, &(&1.id == id))
-    {:noreply, socket |> assign(:merge_files, files) |> assign(:merge_error, nil)}
-  end
-
-  @impl true
-  def handle_event("merge_toggle_numbering", _params, socket) do
-    {:noreply, update(socket, :merge_numbering, &(!&1))}
-  end
-
-  @impl true
-  def handle_event("merge_set_bookmarks", %{"bookmarks" => value}, socket) do
-    {:noreply, assign(socket, :merge_bookmarks, value)}
-  end
-
-  @impl true
-  def handle_event("merge_set_forms", %{"forms" => value}, socket) do
-    {:noreply, assign(socket, :merge_forms, value)}
-  end
-
-  @impl true
-  def handle_event("merge_submit", _params, socket) do
-    if socket.assigns.merge_files == [] do
-      {:noreply, put_flash(socket, :error, "Add at least one PDF to merge")}
-    else
-      {:noreply, run_merge(socket)}
-    end
-  end
 
   defp run_merge(socket) do
     socket = socket |> assign(:merge_running, true) |> assign(:merge_error, nil)
@@ -4538,51 +4761,6 @@ defmodule QuireWeb.WorkspaceLive do
   defp merge_upload_error(_), do: "Upload failed"
 
   # ── Split wizard (T-082) ──────────────────────────────────────────────
-
-  @impl true
-  def handle_event("open_split_wizard", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_split_wizard, true)
-     |> assign(:split_mode, "every_n")
-     |> assign(:split_n, "5")
-     |> assign(:split_level, "1")
-     |> assign(:split_ranges, "")
-     |> assign(:split_size, "1mb")
-     |> assign(:split_extract, "")
-     |> assign(:split_running, false)
-     |> assign(:split_error, nil)}
-  end
-
-  @impl true
-  def handle_event("close_split_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_split_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("split_set_mode", %{"mode" => mode}, socket) do
-    {:noreply, socket |> assign(:split_mode, mode) |> assign(:split_error, nil)}
-  end
-
-  @impl true
-  def handle_event("split_set_param", params, socket) do
-    socket =
-      Enum.reduce(params, socket, fn
-        {"n", value}, acc -> assign(acc, :split_n, value)
-        {"level", value}, acc -> assign(acc, :split_level, value)
-        {"ranges", value}, acc -> assign(acc, :split_ranges, value)
-        {"size", value}, acc -> assign(acc, :split_size, value)
-        {"extract", value}, acc -> assign(acc, :split_extract, value)
-        _, acc -> acc
-      end)
-
-    {:noreply, assign(socket, :split_error, nil)}
-  end
-
-  @impl true
-  def handle_event("split_submit", _params, socket) do
-    {:noreply, run_split(socket)}
-  end
 
   defp run_split(socket) do
     socket = socket |> assign(:split_running, true) |> assign(:split_error, nil)
@@ -4735,61 +4913,6 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   # ── Compress wizard (T-083) ───────────────────────────────────────────
-
-  @impl true
-  def handle_event("open_compress_wizard", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_compress_wizard, true)
-     |> assign(:compress_preset, "medium")
-     |> assign(:compress_custom_quality, "60")
-     |> assign(:compress_custom_max_width, "2048")
-     |> assign(:compress_remove_a11y, false)
-     |> assign(:compress_running, false)
-     |> assign(:compress_error, nil)
-     |> assign(:compress_preview, nil)}
-  end
-
-  @impl true
-  def handle_event("close_compress_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_compress_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("compress_set_preset", %{"preset" => preset}, socket) do
-    {:noreply,
-     socket
-     |> assign(:compress_preset, preset)
-     |> assign(:compress_error, nil)
-     |> assign(:compress_preview, nil)}
-  end
-
-  @impl true
-  def handle_event("compress_set_param", params, socket) do
-    socket =
-      Enum.reduce(params, socket, fn
-        {"quality", value}, acc -> assign(acc, :compress_custom_quality, value)
-        {"max_width", value}, acc -> assign(acc, :compress_custom_max_width, value)
-        _, acc -> acc
-      end)
-
-    {:noreply, socket |> assign(:compress_error, nil) |> assign(:compress_preview, nil)}
-  end
-
-  @impl true
-  def handle_event("compress_toggle_a11y", _params, socket) do
-    {:noreply, update(socket, :compress_remove_a11y, &(!&1))}
-  end
-
-  @impl true
-  def handle_event("compress_preview", _params, socket) do
-    {:noreply, run_compress_preview(socket)}
-  end
-
-  @impl true
-  def handle_event("compress_commit", _params, socket) do
-    {:noreply, run_compress_commit(socket)}
-  end
 
   defp run_compress_preview(socket) do
     socket = socket |> assign(:compress_running, true) |> assign(:compress_error, nil)
@@ -4991,26 +5114,6 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── PDF/A wizard (T-084) ──────────────────────────────────────────────
 
-  @impl true
-  def handle_event("open_pdfa_wizard", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_pdfa_wizard, true)
-     |> assign(:pdfa_running, false)
-     |> assign(:pdfa_error, nil)
-     |> assign(:pdfa_report, nil)}
-  end
-
-  @impl true
-  def handle_event("close_pdfa_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_pdfa_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("pdfa_convert", _params, socket) do
-    {:noreply, run_pdfa_convert(socket)}
-  end
-
   defp run_pdfa_convert(socket) do
     socket =
       socket
@@ -5119,84 +5222,6 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── New ▾ dropdown (T-085) ────────────────────────────────────────────
 
-  @impl true
-  def handle_event("toggle_new_menu", _params, socket) do
-    {:noreply, update(socket, :show_new_menu, &(!&1))}
-  end
-
-  @impl true
-  def handle_event("close_new_menu", _params, socket) do
-    {:noreply, assign(socket, :show_new_menu, false)}
-  end
-
-  @impl true
-  def handle_event("new_blank", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_new_menu, false)
-     |> assign(:show_blank_wizard, true)
-     |> assign(:blank_size, "a4")
-     |> assign(:blank_orientation, "portrait")
-     |> assign(:blank_error, nil)}
-  end
-
-  @impl true
-  def handle_event("new_template", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_new_menu, false)
-     |> assign(:show_template_wizard, true)
-     |> assign(:template_id, "letter")
-     |> assign(:template_error, nil)}
-  end
-
-  @impl true
-  def handle_event("new_from_scanner", _params, socket) do
-    # Reuses the T-080 scan-to-PDF flow
-    {:noreply,
-     socket
-     |> assign(:show_new_menu, false)
-     |> assign(:show_camera_capture, true)
-     |> assign(:scan_job_id, nil)
-     |> assign(:scan_progress, nil)
-     |> assign(:scan_error, nil)}
-  end
-
-  @impl true
-  def handle_event("close_blank_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_blank_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("blank_set_size", %{"size" => size}, socket) do
-    {:noreply, assign(socket, :blank_size, size)}
-  end
-
-  @impl true
-  def handle_event("blank_set_orientation", %{"orientation" => orientation}, socket) do
-    {:noreply, assign(socket, :blank_orientation, orientation)}
-  end
-
-  @impl true
-  def handle_event("blank_create", _params, socket) do
-    {:noreply, create_blank_document(socket)}
-  end
-
-  @impl true
-  def handle_event("close_template_wizard", _params, socket) do
-    {:noreply, assign(socket, :show_template_wizard, false)}
-  end
-
-  @impl true
-  def handle_event("template_set", %{"template" => template_id}, socket) do
-    {:noreply, assign(socket, :template_id, template_id)}
-  end
-
-  @impl true
-  def handle_event("template_create", _params, socket) do
-    {:noreply, create_template_document(socket)}
-  end
-
   defp create_blank_document(socket) do
     size = blank_size_atom(socket.assigns.blank_size)
     orientation = blank_orientation_atom(socket.assigns.blank_orientation)
@@ -5246,11 +5271,6 @@ defmodule QuireWeb.WorkspaceLive do
   defp blank_orientation_atom("landscape"), do: :landscape
   defp blank_orientation_atom(_), do: :portrait
 
-  @impl true
-  def handle_info({:close_camera_modal}, socket) do
-    {:noreply, assign(socket, :show_camera_capture, false)}
-  end
-
   attr :template, :map, required: true
   attr :selected, :boolean, required: true
 
@@ -5280,11 +5300,6 @@ defmodule QuireWeb.WorkspaceLive do
       <span class="text-xs text-gray-400 dark:text-gray-500">{@template.desc}</span>
     </button>
     """
-  end
-
-  @impl true
-  def handle_info({:request_camera}, socket) do
-    {:noreply, push_event(socket, "start_camera", %{})}
   end
 
   # ── Annotation commit helpers (T-107) ────────────────────────────────

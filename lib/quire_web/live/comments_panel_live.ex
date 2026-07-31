@@ -249,9 +249,6 @@ defmodule QuireWeb.Live.CommentsPanel do
     case Quire.Export.FDF.generate(doc_id) do
       {:ok, content} ->
         send(self(), {:download, "annotations.fdf", content, "application/vnd.adobe.fdf"})
-
-      {:error, reason} ->
-        send(self(), {:export_error, "FDF export failed: #{inspect(reason)}"})
     end
 
     {:noreply, socket}
@@ -263,9 +260,6 @@ defmodule QuireWeb.Live.CommentsPanel do
     case Quire.Export.XFDF.generate(doc_id) do
       {:ok, content} ->
         send(self(), {:download, "annotations.xfdf", content, "application/vnd.adobe.xfdf"})
-
-      {:error, reason} ->
-        send(self(), {:export_error, "XFDF export failed: #{inspect(reason)}"})
     end
 
     {:noreply, socket}
@@ -277,9 +271,6 @@ defmodule QuireWeb.Live.CommentsPanel do
     case Quire.Export.CSV.generate(doc_id) do
       {:ok, content} ->
         send(self(), {:download, "annotations.csv", content, "text/csv"})
-
-      {:error, reason} ->
-        send(self(), {:export_error, "CSV export failed: #{inspect(reason)}"})
     end
 
     {:noreply, socket}

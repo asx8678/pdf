@@ -1,0 +1,405 @@
+{
+  "format": 1,
+  "entries": {
+    "topology/hosts/1d7b226f5c38fafba27efd7f502cadeeb9d47362a489fa027ab0e1e94d0fba99": {
+      "key": "topology/hosts/1d7b226f5c38fafba27efd7f502cadeeb9d47362a489fa027ab0e1e94d0fba99",
+      "value": {
+        "format": 1,
+        "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "rootId": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "identity": {
+          "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+          "name": "main",
+          "kind": "main",
+          "sessionId": "019fb806-53da-716e-8fb2-2d2c079857e0"
+        },
+        "startedAt": 1785498850591,
+        "updatedAt": 1785505435994,
+        "expiresAt": 1785505450994
+      },
+      "version": 91,
+      "updatedAt": 1785505435995,
+      "updatedBy": {
+        "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb806-53da-716e-8fb2-2d2c079857e0"
+      }
+    },
+    "sessions/019fb806-53da-716e-8fb2-2d2c079857e0": {
+      "key": "sessions/019fb806-53da-716e-8fb2-2d2c079857e0",
+      "value": {
+        "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "name": "Peer 019fb806",
+        "kind": "peer",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "019fb806-53da-716e-8fb2-2d2c079857e0",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "high",
+        "startedAt": 1785498850591,
+        "updatedAt": 1785505435994,
+        "pendingMessages": false,
+        "local": false
+      },
+      "version": 91,
+      "updatedAt": 1785505435995,
+      "updatedBy": {
+        "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb806-53da-716e-8fb2-2d2c079857e0"
+      }
+    },
+    "topology/participants/1d7b226f5c38fafba27efd7f502cadeeb9d47362a489fa027ab0e1e94d0fba99": {
+      "key": "topology/participants/1d7b226f5c38fafba27efd7f502cadeeb9d47362a489fa027ab0e1e94d0fba99",
+      "value": {
+        "format": 1,
+        "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "kind": "root",
+        "rootId": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "ownerHostId": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "ownerIdentityId": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "name": "main",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "capabilities": [
+          "steer",
+          "followUp",
+          "fabric"
+        ],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "019fb806-53da-716e-8fb2-2d2c079857e0",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "high",
+        "startedAt": 1785498850591,
+        "updatedAt": 1785505435994,
+        "pendingMessages": false,
+        "controlProtocol": "v1"
+      },
+      "version": 91,
+      "updatedAt": 1785505435996,
+      "updatedBy": {
+        "id": "session:019fb806-53da-716e-8fb2-2d2c079857e0",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb806-53da-716e-8fb2-2d2c079857e0"
+      }
+    },
+    "topology/hosts/65c791768d1894e6833b469cd37e0e87272857aeddceaf68abe65f0f93b10866": {
+      "key": "topology/hosts/65c791768d1894e6833b469cd37e0e87272857aeddceaf68abe65f0f93b10866",
+      "value": {
+        "format": 1,
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "identity": {
+          "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+          "name": "main",
+          "kind": "main",
+          "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+        },
+        "startedAt": 1785505485498,
+        "updatedAt": 1785511552055,
+        "expiresAt": 1785511567055
+      },
+      "version": 315,
+      "updatedAt": 1785511552057,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "sessions/019fb86b-915f-7691-b9e3-3ab06a0fcb0e": {
+      "key": "sessions/019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+      "value": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "Peer 019fb86b",
+        "kind": "peer",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "high",
+        "startedAt": 1785505485498,
+        "updatedAt": 1785511552055,
+        "pendingMessages": false,
+        "local": false
+      },
+      "version": 315,
+      "updatedAt": 1785511552059,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "topology/participants/65c791768d1894e6833b469cd37e0e87272857aeddceaf68abe65f0f93b10866": {
+      "key": "topology/participants/65c791768d1894e6833b469cd37e0e87272857aeddceaf68abe65f0f93b10866",
+      "value": {
+        "format": 1,
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "kind": "root",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerHostId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerIdentityId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "status": "running",
+        "runner": "pi",
+        "transport": "host",
+        "capabilities": [
+          "steer",
+          "followUp",
+          "fabric"
+        ],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "high",
+        "startedAt": 1785505485498,
+        "updatedAt": 1785511552056,
+        "pendingMessages": false,
+        "controlProtocol": "v1"
+      },
+      "version": 315,
+      "updatedAt": 1785511552060,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "topology/participants/9d07e7636cf94802bc0cc937b44a4e738253dbbec8bac84b4cd0a527ba80f285": {
+      "key": "topology/participants/9d07e7636cf94802bc0cc937b44a4e738253dbbec8bac84b4cd0a527ba80f285",
+      "value": {
+        "format": 1,
+        "id": "001c17bda3a04a66b9272cf2412485d1",
+        "kind": "agent",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerHostId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerIdentityId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "parentId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "G4-pdf-y6j.1",
+        "status": "timed_out",
+        "runner": "pi",
+        "transport": "process",
+        "capabilities": [],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "53481",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "medium",
+        "startedAt": 1785505755818,
+        "updatedAt": 1785509355899,
+        "finishedAt": 1785509355899,
+        "turns": 322,
+        "toolCalls": 368,
+        "usage": {
+          "input": 262210,
+          "output": 347271,
+          "cacheRead": 66775808,
+          "cacheWrite": 0,
+          "cost": 0.32091754239999987
+        },
+        "controlProtocol": "v1"
+      },
+      "version": 1,
+      "updatedAt": 1785510636637,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "topology/participants/690f02e96222033d326e8c7975e162bbab4d752b5f6000664dec96f0bdfd70d4": {
+      "key": "topology/participants/690f02e96222033d326e8c7975e162bbab4d752b5f6000664dec96f0bdfd70d4",
+      "value": {
+        "format": 1,
+        "id": "a59542b1bbc5420b8cbd705ad1271a52",
+        "kind": "agent",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerHostId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerIdentityId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "parentId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "G4-pdf-y6j.2",
+        "status": "completed",
+        "runner": "pi",
+        "transport": "process",
+        "capabilities": [],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "53482",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "medium",
+        "startedAt": 1785505755818,
+        "updatedAt": 1785507339020,
+        "finishedAt": 1785507339020,
+        "turns": 198,
+        "toolCalls": 211,
+        "usage": {
+          "input": 119114,
+          "output": 110902,
+          "cacheRead": 17515520,
+          "cacheWrite": 0,
+          "cost": 0.096771976
+        },
+        "controlProtocol": "v1"
+      },
+      "version": 1,
+      "updatedAt": 1785510636637,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "topology/participants/04822312244a6bd0dbf0ebc1195c8e27cd1dcde9763793a95a09318a5acbe6cb": {
+      "key": "topology/participants/04822312244a6bd0dbf0ebc1195c8e27cd1dcde9763793a95a09318a5acbe6cb",
+      "value": {
+        "format": 1,
+        "id": "4a44ceaecebd47f49b8f3aa802837857",
+        "kind": "agent",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerHostId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerIdentityId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "parentId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "G4-pdf-y6j.3",
+        "status": "completed",
+        "runner": "pi",
+        "transport": "process",
+        "capabilities": [],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "53483",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "medium",
+        "startedAt": 1785505755818,
+        "updatedAt": 1785507130494,
+        "finishedAt": 1785507130494,
+        "turns": 165,
+        "toolCalls": 180,
+        "usage": {
+          "input": 152134,
+          "output": 102877,
+          "cacheRead": 19454976,
+          "cacheWrite": 0,
+          "cost": 0.10457825279999995
+        },
+        "controlProtocol": "v1"
+      },
+      "version": 1,
+      "updatedAt": 1785510636637,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "topology/participants/35697969c36934d3d36b13ad2039f3cf01af5f19e706efccc681036774f9f905": {
+      "key": "topology/participants/35697969c36934d3d36b13ad2039f3cf01af5f19e706efccc681036774f9f905",
+      "value": {
+        "format": 1,
+        "id": "add3e4326ac543698162d7ea160fca5e",
+        "kind": "agent",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerHostId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerIdentityId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "parentId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "G4-pdf-y6j.4",
+        "status": "completed",
+        "runner": "pi",
+        "transport": "process",
+        "capabilities": [],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "53484",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "medium",
+        "startedAt": 1785505755818,
+        "updatedAt": 1785507927740,
+        "finishedAt": 1785507927740,
+        "turns": 235,
+        "toolCalls": 270,
+        "usage": {
+          "input": 155467,
+          "output": 176523,
+          "cacheRead": 29034496,
+          "cacheWrite": 0,
+          "cost": 0.15248840880000006
+        },
+        "controlProtocol": "v1"
+      },
+      "version": 1,
+      "updatedAt": 1785510636638,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    },
+    "topology/participants/906f8fd93faeefc9862eec3e91582182953fb8db73337e5b0c7381066c0275a7": {
+      "key": "topology/participants/906f8fd93faeefc9862eec3e91582182953fb8db73337e5b0c7381066c0275a7",
+      "value": {
+        "format": 1,
+        "id": "ea80e020421f4b2982f23d6cba9e5580",
+        "kind": "agent",
+        "rootId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerHostId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "ownerIdentityId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "parentId": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "G4-pdf-y6j.5",
+        "status": "completed",
+        "runner": "pi",
+        "transport": "process",
+        "capabilities": [],
+        "cwd": "/Users/adam2/projects/pdf",
+        "sessionId": "64162",
+        "model": "deepseek/deepseek-v4-flash",
+        "thinking": "medium",
+        "startedAt": 1785507130925,
+        "updatedAt": 1785508239231,
+        "finishedAt": 1785508239231,
+        "turns": 191,
+        "toolCalls": 213,
+        "usage": {
+          "input": 165295,
+          "output": 88668,
+          "cacheRead": 24121216,
+          "cacheWrite": 0,
+          "cost": 0.11550774480000002
+        },
+        "controlProtocol": "v1"
+      },
+      "version": 1,
+      "updatedAt": 1785510636638,
+      "updatedBy": {
+        "id": "session:019fb86b-915f-7691-b9e3-3ab06a0fcb0e",
+        "name": "main",
+        "kind": "main",
+        "sessionId": "019fb86b-915f-7691-b9e3-3ab06a0fcb0e"
+      }
+    }
+  },
+  "versions": {
+    "topology/hosts/1d7b226f5c38fafba27efd7f502cadeeb9d47362a489fa027ab0e1e94d0fba99": 91,
+    "sessions/019fb806-53da-716e-8fb2-2d2c079857e0": 91,
+    "topology/participants/1d7b226f5c38fafba27efd7f502cadeeb9d47362a489fa027ab0e1e94d0fba99": 91,
+    "topology/hosts/65c791768d1894e6833b469cd37e0e87272857aeddceaf68abe65f0f93b10866": 315,
+    "sessions/019fb86b-915f-7691-b9e3-3ab06a0fcb0e": 315,
+    "topology/participants/65c791768d1894e6833b469cd37e0e87272857aeddceaf68abe65f0f93b10866": 315,
+    "topology/participants/9d07e7636cf94802bc0cc937b44a4e738253dbbec8bac84b4cd0a527ba80f285": 1,
+    "topology/participants/690f02e96222033d326e8c7975e162bbab4d752b5f6000664dec96f0bdfd70d4": 1,
+    "topology/participants/04822312244a6bd0dbf0ebc1195c8e27cd1dcde9763793a95a09318a5acbe6cb": 1,
+    "topology/participants/35697969c36934d3d36b13ad2039f3cf01af5f19e706efccc681036774f9f905": 1,
+    "topology/participants/906f8fd93faeefc9862eec3e91582182953fb8db73337e5b0c7381066c0275a7": 1
+  },
+  "tombstoneOrder": []
+}
