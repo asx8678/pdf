@@ -353,6 +353,175 @@
     />
 
     <.modal
+      :if={@show_merge_wizard}
+      title="Merge PDFs"
+      on_close="close_merge_wizard"
+      open={@show_merge_wizard}
+      size="large"
+    >
+      <div id="merge-wizard" class="space-y-4">
+        <%!-- Drop zone / file picker --%>
+        <div
+          phx-drop-target={@uploads.merge_files.ref}
+          class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-chrome-border dark:border-gray-600 p-6 text-center hover:border-accent/60 transition-colors"
+        >
+          <.live_file_input upload={@uploads.merge_files} class="sr-only" />
+          <.icon name="hero-document-plus" class="size-8 text-gray-300 dark:text-gray-600" />
+          <p class="text-sm text-gray-600 dark:text-gray-300">
+            Drop PDFs here or click to browse
+          </p>
+          <p class="text-xs text-gray-400 dark:text-gray-500">
+            Up to 12 files · 50 MB each · 200 MB total
+          </p>
+        </div>
+
+        <div
+          :for={{err, name} <- upload_errors(@uploads.merge_files)}
+          class="text-xs text-red-500"
+        >
+          {name}: {merge_upload_error(err)}
+        </div>
+
+        <%!-- File list with drag-reorder + per-file ranges --%>
+        <div :if={@merge_files != []} id="merge-file-list" phx-hook=".MergeDrag" class="space-y-2">
+          <div
+            :for={{item, idx} <- Enum.with_index(@merge_files)}
+            id={"merge-item-" <> item.id}
+            data-merge-draggable="true"
+            data-merge-id={item.id}
+            draggable="true"
+            class="flex items-center gap-3 rounded-lg border border-chrome-border dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2"
+          >
+            <span class="cursor-grab text-gray-400 select-none" aria-hidden="true">
+              <svg class="size-4" viewBox="0 0 16 16" fill="currentColor"><circle
+                cx="5"
+                cy="3"
+                r="1.5"
+              /><circle cx="11" cy="3" r="1.5" /><circle cx="5" cy="8" r="1.5" /><circle
+                cx="11"
+                cy="8"
+                r="1.5"
+              /><circle cx="5" cy="13" r="1.5" /><circle cx="11" cy="13" r="1.5" /></svg>
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">
+                {item.name}
+              </p>
+              <p class="text-xs text-gray-400 dark:text-gray-500">
+                {item.pages} page{if item.pages == 1, do: "", else: "s"}
+              </p>
+            </div>
+            <input
+              type="text"
+              id={"merge-range-" <> item.id}
+              name={item.id}
+              value={item.range}
+              phx-change="merge_set_range"
+              placeholder="range, e.g. 1-3,5 (blank = all)"
+              aria-label={"Page range for " <> item.name}
+              class="w-44 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-xs text-gray-700 dark:text-gray-200"
+            />
+            <div class="flex items-center gap-0.5">
+              <button
+                type="button"
+                phx-click="merge_move_file"
+                phx-value-id={item.id}
+                phx-value-dir="up"
+                disabled={idx == 0}
+                aria-label={"Move " <> item.name <> " up"}
+                class="p-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30"
+              >
+                <.icon name="hero-chevron-up" class="size-4" />
+              </button>
+              <button
+                type="button"
+                phx-click="merge_move_file"
+                phx-value-id={item.id}
+                phx-value-dir="down"
+                disabled={idx == length(@merge_files) - 1}
+                aria-label={"Move " <> item.name <> " down"}
+                class="p-1 rounded text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-30"
+              >
+                <.icon name="hero-chevron-down" class="size-4" />
+              </button>
+              <button
+                type="button"
+                phx-click="merge_remove_file"
+                phx-value-id={item.id}
+                aria-label={"Remove " <> item.name}
+                class="p-1 rounded text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30"
+              >
+                <.icon name="hero-x-mark" class="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <%!-- Options --%>
+        <div class="flex flex-wrap items-center gap-x-6 gap-y-2 pt-1 text-sm">
+          <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              id="merge-numbering"
+              checked={@merge_numbering}
+              phx-click="merge_toggle_numbering"
+              class="size-4 rounded border-gray-300 text-accent focus:ring-accent/40"
+            />
+            <span class="text-gray-700 dark:text-gray-200">Continue page numbering</span>
+          </label>
+
+          <label class="inline-flex items-center gap-2">
+            <span class="text-gray-700 dark:text-gray-200">Bookmarks</span>
+            <select
+              id="merge-bookmarks"
+              phx-change="merge_set_bookmarks"
+              class="rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-700 dark:text-gray-200"
+            >
+              <option value="keep" selected={@merge_bookmarks == "keep"}>Keep</option>
+              <option value="flatten" selected={@merge_bookmarks == "flatten"}>Flatten</option>
+            </select>
+          </label>
+
+          <label class="inline-flex items-center gap-2">
+            <span class="text-gray-700 dark:text-gray-200">Forms</span>
+            <select
+              id="merge-forms"
+              phx-change="merge_set_forms"
+              class="rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-sm text-gray-700 dark:text-gray-200"
+            >
+              <option value="keep" selected={@merge_forms == "keep"}>Keep</option>
+              <option value="discard" selected={@merge_forms == "discard"}>Discard</option>
+            </select>
+          </label>
+        </div>
+
+        <div :if={@merge_error} class="text-sm text-red-500" role="alert">
+          {@merge_error}
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_merge_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="merge-submit-btn"
+            phx-click="merge_submit"
+            disabled={@merge_files == [] || @merge_running}
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <.icon :if={@merge_running} name="hero-arrow-path" class="size-4 animate-spin" />
+            <span>Merge PDFs</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
       :if={@show_camera_capture}
       title="Scan to PDF"
       on_close="close_camera_capture"
@@ -637,6 +806,47 @@
 
       function lum(d, i) {
         return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      }
+    </script>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".MergeDrag">
+      export default {
+        mounted() {
+          this._onDragStart = (e) => {
+            const row = e.target.closest("[data-merge-draggable]");
+            if (!row) return;
+            e.dataTransfer.effectAllowed = "move";
+            e.dataTransfer.setData("text/plain", row.dataset.mergeId);
+            row.classList.add("opacity-50");
+          };
+          this._onDragEnd = (e) => {
+            const row = e.target.closest("[data-merge-draggable]");
+            if (row) row.classList.remove("opacity-50");
+          };
+          this._onDragOver = (e) => {
+            if (e.target.closest("[data-merge-draggable]")) e.preventDefault();
+          };
+          this._onDrop = (e) => {
+            const target = e.target.closest("[data-merge-draggable]");
+            if (!target) return;
+            e.preventDefault();
+            const id = e.dataTransfer.getData("text/plain");
+            if (id && id !== target.dataset.mergeId) {
+              this.pushEvent("merge_move_file", { id, dir: "to", target: target.dataset.mergeId });
+            }
+          };
+          this.el.addEventListener("dragstart", this._onDragStart);
+          this.el.addEventListener("dragend", this._onDragEnd);
+          this.el.addEventListener("dragover", this._onDragOver);
+          this.el.addEventListener("drop", this._onDrop);
+        },
+
+        destroyed() {
+          this.el.removeEventListener("dragstart", this._onDragStart);
+          this.el.removeEventListener("dragend", this._onDragEnd);
+          this.el.removeEventListener("dragover", this._onDragOver);
+          this.el.removeEventListener("drop", this._onDrop);
+        }
       }
     </script>
 

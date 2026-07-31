@@ -193,6 +193,13 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_mode, "overlay")
       |> assign(:translate_provider_label, provider_label())
       |> assign(:translate_results, [])
+      |> assign(:show_merge_wizard, false)
+      |> assign(:merge_files, [])
+      |> assign(:merge_numbering, true)
+      |> assign(:merge_bookmarks, "keep")
+      |> assign(:merge_forms, "keep")
+      |> assign(:merge_running, false)
+      |> assign(:merge_error, nil)
       |> load_user_settings()
       |> load_saved_signatures()
       |> load_saved_initials()
@@ -205,6 +212,12 @@ defmodule QuireWeb.WorkspaceLive do
         accept: ~w(application/pdf),
         max_entries: 1,
         max_file_size: 100_000_000
+      )
+      |> allow_upload(:merge_files,
+        accept: ~w(application/pdf),
+        max_entries: 12,
+        max_file_size: 50_000_000,
+        auto_upload: true
       )
 
     Phoenix.PubSub.subscribe(Quire.PubSub, "document:#{id}")
@@ -2507,6 +2520,12 @@ defmodule QuireWeb.WorkspaceLive do
             id="clipboard-pdf-btn"
             tooltip="Create a PDF from the text or image on your clipboard"
           />
+          <.ribbon_button
+            icon="hero-document-plus"
+            label="Merge"
+            phx-click="open_merge_wizard"
+            tooltip="Combine multiple PDFs — drag to reorder, per-file page ranges, bookmarks and forms options"
+          />
         </.ribbon_group>
 
         <.ribbon_group :if={@clipboard_fallback} label="Paste target">
@@ -3694,6 +3713,265 @@ defmodule QuireWeb.WorkspaceLive do
   defp scan_contrast("low"), do: :low
   defp scan_contrast("bw"), do: :bw
   defp scan_contrast(_), do: :auto
+
+  # ── Merge wizard (T-081) ──────────────────────────────────────────────
+
+  @merge_max_files 12
+  @merge_max_bytes 200_000_000
+
+  @impl true
+  def handle_event("open_merge_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_merge_wizard, true)
+     |> assign(:merge_error, nil)
+     |> assign(:merge_running, false)}
+  end
+
+  @impl true
+  def handle_event("close_merge_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_merge_wizard, false)}
+  end
+
+  # auto_upload: true — fired as soon as files are selected/dropped.
+  @impl true
+  def handle_event("merge_files", _params, socket) do
+    entries =
+      consume_uploaded_entries(socket, :merge_files, fn file_meta, entry ->
+        %{name: entry.client_name, bytes: File.read!(file_meta.path)}
+      end)
+
+    socket =
+      Enum.reduce_while(entries, socket, fn file, acc ->
+        cond do
+          length(acc.assigns.merge_files) >= @merge_max_files ->
+            {:halt, put_flash(acc, :error, "Merge supports at most #{@merge_max_files} files")}
+
+          true ->
+            pages =
+              case ExPdfium.open(file.bytes) do
+                {:ok, doc} ->
+                  case ExPdfium.page_count(doc) do
+                    {:ok, n} -> n
+                    _ -> 0
+                  end
+
+                _ ->
+                  0
+              end
+
+            if pages == 0 do
+              {:halt, put_flash(acc, :error, "#{file.name} is not a readable PDF")}
+            else
+              item = %{
+                id: Ecto.UUID.generate(),
+                name: file.name,
+                bytes: file.bytes,
+                pages: pages,
+                range: ""
+              }
+
+              {:cont,
+               acc
+               |> assign(:merge_files, acc.assigns.merge_files ++ [item])
+               |> assign(:merge_error, nil)}
+            end
+        end
+      end)
+
+    {:noreply, socket}
+  end
+
+  # The range input is named by the item's id (the browser's change event
+  # sends %{item_id => range}); handle the generic shape defensively.
+  @impl true
+  def handle_event("merge_set_range", params, socket) do
+    {id, range} =
+      case Map.to_list(params) do
+        [{id, range}] -> {id, range}
+        _ -> {nil, nil}
+      end
+
+    if is_binary(id) and is_binary(range) do
+      files =
+        Enum.map(
+          socket.assigns.merge_files,
+          &if(&1.id == id, do: %{&1 | range: range}, else: &1)
+        )
+
+      {:noreply, socket |> assign(:merge_files, files) |> assign(:merge_error, nil)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("merge_move_file", %{"id" => id, "dir" => dir}, socket) do
+    {:noreply, move_merge_file(socket, id, dir)}
+  end
+
+  # HTML5 drag-and-drop reorder: move `id` to the position of `target`.
+  @impl true
+  def handle_event("merge_move_file", %{"id" => id, "dir" => "to", "target" => target}, socket) do
+    files = socket.assigns.merge_files
+    ids = Enum.map(files, & &1.id)
+
+    with true <- id in ids,
+         true <- target in ids,
+         from when is_integer(from) <- Enum.find_index(ids, &(&1 == id)),
+         to when is_integer(to) <- Enum.find_index(ids, &(&1 == target)) do
+      {item, rest} = List.pop_at(files, from)
+      moved = List.insert_at(rest, to, item)
+      {:noreply, assign(socket, :merge_files, moved)}
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event("merge_remove_file", %{"id" => id}, socket) do
+    files = Enum.reject(socket.assigns.merge_files, &(&1.id == id))
+    {:noreply, socket |> assign(:merge_files, files) |> assign(:merge_error, nil)}
+  end
+
+  @impl true
+  def handle_event("merge_toggle_numbering", _params, socket) do
+    {:noreply, update(socket, :merge_numbering, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("merge_set_bookmarks", %{"bookmarks" => value}, socket) do
+    {:noreply, assign(socket, :merge_bookmarks, value)}
+  end
+
+  @impl true
+  def handle_event("merge_set_forms", %{"forms" => value}, socket) do
+    {:noreply, assign(socket, :merge_forms, value)}
+  end
+
+  @impl true
+  def handle_event("merge_submit", _params, socket) do
+    if socket.assigns.merge_files == [] do
+      {:noreply, put_flash(socket, :error, "Add at least one PDF to merge")}
+    else
+      {:noreply, run_merge(socket)}
+    end
+  end
+
+  defp run_merge(socket) do
+    socket = socket |> assign(:merge_running, true) |> assign(:merge_error, nil)
+
+    case build_merge_sources(socket.assigns.merge_files) do
+      {:ok, sources} ->
+        opts = [
+          continue_numbering: socket.assigns.merge_numbering,
+          bookmarks: merge_choice(socket.assigns.merge_bookmarks, :keep),
+          forms: merge_choice(socket.assigns.merge_forms, :keep)
+        ]
+
+        case Quire.Merge.merge_and_ingest(sources, opts, socket.assigns.current_scope,
+               title: "Merged PDF"
+             ) do
+          {:ok, %{document: doc}} ->
+            journal_doc_merge(doc, sources, opts)
+
+            socket
+            |> assign(:merge_running, false)
+            |> assign(:show_merge_wizard, false)
+            |> assign(:merge_files, [])
+            |> put_flash(:info, "Merged #{length(sources)} PDF(s) into #{doc.title}")
+            |> push_navigate(to: ~p"/workspace/#{doc.id}")
+
+          {:error, reason} ->
+            socket
+            |> assign(:merge_running, false)
+            |> assign(:merge_error, merge_error_message(reason))
+            |> put_flash(:error, merge_error_message(reason))
+        end
+
+      {:error, message} ->
+        socket
+        |> assign(:merge_running, false)
+        |> assign(:merge_error, message)
+        |> put_flash(:error, message)
+    end
+  end
+
+  # Resolves each file's range spec against its page count; fails with a
+  # plain-language message on the first bad spec.
+  defp build_merge_sources(files) do
+    Enum.reduce_while(files, {:ok, []}, fn file, {:ok, acc} ->
+      case Quire.Merge.parse_ranges(file.range, file.pages) do
+        {:ok, pages} ->
+          {:cont, {:ok, acc ++ [%{bytes: file.bytes, pages: pages}]}}
+
+        {:error, {message, _spec}} ->
+          {:halt, {:error, "#{file.name}: #{message}"}}
+      end
+    end)
+  end
+
+  # Best-effort doc.merge journal entry on the new document's edit session.
+  # Plain map (not the Operation struct) — EditSession.apply reads it with
+  # both Map.get/2 and Access, which structs do not implement.
+  defp journal_doc_merge(doc, sources, opts) do
+    user_id = doc.user_id
+
+    with {:ok, session} <- Quire.Editing.open_session(doc.id, user_id) do
+      op = %{
+        kind: "doc.merge",
+        data: %{sources: Enum.map(sources, &%{pages: &1.pages}), opts: opts},
+        inverse: {:restore_revision, nil}
+      }
+
+      Quire.Editing.apply_for_server(session, op)
+    end
+  end
+
+  defp merge_choice("flatten", _default), do: :flatten
+  defp merge_choice("discard", _default), do: :discard
+  defp merge_choice(_, default), do: default
+
+  defp merge_error_message({:too_many_sources, n, max}), do: "Too many sources: #{n} (max #{max})"
+
+  defp merge_error_message({:page_out_of_bounds, _pages, count}),
+    do: "Page selection out of range (document has #{count} pages)"
+
+  defp merge_error_message(:no_sources), do: "Nothing to merge"
+  defp merge_error_message(:missing_bytes), do: "A source PDF could not be read"
+  defp merge_error_message({:invalid_pdf, _}), do: "One of the files is not a valid PDF"
+  defp merge_error_message(reason), do: "Merge failed: #{inspect(reason)}"
+
+  defp move_merge_file(socket, id, "up") do
+    files = socket.assigns.merge_files
+    idx = Enum.find_index(files, &(&1.id == id))
+
+    if is_integer(idx) and idx > 0 do
+      {item, rest} = List.pop_at(files, idx)
+      assign(socket, :merge_files, List.insert_at(rest, idx - 1, item))
+    else
+      socket
+    end
+  end
+
+  defp move_merge_file(socket, id, "down") do
+    files = socket.assigns.merge_files
+    idx = Enum.find_index(files, &(&1.id == id))
+
+    if is_integer(idx) and idx < length(files) - 1 do
+      {item, rest} = List.pop_at(files, idx)
+      assign(socket, :merge_files, List.insert_at(rest, idx + 1, item))
+    else
+      socket
+    end
+  end
+
+  defp move_merge_file(socket, _id, _other), do: socket
+
+  defp merge_upload_error(:too_large), do: "File too large (max 50 MB)"
+  defp merge_upload_error(:too_many_files), do: "Too many files (max 12)"
+  defp merge_upload_error(:not_accepted), do: "Only PDF files are accepted"
+  defp merge_upload_error(_), do: "Upload failed"
 
   @impl true
   def handle_info({:close_camera_modal}, socket) do
