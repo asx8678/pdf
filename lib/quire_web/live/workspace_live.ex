@@ -194,6 +194,14 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_provider_label, provider_label())
       |> assign(:translate_results, [])
       |> assign(:show_merge_wizard, false)
+      |> assign(:show_new_menu, false)
+      |> assign(:show_blank_wizard, false)
+      |> assign(:blank_size, "a4")
+      |> assign(:blank_orientation, "portrait")
+      |> assign(:blank_error, nil)
+      |> assign(:show_template_wizard, false)
+      |> assign(:template_id, "letter")
+      |> assign(:template_error, nil)
       |> assign(:show_pdfa_wizard, false)
       |> assign(:pdfa_running, false)
       |> assign(:pdfa_error, nil)
@@ -2264,6 +2272,8 @@ defmodule QuireWeb.WorkspaceLive do
 
   @view_toggle_tabs ~w(edit comment secure forms esign ocr)
 
+  attr :show_new_menu, :boolean, default: false
+
   defp ribbon_strip(assigns) do
     assigns =
       assigns
@@ -2533,6 +2543,75 @@ defmodule QuireWeb.WorkspaceLive do
 
       <!-- Create & Convert tab ribbon (T-074 / pdf-wyh.1) -->
       <div :if={@active_tab == "create-convert"} class="flex items-center gap-1 flex-1">
+        <!-- New ▾ dropdown (T-085) -->
+        <div :if={@active_tab == "create-convert"} class="relative">
+          <button
+            type="button"
+            id="new-menu-btn"
+            phx-click="toggle_new_menu"
+            aria-label="New document — blank, template, clipboard or scanner"
+            aria-haspopup="menu"
+            aria-expanded={@show_new_menu}
+            class={[
+              "flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              if(@show_new_menu,
+                do: "bg-accent/10 text-accent",
+                else: "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              )
+            ]}
+          >
+            <.icon name="hero-plus" class="size-4" />
+            <span>New</span>
+            <.icon name="hero-chevron-down" class="size-3" />
+          </button>
+
+          <div
+            :if={@show_new_menu}
+            id="new-menu"
+            role="menu"
+            aria-label="New document menu"
+            class="absolute top-full left-0 mt-1 w-56 rounded-xl border border-chrome-border dark:border-gray-600 bg-chrome-white dark:bg-gray-800 shadow-xl z-50 py-1"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              phx-click="new_blank"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-document" class="size-4 text-gray-400" />
+              <span>Blank document</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              phx-click="new_template"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-squares-plus" class="size-4 text-gray-400" />
+              <span>From template</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              id="new-clipboard-btn"
+              phx-hook="ClipboardPdf"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-clipboard-document-list" class="size-4 text-gray-400" />
+              <span>From clipboard</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              phx-click="new_from_scanner"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-camera" class="size-4 text-gray-400" />
+              <span>From scanner</span>
+            </button>
+          </div>
+        </div>
+
         <.ribbon_group label="Create from…">
           <.ribbon_button
             icon="hero-clipboard-document-list"
@@ -4592,9 +4671,169 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
+  # ── New ▾ dropdown (T-085) ────────────────────────────────────────────
+
+  @impl true
+  def handle_event("toggle_new_menu", _params, socket) do
+    {:noreply, update(socket, :show_new_menu, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("close_new_menu", _params, socket) do
+    {:noreply, assign(socket, :show_new_menu, false)}
+  end
+
+  @impl true
+  def handle_event("new_blank", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_new_menu, false)
+     |> assign(:show_blank_wizard, true)
+     |> assign(:blank_size, "a4")
+     |> assign(:blank_orientation, "portrait")
+     |> assign(:blank_error, nil)}
+  end
+
+  @impl true
+  def handle_event("new_template", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_new_menu, false)
+     |> assign(:show_template_wizard, true)
+     |> assign(:template_id, "letter")
+     |> assign(:template_error, nil)}
+  end
+
+  @impl true
+  def handle_event("new_from_scanner", _params, socket) do
+    # Reuses the T-080 scan-to-PDF flow
+    {:noreply,
+     socket
+     |> assign(:show_new_menu, false)
+     |> assign(:show_camera_capture, true)
+     |> assign(:scan_job_id, nil)
+     |> assign(:scan_progress, nil)
+     |> assign(:scan_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_blank_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_blank_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("blank_set_size", %{"size" => size}, socket) do
+    {:noreply, assign(socket, :blank_size, size)}
+  end
+
+  @impl true
+  def handle_event("blank_set_orientation", %{"orientation" => orientation}, socket) do
+    {:noreply, assign(socket, :blank_orientation, orientation)}
+  end
+
+  @impl true
+  def handle_event("blank_create", _params, socket) do
+    {:noreply, create_blank_document(socket)}
+  end
+
+  @impl true
+  def handle_event("close_template_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_template_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("template_set", %{"template" => template_id}, socket) do
+    {:noreply, assign(socket, :template_id, template_id)}
+  end
+
+  @impl true
+  def handle_event("template_create", _params, socket) do
+    {:noreply, create_template_document(socket)}
+  end
+
+  defp create_blank_document(socket) do
+    size = blank_size_atom(socket.assigns.blank_size)
+    orientation = blank_orientation_atom(socket.assigns.blank_orientation)
+
+    case Quire.Blank.create(size, orientation) do
+      {:ok, bytes} ->
+        ingest_new_document(socket, bytes, "Blank #{String.upcase(to_string(size))}")
+
+      {:error, reason} ->
+        socket |> assign(:blank_error, "Failed to create blank document: #{inspect(reason)}")
+    end
+  end
+
+  defp create_template_document(socket) do
+    template_id = socket.assigns.template_id
+
+    case Quire.Blank.render_template(template_id, :a4, :portrait) do
+      {:ok, bytes} ->
+        template = Enum.find(Quire.Blank.templates(), &(&1.id == template_id))
+        ingest_new_document(socket, bytes, "Template: #{template.name}")
+
+      {:error, reason} ->
+        socket |> assign(:template_error, "Failed to create template: #{inspect(reason)}")
+    end
+  end
+
+  defp ingest_new_document(socket, bytes, title) do
+    case Quire.Documents.ingest(bytes, socket.assigns.current_scope, title: title) do
+      {:ok, %{document: doc}} ->
+        socket
+        |> assign(:show_blank_wizard, false)
+        |> assign(:show_template_wizard, false)
+        |> put_flash(:info, "#{title} created")
+        |> push_navigate(to: ~p"/workspace/#{doc.id}")
+
+      {:error, reason} ->
+        socket
+        |> assign(:blank_error, "Failed to save document: #{inspect(reason)}")
+        |> assign(:template_error, "Failed to save document: #{inspect(reason)}")
+    end
+  end
+
+  defp blank_size_atom("letter"), do: :letter
+  defp blank_size_atom("legal"), do: :legal
+  defp blank_size_atom(_), do: :a4
+
+  defp blank_orientation_atom("landscape"), do: :landscape
+  defp blank_orientation_atom(_), do: :portrait
+
   @impl true
   def handle_info({:close_camera_modal}, socket) do
     {:noreply, assign(socket, :show_camera_capture, false)}
+  end
+
+  attr :template, :map, required: true
+  attr :selected, :boolean, required: true
+
+  defp template_card(assigns) do
+    ~H"""
+    <button
+      type="button"
+      role="radio"
+      aria-checked={@selected}
+      aria-label={"Template: " <> @template.name}
+      phx-click="template_set"
+      phx-value-template={@template.id}
+      class={[
+        "flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors",
+        if(@selected,
+          do: "border-accent bg-accent/10",
+          else: "border-chrome-border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700"
+        )
+      ]}
+    >
+      <span class={[
+        "text-sm font-medium",
+        if(@selected, do: "text-accent", else: "text-gray-700 dark:text-gray-200")
+      ]}>
+        {@template.name}
+      </span>
+      <span class="text-xs text-gray-400 dark:text-gray-500">{@template.desc}</span>
+    </button>
+    """
   end
 
   @impl true

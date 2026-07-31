@@ -34,6 +34,7 @@
       form_detections={@form_detections}
       clipboard_fallback={@clipboard_fallback}
       clipboard_fallback_msg={@clipboard_fallback_msg}
+      show_new_menu={@show_new_menu}
     />
 
     <.ocr_options_panel
@@ -896,6 +897,135 @@
           >
             <.icon :if={@pdfa_running} name="hero-arrow-path" class="size-4 animate-spin" />
             <span>Convert to PDF/A</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
+      :if={@show_blank_wizard}
+      title="New blank document"
+      on_close="close_blank_wizard"
+      open={@show_blank_wizard}
+    >
+      <div id="blank-wizard" class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="blank-size">
+            Page size
+          </label>
+          <select
+            id="blank-size"
+            phx-change="blank_set_size"
+            class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          >
+            <option value="a4" selected={@blank_size == "a4"}>A4</option>
+            <option value="letter" selected={@blank_size == "letter"}>Letter</option>
+            <option value="legal" selected={@blank_size == "legal"}>Legal</option>
+          </select>
+        </div>
+
+        <div>
+          <span class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5">Orientation</span>
+          <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Orientation">
+            <button
+              type="button"
+              id="blank-orientation-portrait"
+              role="radio"
+              aria-checked={@blank_orientation == "portrait"}
+              aria-label="Portrait"
+              phx-click="blank_set_orientation"
+              phx-value-orientation="portrait"
+              class={[
+                "px-3 py-2 rounded-lg border text-sm transition-colors",
+                if(@blank_orientation == "portrait",
+                  do: "border-accent bg-accent/10 text-accent",
+                  else:
+                    "border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                )
+              ]}
+            >
+              Portrait
+            </button>
+            <button
+              type="button"
+              id="blank-orientation-landscape"
+              role="radio"
+              aria-checked={@blank_orientation == "landscape"}
+              aria-label="Landscape"
+              phx-click="blank_set_orientation"
+              phx-value-orientation="landscape"
+              class={[
+                "px-3 py-2 rounded-lg border text-sm transition-colors",
+                if(@blank_orientation == "landscape",
+                  do: "border-accent bg-accent/10 text-accent",
+                  else:
+                    "border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                )
+              ]}
+            >
+              Landscape
+            </button>
+          </div>
+        </div>
+
+        <div :if={@blank_error} class="text-sm text-red-500" role="alert">
+          {@blank_error}
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_blank_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="blank-create-btn"
+            phx-click="blank_create"
+            class="px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors"
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
+      :if={@show_template_wizard}
+      title="New from template"
+      on_close="close_template_wizard"
+      open={@show_template_wizard}
+    >
+      <div id="template-wizard" class="space-y-4">
+        <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Template">
+          <.template_card
+            :for={template <- Quire.Blank.templates()}
+            template={template}
+            selected={@template_id == template.id}
+          />
+        </div>
+
+        <div :if={@template_error} class="text-sm text-red-500" role="alert">
+          {@template_error}
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_template_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="template-create-btn"
+            phx-click="template_create"
+            class="px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors"
+          >
+            Create
           </button>
         </div>
       </div>
