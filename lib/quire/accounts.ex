@@ -12,8 +12,7 @@ defmodule Quire.Accounts do
     UserToken,
     UserNotifier,
     SigningCredential,
-    License,
-    Totp
+    License
   }
 
   ## Database getters

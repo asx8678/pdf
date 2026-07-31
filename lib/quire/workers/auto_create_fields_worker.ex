@@ -42,7 +42,7 @@ defmodule Quire.Workers.AutoCreateFieldsWorker do
     revision_id = args["revision_id"]
     operation_id = args["operation_id"]
 
-    with {:ok, doc} <- fetch_document(doc_id),
+    with {:ok, _doc} <- fetch_document(doc_id),
          {:ok, rev} <- fetch_revision(revision_id),
          %Quire.Storage.Ref{} = ref <- Revision.storage_ref(rev),
          {:ok, _source_bytes} <- Quire.Storage.get(ref) do

@@ -44,11 +44,8 @@ defmodule Quire.Licensing do
           | :audit
           | :export
 
-  @doc """
-  Tier-to-feature mapping.
-
-  Each tier lists the features it unlocks. Features not listed are denied.
-  """
+  # Tier-to-feature mapping. Each tier lists the features it unlocks;
+  # features not listed are denied.
   @tier_features %{
     "trial" => [
       :edit,

@@ -131,9 +131,8 @@ defmodule Quire.Compare.TextDiff do
 
   # ── LCS via DP (pure Elixir, map-based table) ─────────────────────────
 
-  defp lcs([], _b), do: Enum.map(_b, &{:right, &1})
+  defp lcs([], b), do: Enum.map(b, &{:right, &1})
   defp lcs(a, []), do: Enum.map(a, &{:left, &1})
-  defp lcs([], []), do: []
 
   defp lcs(a, b) do
     n = length(a)

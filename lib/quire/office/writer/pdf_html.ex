@@ -193,7 +193,7 @@ defmodule Quire.Office.Writer.PdfHtml do
   # ── Page rendering ───────────────────────────────────────────────────────
 
   # Render one page at DPI, re-encode PNG → WebP, return a base64 data URI.
-  defp render_page_webp(ref, page, index, dpi, webp_quality) do
+  defp render_page_webp(ref, _page, index, dpi, webp_quality) do
     with {:ok, png} <- Render.render_page(ref, index, dpi: dpi),
          {:ok, webp} <- png_to_webp(png, webp_quality) do
       {:ok, "data:image/webp;base64,#{Base.encode64(webp)}"}

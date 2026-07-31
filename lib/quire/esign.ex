@@ -189,8 +189,6 @@ defmodule Quire.Esign do
     remaining_unsigned = get_unsigned_signers_count(envelope.id)
 
     if remaining_unsigned == 0 do
-      now = DateTime.utc_now(:second)
-
       result =
         envelope
         |> Envelope.changeset(%{})

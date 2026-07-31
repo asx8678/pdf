@@ -147,6 +147,11 @@ defmodule Quire.Compare.PixelDiff do
     do_compute_diff(a, b, <<>>)
   end
 
+  # Mismatched dimensions — treat as entirely different (all pixels differ).
+  def compute_diff(%ExPdfium.Bitmap{data: a}, %ExPdfium.Bitmap{data: _b}) do
+    byte_size(a) |> then(&:binary.copy(<<255>>, &1))
+  end
+
   defp do_compute_diff(<<r1, g1, b1, ra::binary>>, <<r2, g2, b2, rb::binary>>, acc) do
     val =
       if abs(r1 - r2) > 10 or abs(g1 - g2) > 10 or abs(b1 - b2) > 10 do
@@ -159,11 +164,6 @@ defmodule Quire.Compare.PixelDiff do
   end
 
   defp do_compute_diff(<<>>, <<>>, acc), do: acc
-
-  def compute_diff(a_bitmap, b_bitmap) do
-    # Mismatched dimensions — treat as entirely different
-    byte_size(a_bitmap.data) |> then(&:binary.copy(<<255>>, &1))
-  end
 
   # ── Diff pixel counting ───────────────────────────────────────────────
 
@@ -233,8 +233,8 @@ defmodule Quire.Compare.PixelDiff do
     do_group(rest, n, start, acc)
   end
 
-  defp do_group([n | rest], _current, start, acc) do
-    do_group(rest, n, n, [{start, _current} | acc])
+  defp do_group([n | rest], current, start, acc) do
+    do_group(rest, n, n, [{start, current} | acc])
   end
 
   @doc """

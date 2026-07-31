@@ -12,6 +12,7 @@ defmodule QuireWeb.Shared.Modal do
   attr :open, :boolean, default: false
   attr :title, :string, default: nil
   attr :on_close, :any, default: nil
+  attr :size, :string, values: ["small", "medium", "large"], default: "medium"
   slot :inner_block, required: true
 
   def modal(assigns) do
@@ -24,7 +25,10 @@ defmodule QuireWeb.Shared.Modal do
       aria-label={@title}
     >
       <div class="fixed inset-0 bg-black/50" phx-click={@on_close} />
-      <div class="relative bg-chrome-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[85vh] overflow-y-auto border border-chrome-border dark:border-gray-600">
+      <div class={[
+        "relative bg-chrome-white dark:bg-gray-800 rounded-xl shadow-2xl w-full mx-4 max-h-[85vh] overflow-y-auto border border-chrome-border dark:border-gray-600",
+        if(@size == "large", do: "max-w-3xl", else: "max-w-lg")
+      ]}>
         <div class="flex items-center justify-between px-6 py-4 border-b border-chrome-border dark:border-gray-600">
           <h2 class="text-lg font-medium text-gray-900 dark:text-gray-100">{@title}</h2>
           <button

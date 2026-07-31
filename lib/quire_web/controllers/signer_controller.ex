@@ -51,8 +51,6 @@ defmodule QuireWeb.SignerController do
 
   defp validate_envelope(_), do: {:error, :not_found}
 
-  defp fetch_document(nil), do: {:error, :not_found}
-
   defp fetch_document(doc_id) do
     case Repo.get(Quire.Documents.Document, doc_id) do
       nil -> {:error, :not_found}

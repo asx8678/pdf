@@ -1,6 +1,4 @@
 defmodule Quire.Pades.Pkcs12 do
-  import Bitwise, only: [<<<: 2, "^^^": 2, |||: 2]
-
   @moduledoc """
   Parses PKCS#12 keystores (RFC 7292) to extract private keys and certificates.
   Pure Elixir over OTP `:public_key` and `:crypto`.
@@ -46,7 +44,7 @@ defmodule Quire.Pades.Pkcs12 do
   defp decode_pfx(bin, _pw), do: {:error, {:bad_pfx, byte_size(bin)}}
 
   defp decode_pfx_cont(rest, len, pw) do
-    <<content::binary-size(len), _::binary>> = rest
+    <<content::binary-size(^len), _::binary>> = rest
     parse_pfx_content(content, pw)
   end
 
@@ -212,7 +210,7 @@ defmodule Quire.Pades.Pkcs12 do
     :binary.copy(data, reps) <> binary_part(data, 0, rem)
   end
 
-  defp iterate_kdf(d, i_block, _ilen, need, _iter, _hash, _v, hl) when need <= 0, do: <<>>
+  defp iterate_kdf(_d, _i_block, _ilen, need, _iter, _hash, _v, _hl) when need <= 0, do: <<>>
 
   defp iterate_kdf(d, i_block, ilen, need, iter, hash, v, hl) do
     ai = :crypto.hash(hash, d <> i_block)
@@ -371,21 +369,6 @@ defmodule Quire.Pades.Pkcs12 do
 
   defp elem_raw({_tag, val}), do: val
   defp elem_raw(bin) when is_binary(bin), do: bin
-
-  # Unwrap [0] EXPLICIT: strip the context tag and return inner content
-  defp unwrap_context_0(<<0xA0, len::8, rest::binary>>) when len < 128,
-    do: {:ok, binary_part(rest, 0, len)}
-
-  defp unwrap_context_0(<<0xA0, 0x81, len::8, rest::binary>>),
-    do: {:ok, binary_part(rest, 0, len)}
-
-  defp unwrap_context_0(<<0xA0, 0x82, len::16, rest::binary>>),
-    do: {:ok, binary_part(rest, 0, len)}
-
-  defp unwrap_context_0(<<0xA0, 0x83, len::24, rest::binary>>),
-    do: {:ok, binary_part(rest, 0, len)}
-
-  defp unwrap_context_0(bin), do: {:error, {:bad_context_0, byte_size(bin)}}
 
   defp decode_int(<<n::binary>>), do: :binary.decode_unsigned(n)
 

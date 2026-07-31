@@ -53,3 +53,8 @@ npm-debug.log
 
 # Agent worktrees.
 /.claude/worktrees/
+
+# Generated per-seed workspace fixture map (scripts/seed_workspace_fixtures.exs
+# rewrites document ids on every run; e2e specs read it and fail with a
+# "seed first" hint when absent).
+/test/visual/fixture_urls.json

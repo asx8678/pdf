@@ -6,7 +6,6 @@ defmodule QuireWeb.SignerLive do
   use QuireWeb, :live_view
 
   alias Quire.Esign
-  alias Quire.Esign.{Signer, Envelope}
 
   @impl true
   def mount(%{"token" => token}, _session, socket) do

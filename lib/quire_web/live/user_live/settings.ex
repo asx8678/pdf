@@ -936,9 +936,9 @@ defmodule QuireWeb.UserLive.Settings do
     Map.get(@known_languages, lang, lang)
   end
 
-  defp format_bytes(n) when n >= 1_048_576, do: "\#{Float.round(n / 1_048_576, 2)} MB"
-  defp format_bytes(n) when n >= 1024, do: "\#{Float.round(n / 1024, 1)} KB"
-  defp format_bytes(n), do: "\#{n} B"
+  defp format_bytes(n) when n >= 1_048_576, do: "#{Float.round(n / 1_048_576, 2)} MB"
+  defp format_bytes(n) when n >= 1024, do: "#{Float.round(n / 1024, 1)} KB"
+  defp format_bytes(n), do: "#{n} B"
 
   # ── Engine version table helpers (T-166) ──────────────────────────────
 

@@ -488,8 +488,6 @@ defmodule QuireWeb.Chrome.EsignWizard do
 
   ## ── Helpers ──────────────────────────────────────────────────────────────
 
-  @field_types [:signature, :initials, :name, :date, :text, :checkbox]
-
   defp signer_color(order) when is_integer(order) do
     colors = ["#4F46E5", "#059669", "#D97706", "#DC2626", "#7C3AED", "#0891B2"]
     Enum.at(colors, rem(order - 1, length(colors)))
@@ -514,8 +512,6 @@ defmodule QuireWeb.Chrome.EsignWizard do
   defp format_datetime_local(%DateTime{} = dt) do
     dt |> DateTime.to_naive() |> NaiveDateTime.truncate(:second) |> NaiveDateTime.to_string()
   end
-
-  defp format_datetime(nil), do: ""
 
   defp format_datetime(%DateTime{} = dt) do
     dt |> DateTime.to_naive() |> NaiveDateTime.to_string()

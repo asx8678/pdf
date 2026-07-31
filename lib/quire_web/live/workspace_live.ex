@@ -729,7 +729,7 @@ defmodule QuireWeb.WorkspaceLive do
   def handle_event("esign_wizard_send", _params, socket) do
     %{assigns: assigns} = socket
     signers = assigns.esign_wizard_signers
-    fields = assigns.esign_wizard_fields
+    _fields = assigns.esign_wizard_fields
     subject = assigns.esign_wizard_subject
     message = assigns.esign_wizard_message
     expires_at = assigns.esign_wizard_expires_at
@@ -846,11 +846,9 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── Annotation event handlers (T-107) ──────────────────────────────────
 
-  @doc """
-  Receives a committed annotation from the annot_edit_hook.
-  Handles all annotation types: text-markup, shapes, stamps,
-  file attachments, and free-text callouts.
-  """
+  # Receives a committed annotation from the annot_edit_hook.
+  # Handles all annotation types: text-markup, shapes, stamps,
+  # file attachments, and free-text callouts.
   def handle_event("annot_committed", %{"type" => type, "data" => data}, socket) do
     document_id = socket.assigns.active_document_id
 
@@ -1530,9 +1528,7 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :whiteout_warning_visible, false)}
   end
 
-  @doc """
-  Dismisses the OCR prompt for the current session.
-  """
+  # Dismisses the OCR prompt for the current session.
   def handle_event("dismiss_ocr_prompt", _params, socket) do
     {:noreply,
      socket
@@ -1542,9 +1538,7 @@ defmodule QuireWeb.WorkspaceLive do
 
   # ── Convert-to-Office handler (T-074 / pdf-wyh.1) ─────────────────────
 
-  @doc """
-  Enqueues PdfToOfficeWorker for the selected format.
-  """
+  # Enqueues PdfToOfficeWorker for the selected format.
   def handle_event("convert_to_office", %{"format" => format}, socket) do
     doc_id = socket.assigns.active_document_id
 
@@ -1622,11 +1616,9 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  @doc """
-  T-079 Clipboard to PDF: receives base64 PDF bytes built client-side from
-  clipboard text/image (via `@cantoo/pdf-lib`), ingests them as a new
-  document (revision 1), and navigates to it in the workspace.
-  """
+  # T-079 Clipboard to PDF: receives base64 PDF bytes built client-side from
+  # clipboard text/image (via `@cantoo/pdf-lib`), ingests them as a new
+  # document (revision 1), and navigates to it in the workspace.
   def handle_event("clipboard_pdf_ready", params, socket) do
     scope = socket.assigns.current_scope
     filename = Map.get(params, "filename", "")
@@ -1696,10 +1688,8 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  @doc """
-  T-079: clipboard read failed (permission denied, empty, or unsupported
-  format). Show the paste-target fallback with a plain-language message.
-  """
+  # T-079: clipboard read failed (permission denied, empty, or unsupported
+  # format). Show the paste-target fallback with a plain-language message.
   def handle_event("clipboard_pdf_error", %{"code" => code}, socket) do
     {fallback, msg} =
       case code do
@@ -1723,18 +1713,14 @@ defmodule QuireWeb.WorkspaceLive do
      socket |> assign(:clipboard_fallback, fallback) |> assign(:clipboard_fallback_msg, msg)}
   end
 
-  @doc """
-  T-079: dismiss the paste-target fallback panel.
-  """
+  # T-079: dismiss the paste-target fallback panel.
   def handle_event("clipboard_pdf_cancel", _params, socket) do
     {:noreply,
      socket |> assign(:clipboard_fallback, false) |> assign(:clipboard_fallback_msg, nil)}
   end
 
-  @doc """
-  Delivers a finished HTML export as a browser download and clears the
-  convert-progress state.
-  """
+  # Delivers a finished HTML export as a browser download and clears the
+  # convert-progress state.
   def handle_info({:html_export_done, filename, html}, socket) do
     {:noreply,
      socket
@@ -1749,9 +1735,7 @@ defmodule QuireWeb.WorkspaceLive do
      |> put_flash(:info, "HTML export ready — #{filename} downloaded")}
   end
 
-  @doc """
-  Marks a finished HTML export as complete (download already delivered).
-  """
+  # Marks a finished HTML export as complete (download already delivered).
   def handle_info({:convert_html_error, reason}, socket) do
     {:noreply,
      socket
@@ -1761,10 +1745,8 @@ defmodule QuireWeb.WorkspaceLive do
      |> put_flash(:error, "HTML export failed")}
   end
 
-  @doc """
-  Checks whether the document has any extractable text and assigns
-  `show_ocr_prompt` if all pages lack a text layer.
-  """
+  # Checks whether the document has any extractable text and assigns
+  # `show_ocr_prompt` if all pages lack a text layer.
   defp check_text_layer(socket) do
     doc_id = socket.assigns.active_document_id
     scope = socket.assigns.current_scope
@@ -1773,7 +1755,7 @@ defmodule QuireWeb.WorkspaceLive do
          {:ok, rev} <- Quire.Documents.current_revision(doc) do
       has_any_text =
         Quire.Repo.all(
-          Ecto.Query.from(p in Quire.Documents.Page,
+          from(p in Quire.Documents.Page,
             where: p.revision_id == ^rev.id and p.has_text == true,
             select: p.id,
             limit: 1
@@ -1924,13 +1906,11 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  @doc """
-  Handles a committed signature placement (T-115): the client rasterised the
-  signature to PNG at the chosen box size and reports the rect in PDF points.
-  The server embeds the signature as a flattened XObject via the
-  `signature.place` op, journals it, flushes a new revision, and tells the
-  client to reload the document.
-  """
+  # Handles a committed signature placement (T-115): the client rasterised the
+  # signature to PNG at the chosen box size and reports the rect in PDF points.
+  # The server embeds the signature as a flattened XObject via the
+  # `signature.place` op, journals it, flushes a new revision, and tells the
+  # client to reload the document.
   def handle_event("signature_placed", params, socket) do
     doc_id = socket.assigns.active_document_id
     user_id = socket.assigns.current_scope.user.id
@@ -2242,6 +2222,11 @@ defmodule QuireWeb.WorkspaceLive do
   # mutate the document.
   attr :active_tab, :string, required: true
   attr :view_mode, :atom, values: [:edit, :preview], required: true
+  attr :form_detect_running, :boolean, default: false
+  attr :form_detect_progress, :integer, default: nil
+  attr :form_detections, :list, default: []
+  attr :clipboard_fallback, :boolean, default: false
+  attr :clipboard_fallback_msg, :string, default: nil
 
   @view_toggle_tabs ~w(edit comment secure forms esign ocr)
 
@@ -2830,6 +2815,7 @@ defmodule QuireWeb.WorkspaceLive do
   attr :initials, :list, default: []
   attr :search_query, :string, default: ""
   attr :search_results, :list, default: []
+  attr :translate_results, :list, default: []
   attr :search_total, :integer, default: 0
   attr :search_current, :integer, default: 0
   attr :search_match_case, :boolean, default: false
@@ -3479,13 +3465,13 @@ defmodule QuireWeb.WorkspaceLive do
               "note" => "Pages inserted from #{filename}"
             }
 
-            {:ok, _new_rev} =
+            {:ok, new_rev} =
               Quire.Documents.create_revision(doc,
                 label: "Inserted from #{filename}",
                 source: source_map
               )
 
-            {:ok, _new_rev}
+            {:ok, new_rev}
           end
         after
           ExPdfium.close(src_doc)

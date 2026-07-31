@@ -15,8 +15,7 @@ defmodule Quire.Workers.EnvelopeReminderWorker do
   use Oban.Worker, queue: :maintenance, max_attempts: 2
 
   alias Quire.Repo
-  alias Quire.Esign
-  alias Quire.Esign.{Envelope, Signer}
+  alias Quire.Esign.Envelope
 
   import Ecto.Query
 

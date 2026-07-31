@@ -1,5 +1,5 @@
 defmodule Quire.Pades.Cms do
-  import Bitwise, only: [|||: 2, &&&: 2, >>>: 2, "^^^": 2]
+  import Bitwise, only: [|||: 2, &&&: 2, >>>: 2]
 
   @moduledoc """
   Builds detached CMS (Cryptographic Message Syntax) SignedData structures
@@ -15,8 +15,6 @@ defmodule Quire.Pades.Cms do
   @oid_ecdsa_with_sha256 {1, 2, 840, 100_045, 4, 3, 2}
   @oid_data {1, 2, 840, 113_549, 1, 7, 1}
   @oid_signed_data {1, 2, 840, 113_549, 1, 7, 2}
-  @oid_content_type {1, 2, 840, 113_549, 1, 9, 3}
-  @oid_message_digest {1, 2, 840, 113_549, 1, 9, 4}
 
   @doc """
   Build a detached CMS SignedData suitable for embedding in a PDF signature field.
@@ -59,7 +57,7 @@ defmodule Quire.Pades.Cms do
 
   # ── CMS DER construction ───────────────────────────────────────────
 
-  defp build_cms(content_hash, signature_bytes, cert_der, issuer, serial, sig_alg) do
+  defp build_cms(_content_hash, signature_bytes, cert_der, issuer, serial, sig_alg) do
     digest_alg_oid = @oid_sha256
     signature_alg_oid = signature_oid(sig_alg)
 
@@ -116,10 +114,6 @@ defmodule Quire.Pades.Cms do
 
   defp signature_oid(:rsa), do: @oid_sha256_with_rsa
   defp signature_oid(:ecdsa), do: @oid_ecdsa_with_sha256
-
-  defp build_attribute(oid, values_der) do
-    encode_sequence([encode_oid(oid), values_der])
-  end
 
   defp encode_algorithm_id(oid) do
     encode_sequence([encode_oid(oid), encode_null()])
@@ -204,7 +198,7 @@ defmodule Quire.Pades.Cms do
     # Two's complement: for -x, encode ~(x-1)
     unsigned = encode_unsigned(-value - 1)
     # Bitwise NOT of each byte
-    inverted = for(<<b::8 <- unsigned>>, do: <<b ^^^ 0xFF>>) |> IO.iodata_to_binary()
+    inverted = for(<<b::8 <- unsigned>>, do: <<Bitwise.bxor(b, 0xFF)>>) |> IO.iodata_to_binary()
     encode_tag(0x02, inverted)
   end
 
@@ -265,17 +259,17 @@ defmodule Quire.Pades.Cms do
 
   @doc false
   def decode_tlv(<<tag, len::8, rest::binary>>) when len < 0x80 do
-    <<value::binary-size(len), remainder::binary>> = rest
+    <<value::binary-size(^len), remainder::binary>> = rest
     {{tag, value}, remainder}
   end
 
   def decode_tlv(<<tag, 0x81, len::8, rest::binary>>) do
-    <<value::binary-size(len), remainder::binary>> = rest
+    <<value::binary-size(^len), remainder::binary>> = rest
     {{tag, value}, remainder}
   end
 
   def decode_tlv(<<tag, 0x82, len::16, rest::binary>>) do
-    <<value::binary-size(len), remainder::binary>> = rest
+    <<value::binary-size(^len), remainder::binary>> = rest
     {{tag, value}, remainder}
   end
 end
