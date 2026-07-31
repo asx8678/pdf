@@ -23,7 +23,13 @@
       on_hamburger_click="open_backstage"
       backstage_open={@backstage_open}
     />
-    <.ribbon_strip active_tab={@active_tab} view_mode={@view_mode} />
+    <.ribbon_strip
+      active_tab={@active_tab}
+      view_mode={@view_mode}
+      form_detect_running={@form_detect_running}
+      form_detect_progress={@form_detect_progress}
+      form_detections={@form_detections}
+    />
 
     <.ocr_options_panel
       :if={@show_ocr_options}

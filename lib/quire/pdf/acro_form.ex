@@ -107,6 +107,203 @@ defmodule Quire.Pdf.AcroForm do
     end
   end
 
+  # ── Field creation (T-125) ────────────────────────────────────────────────
+
+  @doc """
+  Creates a real AcroForm field (widget annotation) on a page.
+
+  `kind` is `:text` (`/FT /Tx`) or `:checkbox` (`/FT /Btn`).  The field
+  dictionary, page `/Annots` wiring, `/AcroForm /Fields` entry and a minimal
+  `/AP` appearance stream are all written in place; callers finish with
+  `Pdf.save/1` and store the result.
+
+  `rect` is `[x0, y0, x1, y1]` in PDF user space (points) — the same
+  convention the detector (`Quire.Forms.Detect`) and the client's
+  `viewport.convertToPdfPoint` use.
+
+  Returns `{:ok, field_ref}`.
+  """
+  @spec add_field(Pdf.t(), non_neg_integer(), [number()], String.t(), :text | :checkbox) ::
+          {:ok, tuple()} | {:error, term()}
+  def add_field(doc, page_index, rect, name, kind \\ :text) when is_reference(doc) do
+    with {:ok, page_ref} <- page_ref_at(doc, page_index) do
+      base = %{
+        "/Type" => {:name, "Annot"},
+        "/Subtype" => {:name, "Widget"},
+        "/Rect" => rect,
+        "/F" => 4,
+        "/P" => page_ref,
+        "/T" => escape_pdf_string(name)
+      }
+
+      field_dict = kind_dict(kind, rect) |> Map.merge(base)
+
+      with {:ok, field_id} <- Pdf.allocate_object_id(doc),
+           :ok <- Pdf.set_object(doc, {field_id, 0}, field_dict),
+           :ok <- append_page_annot(doc, page_ref, {:ref, field_id, 0}),
+           :ok <- append_acroform_field(doc, {:ref, field_id, 0}),
+           :ok <- write_field_appearance(doc, field_id, field_dict, rect, kind) do
+        {:ok, {:ref, field_id, 0}}
+      end
+    end
+  end
+
+  defp kind_dict(:checkbox, _rect) do
+    %{
+      "/FT" => {:name, "Btn"},
+      "/V" => {:name, "Off"},
+      "/AS" => {:name, "Off"},
+      "/MK" => %{"/CA" => "4", "/BC" => [0.0, 0.0, 0.0], "/BG" => [1.0, 1.0, 1.0]}
+    }
+  end
+
+  defp kind_dict(_text, _rect) do
+    %{
+      "/FT" => {:name, "Tx"},
+      "/DA" => "/Helv 12 Tf 0 g",
+      "/MK" => %{"/BG" => [0.96, 0.96, 0.92]}
+    }
+  end
+
+  # Nth leaf page ref (zero-based), in document order.
+  defp page_ref_at(doc, page_index) do
+    with {:ok, catalog} <- Pdf.catalog(doc) do
+      case catalog["/Pages"] do
+        {:ref, num, gen} ->
+          refs = walk_page_tree(doc, {num, gen}, []) |> Enum.reverse()
+
+          case Enum.at(refs, page_index) do
+            nil -> {:error, :page_not_found}
+            ref -> {:ok, ref}
+          end
+
+        _ ->
+          {:error, :page_tree_missing}
+      end
+    end
+  end
+
+  defp append_page_annot(doc, page_ref, widget_ref) do
+    page_id = ref_to_id(page_ref)
+
+    with {:ok, page} <- Pdf.get_object(doc, page_id) do
+      annots = Map.get(page, "/Annots", []) |> List.wrap()
+      Pdf.set_object(doc, page_id, Map.put(page, "/Annots", annots ++ [widget_ref]))
+    end
+  end
+
+  defp append_acroform_field(doc, field_ref) do
+    with {:ok, catalog} <- Pdf.catalog(doc) do
+      {acroform, id} =
+        case catalog do
+          %{"/AcroForm" => {:ref, num, gen}} ->
+            case Pdf.get_object(doc, {num, gen}) do
+              {:ok, af} -> {af, {num, gen}}
+              _ -> {%{}, nil}
+            end
+
+          _ ->
+            {%{}, nil}
+        end
+
+      fields = Map.get(acroform, "/Fields", []) |> List.wrap()
+      fields = Enum.uniq(fields ++ [field_ref])
+
+      {acroform, id} =
+        ensure_acroform_resources(doc, acroform, id)
+
+      acroform = acroform |> Map.put("/Fields", fields) |> Map.put("/NeedAppearances", true)
+
+      {num, gen} =
+        case id do
+          nil ->
+            {:ok, fresh} = Pdf.allocate_object_id(doc)
+            {fresh, 0}
+
+          {n, g} ->
+            {n, g}
+        end
+
+      with :ok <- Pdf.set_object(doc, {num, gen}, acroform) do
+        updated = Map.put(catalog, "/AcroForm", {:ref, num, gen})
+        Pdf.set_object(doc, 1, updated)
+      end
+    end
+  end
+
+  # Make sure the AcroForm carries a /DR /Font /Helv entry so text fields have
+  # a resolvable default appearance font.  Returns {acroform, id}.
+  defp ensure_acroform_resources(doc, acroform, id) do
+    fonts = acroform |> Map.get("/DR", %{}) |> Map.get("/Font", %{})
+
+    case Map.get(fonts, "/Helv") do
+      {:ref, _, _} ->
+        {acroform, id}
+
+      _ ->
+        case Pdf.allocate_object_id(doc) do
+          {:ok, font_id} ->
+            font_dict = %{
+              "/Type" => {:name, "Font"},
+              "/Subtype" => {:name, "Type1"},
+              "/BaseFont" => {:name, "Helvetica"}
+            }
+
+            :ok = Pdf.set_object(doc, {font_id, 0}, font_dict)
+            fonts = Map.put(fonts, "/Helv", {:ref, font_id, 0})
+            dr = Map.put(Map.get(acroform, "/DR", %{}), "/Font", fonts)
+            {Map.put(acroform, "/DR", dr), id}
+
+          {:error, _reason} ->
+            {acroform, id}
+        end
+    end
+  end
+
+  # Minimal appearance stream so the widget is visible and interactive in
+  # Acrobat / Chrome without a value write first.
+  defp write_field_appearance(doc, field_id, field_dict, rect, kind) do
+    [x0, y0, x1, y1] = Enum.map(rect, &to_float/1)
+    width = max(x1 - x0, 1.0)
+    height = max(y1 - y0, 1.0)
+
+    bbox = [0.0, 0.0, width, height]
+
+    off_data =
+      "q Q"
+      |> then(&IO.iodata_to_binary([&1]))
+
+    on_data =
+      case kind do
+        :checkbox ->
+          # A simple check mark inside the box
+          "q 0.2 w 1 1 1 RG 1.2 4.2 m 4.6 8.4 l 9.8 14.2 l 15.6 1.4 l S Q"
+
+        _ ->
+          "q Q"
+      end
+
+    with {:ok, off_id} <- Pdf.allocate_object_id(doc),
+         :ok <-
+           Pdf.set_object(doc, {off_id, 0}, {:stream, %{"/BBox" => bbox}, off_data}) do
+      case kind do
+        :checkbox ->
+          with {:ok, on_id} <- Pdf.allocate_object_id(doc),
+               :ok <-
+                 Pdf.set_object(doc, {on_id, 0}, {:stream, %{"/BBox" => bbox}, on_data}) do
+            ap = %{"/N" => %{"/Off" => {:ref, off_id, 0}, "/On" => {:ref, on_id, 0}}}
+            updated = Map.put(field_dict, "/AP", ap)
+            Pdf.set_object(doc, {field_id, 0}, updated)
+          end
+
+        _ ->
+          ap = %{"/N" => {:ref, off_id, 0}}
+          updated = Map.put(field_dict, "/AP", ap)
+          Pdf.set_object(doc, {field_id, 0}, updated)
+      end
+    end
+  end
+
   # ── Field rebuild after page import ────────────────────────────────────────
 
   @doc """

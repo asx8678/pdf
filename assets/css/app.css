@@ -59,6 +59,21 @@
 
 /* This file is for your main application CSS */
 
+/* Form-field detection preview (T-125) — dashed boxes over detected fields */
+.quire-form-detect-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #f59e0b;
+  background: rgba(245, 158, 11, 0.10);
+  pointer-events: none;
+  z-index: 30;
+}
+
+.quire-form-detect-overlay[data-kind="checkbox"] {
+  border-color: #10b981;
+  background: rgba(16, 185, 129, 0.10);
+}
+
 /* Signature placement overlay (T-115) — draggable/resizable box on the page */
 .sig-placement-overlay {
   position: absolute;

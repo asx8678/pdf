@@ -181,6 +181,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:convert_running, false)
       |> assign(:convert_format, nil)
       |> assign(:convert_error, nil)
+      |> assign(:form_detect_running, false)
+      |> assign(:form_detect_progress, nil)
+      |> assign(:form_detect_operation_id, nil)
+      |> assign(:form_detections, nil)
       |> assign(:translate_source, "detect")
       |> assign(:translate_target, "en")
       |> assign(:translate_mode, "overlay")
@@ -2456,6 +2460,49 @@ defmodule QuireWeb.WorkspaceLive do
             disabled={!@has_form_fields}
           />
         </.ribbon_group>
+        <.ribbon_group label="Scanned Form">
+          <div class="flex items-center gap-2">
+            <.ribbon_button
+              icon="hero-sparkles"
+              label="Auto-create fields"
+              phx-click="auto_create_fields"
+              tooltip="Detect form-like boxes and lines in a scanned document"
+              disabled={@form_detect_running || @form_detections != nil}
+            />
+            <div
+              :if={@form_detect_running}
+              class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+            >
+              <.icon name="hero-arrow-path" class="size-3.5 animate-spin" />
+              Detecting… {@form_detect_progress && @form_detect_progress.pct}%
+            </div>
+          </div>
+        </.ribbon_group>
+      </div>
+
+      <!-- Detected-fields preview panel (T-125) -->
+      <div
+        :if={@form_detections != nil}
+        class="border-t border-gray-200 dark:border-gray-700 bg-amber-50 dark:bg-amber-950/30 px-4 py-2 flex items-center gap-3"
+        id="form-detection-preview"
+      >
+        <span class="text-sm text-amber-900 dark:text-amber-200">
+          Detected {@form_detections.total} field(s) — check the highlighted boxes, then accept or discard.
+        </span>
+        <button
+          type="button"
+          phx-click="accept_detected_fields"
+          class="ml-auto text-xs font-medium rounded-md px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white transition-colors"
+        >
+          Accept
+        </button>
+        <button
+          type="button"
+          phx-click="discard_detected_fields"
+          class="text-xs font-medium rounded-md px-2.5 py-1 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+        >
+          Discard
+        </button>
       </div>
 
       <!-- Translate tab ribbon (T-157) -->
@@ -2787,6 +2834,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:convert_running, false)
       |> assign(:convert_format, nil)
       |> assign(:convert_error, nil)
+      |> clear_form_detection()
       |> push_event("revision_updated", %{revision_id: rev.id})
 
     # Fetch confidence data for this revision to show the confidence panel.
@@ -2805,8 +2853,31 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   @impl true
-  def handle_info({:operation_progress, _operation_id, pct}, socket) do
-    {:noreply, assign(socket, :ocr_progress, %{pct: pct})}
+  def handle_info({:operation_progress, operation_id, pct}, socket) do
+    # Form-field detection jobs carry an operation_id; OCR jobs broadcast
+    # with nil (never sent) — keep the legacy assign for compatibility.
+    socket =
+      if operation_id == socket.assigns.form_detect_operation_id do
+        assign(socket, :form_detect_progress, %{pct: pct})
+      else
+        assign(socket, :ocr_progress, %{pct: pct})
+      end
+
+    {:noreply, socket}
+  end
+
+  @impl true
+  def handle_info({:auto_create_detections, operation_id, detections}, socket) do
+    if operation_id == socket.assigns.form_detect_operation_id do
+      {:noreply,
+       socket
+       |> assign(:form_detect_running, false)
+       |> assign(:form_detect_progress, %{pct: 100})
+       |> assign(:form_detections, detections)
+       |> push_event("form_detection_preview", %{fields: detections.fields})}
+    else
+      {:noreply, socket}
+    end
   end
 
   @impl true
@@ -3124,6 +3195,83 @@ defmodule QuireWeb.WorkspaceLive do
       _ ->
         {:noreply, put_flash(socket, :error, "Could not load document for reset")}
     end
+  end
+
+  # ── Auto-create fields from a scanned form (T-125) ─────────────────────
+
+  def handle_event("auto_create_fields", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      operation_id = Ecto.UUID.generate()
+
+      args = %{
+        "doc_id" => doc_id,
+        "revision_id" => rev.id,
+        "operation_id" => operation_id
+      }
+
+      args
+      |> Quire.Workers.AutoCreateFieldsWorker.new([])
+      |> Oban.insert!()
+
+      {:noreply,
+       socket
+       |> assign(:form_detect_running, true)
+       |> assign(:form_detect_progress, %{pct: 0})
+       |> assign(:form_detect_operation_id, operation_id)
+       |> assign(:form_detections, nil)
+       |> put_flash(:info, "Field detection started on #{doc.title}")}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start detection: #{inspect(reason)}")}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, "Could not load document for detection")}
+    end
+  end
+
+  def handle_event("accept_detected_fields", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+    detections = socket.assigns.form_detections
+
+    with true <- detections != nil,
+         {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, %{revision: _rev}} <-
+           Quire.Forms.AutoCreate.commit_revision(doc, detections.fields) do
+      {:noreply,
+       socket
+       |> clear_form_detection()
+       |> put_flash(:info, "Created #{detections.total} form field(s)")}
+    else
+      false ->
+        {:noreply, put_flash(socket, :error, "No detections to commit")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> clear_form_detection()
+         |> put_flash(:error, "Failed to create fields: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("discard_detected_fields", _params, socket) do
+    {:noreply,
+     socket
+     |> clear_form_detection()
+     |> put_flash(:info, "Detection discarded")}
+  end
+
+  defp clear_form_detection(socket) do
+    socket
+    |> assign(:form_detections, nil)
+    |> assign(:form_detect_running, false)
+    |> assign(:form_detect_progress, nil)
+    |> assign(:form_detect_operation_id, nil)
+    |> push_event("form_detection_clear", %{})
   end
 
   defp insert_pages_into_document(doc_id, scope, insert_bytes, filename) do

@@ -39,21 +39,38 @@ defmodule Quire.Workers.Base do
   `{:operation_progress, id, pct}` on PubSub topic `"document:{doc_id}"`.
   """
   def report_progress(operation_id, doc_id, pct) when is_integer(pct) and pct in 0..100 do
-    # Update the operations row with the current progress percentage.
-    # The operations table uses Ecto; this is kept simple for the base.
-    {:ok, _} =
-      Ecto.Adapters.SQL.query(
-        Repo,
-        "UPDATE operations SET progress = $1, updated_at = now() WHERE id = $2",
-        [pct, operation_id]
-      )
+    # The operations.id column is a uuid; the UPDATE runs through the raw
+    # Postgrex query layer (no Ecto casting), so string UUIDs must be dumped
+    # to 16 bytes first (T-125 — Ecto.UUID.generate() strings crash the
+    # query with a Postgrex EncodeError otherwise).
+    with {:ok, op_param} <- uuid_param(operation_id) do
+      {:ok, _} =
+        Ecto.Adapters.SQL.query(
+          Repo,
+          "UPDATE operations SET progress = $1, updated_at = now() WHERE id = $2",
+          [pct, op_param]
+        )
 
-    Phoenix.PubSub.broadcast(
-      Quire.PubSub,
-      "document:#{doc_id}",
-      {:operation_progress, operation_id, pct}
-    )
+      Phoenix.PubSub.broadcast(
+        Quire.PubSub,
+        "document:#{doc_id}",
+        {:operation_progress, operation_id, pct}
+      )
+    else
+      _ -> :ok
+    end
   end
+
+  defp uuid_param(id) when is_binary(id) and byte_size(id) == 16, do: {:ok, id}
+
+  defp uuid_param(id) when is_binary(id) do
+    case Ecto.UUID.dump(id) do
+      {:ok, bin} -> {:ok, bin}
+      :error -> :error
+    end
+  end
+
+  defp uuid_param(_), do: :error
 
   @doc """
   Idempotency guard: returns `{:error, :already_completed}` when the revision

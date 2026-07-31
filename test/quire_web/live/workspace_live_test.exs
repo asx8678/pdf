@@ -86,6 +86,171 @@ defmodule QuireWeb.WorkspaceLiveTest do
     end
   end
 
+  describe "auto-create fields (T-125)" do
+    @auto_btn ~s{button[phx-click="auto_create_fields"]}
+    @accept_btn ~s{button[phx-click="accept_detected_fields"]}
+    @discard_btn ~s{button[phx-click="discard_detected_fields"]}
+
+    @scanned Path.expand("../../fixtures/pdfs/scanned_300dpi.pdf", __DIR__)
+
+    defp doc_fixture(user) do
+      doc =
+        %Quire.Documents.Document{
+          id: Ecto.UUID.generate(),
+          user_id: user.id,
+          title: "scanned.pdf",
+          page_count: 1
+        }
+        |> Quire.Repo.insert!()
+
+      {:ok, ref} = Quire.Storage.put(File.read!(@scanned), name: "scanned.pdf")
+
+      source_map = %{
+        "storage_ref" => %{
+          "adapter" => to_string(ref.adapter),
+          "key" => ref.key,
+          "name" => ref.name,
+          "content_type" => ref.content_type,
+          "byte_size" => ref.byte_size
+        },
+        "filename" => "scanned.pdf"
+      }
+
+      rev =
+        %Quire.Documents.Revision{
+          id: Ecto.UUID.generate(),
+          document_id: doc.id,
+          label: "Original upload",
+          source: source_map
+        }
+        |> Quire.Repo.insert!()
+
+      doc
+      |> Ecto.Changeset.change(%{current_revision_id: rev.id})
+      |> Quire.Repo.update!()
+    end
+
+    defp open_doc(conn, user, doc) do
+      conn
+      |> log_in_user(user)
+      |> live(~p"/workspace/#{doc.id}")
+    end
+
+    defp latest_detect_job do
+      import Ecto.Query
+
+      Quire.Repo.one!(
+        from j in Oban.Job,
+          where: j.worker == "Quire.Workers.AutoCreateFieldsWorker",
+          order_by: [desc: j.id],
+          limit: 1
+      )
+    end
+
+    test "button is visible and enabled on the Forms tab", %{conn: conn} do
+      {:ok, lv, _html} = open_workspace(conn)
+      select_tab(lv, "forms")
+
+      assert has_element?(lv, @auto_btn)
+      assert has_element?(lv, @auto_btn, "Auto-create fields")
+      refute has_element?(lv, ~s{#{@auto_btn}[disabled]})
+    end
+
+    test "preview → accept creates a revision with real form fields", %{conn: conn} do
+      user = user_fixture()
+      doc = doc_fixture(user)
+      {:ok, lv, _html} = open_doc(conn, user, doc)
+      select_tab(lv, "forms")
+
+      lv |> element(@auto_btn) |> render_click()
+
+      # A detection job was enqueued with an operation id
+      job = latest_detect_job()
+      op_id = job.args["operation_id"]
+      assert is_binary(op_id)
+
+      # Running indicator visible while the job is in flight
+      assert render(lv) =~ "Detecting"
+
+      # Simulate the worker's broadcast (Oban is manual in test)
+      detections = %{
+        total: 1,
+        fields: [%{kind: :text, page_index: 0, rect: [72, 700, 250, 720]}]
+      }
+
+      Phoenix.PubSub.broadcast(
+        Quire.PubSub,
+        "document:#{doc.id}",
+        {:auto_create_detections, op_id, detections}
+      )
+
+      render(lv)
+      assert has_element?(lv, "#form-detection-preview")
+      assert render(lv) =~ "Detected 1 field(s)"
+
+      lv |> element(@accept_btn) |> render_click()
+
+      assert render(lv) =~ "Created 1 form field(s)"
+      refute has_element?(lv, "#form-detection-preview")
+
+      # A new revision points at PDF bytes that carry the accepted field
+      reloaded = Quire.Repo.reload!(doc)
+      {:ok, rev} = Quire.Documents.current_revision(reloaded)
+      assert rev.label =~ "Auto-create fields"
+      assert rev.id == reloaded.current_revision_id
+
+      {:ok, stored} = Quire.Storage.get(Quire.Documents.Revision.storage_ref(rev))
+      {:ok, pdf_doc} = ExPdfium.open_blob(stored)
+      {:ok, form_fields} = ExPdfium.form_fields(pdf_doc)
+      assert length(form_fields) == 1
+    end
+
+    test "discard clears the preview without committing anything", %{conn: conn} do
+      user = user_fixture()
+      doc = doc_fixture(user)
+      {:ok, lv, _html} = open_doc(conn, user, doc)
+      select_tab(lv, "forms")
+
+      lv |> element(@auto_btn) |> render_click()
+      job = latest_detect_job()
+      op_id = job.args["operation_id"]
+
+      detections = %{
+        total: 2,
+        fields: [
+          %{kind: :text, page_index: 0, rect: [72, 700, 250, 720]},
+          %{kind: :checkbox, page_index: 0, rect: [72, 610, 92, 630]}
+        ]
+      }
+
+      Phoenix.PubSub.broadcast(
+        Quire.PubSub,
+        "document:#{doc.id}",
+        {:auto_create_detections, op_id, detections}
+      )
+
+      render(lv)
+      assert has_element?(lv, "#form-detection-preview")
+      assert render(lv) =~ "Detected 2 field(s)"
+
+      lv |> element(@discard_btn) |> render_click()
+
+      refute has_element?(lv, "#form-detection-preview")
+      assert render(lv) =~ "Detection discarded"
+
+      # No new revision was created
+      import Ecto.Query
+
+      revisions =
+        Quire.Repo.all(
+          from r in Quire.Documents.Revision,
+            where: r.document_id == ^doc.id
+        )
+
+      assert length(revisions) == 1
+    end
+  end
+
   describe "keyboard shortcuts (§8.5, T-033)" do
     test "the shell carries the keyboard hook and key bindings", %{conn: conn} do
       {:ok, lv, _html} = open_workspace(conn)
