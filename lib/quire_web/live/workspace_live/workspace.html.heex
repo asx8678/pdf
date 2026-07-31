@@ -81,6 +81,14 @@
           <div id="pdf-viewer-container" class="absolute inset-0 overflow-auto"></div>
         <% end %>
 
+        <div
+          id="signature-placement-hint"
+          class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-lg bg-gray-900/85 text-white text-sm shadow-lg pointer-events-none"
+          role="status"
+        >
+          Click the page to place the signature — drag to move, resize with the corners, then press <span class="font-semibold">Enter</span> or <span class="font-semibold">Place</span>.
+        </div>
+
         <button
           :if={@fullscreen}
           type="button"

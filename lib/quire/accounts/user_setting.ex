@@ -73,15 +73,17 @@ defmodule Quire.Accounts.UserSetting do
         changeset
 
       :error ->
-        default = [
-          %{"id" => "undo", "label" => "Undo", "enabled" => true},
-          %{"id" => "redo", "label" => "Redo", "enabled" => true},
-          %{"id" => "open", "label" => "Open", "enabled" => true},
-          %{"id" => "save", "label" => "Save", "enabled" => true},
-          %{"id" => "print", "label" => "Print", "enabled" => true},
-          %{"id" => "email", "label" => "Email", "enabled" => true},
-          %{"id" => "new", "label" => "New", "enabled" => true}
-        ]
+        # Stored as a JSON map keyed by id — Ecto's `:map` type cannot hold
+        # JSON arrays, and the QAT rail reads items via Map.values/1.
+        default = %{
+          "undo" => %{"id" => "undo", "label" => "Undo", "enabled" => true},
+          "redo" => %{"id" => "redo", "label" => "Redo", "enabled" => true},
+          "open" => %{"id" => "open", "label" => "Open", "enabled" => true},
+          "save" => %{"id" => "save", "label" => "Save", "enabled" => true},
+          "print" => %{"id" => "print", "label" => "Print", "enabled" => true},
+          "email" => %{"id" => "email", "label" => "Email", "enabled" => true},
+          "new" => %{"id" => "new", "label" => "New", "enabled" => true}
+        }
 
         put_change(changeset, :qat_items, default)
     end

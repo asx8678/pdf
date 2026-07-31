@@ -371,7 +371,15 @@ defmodule Quire.Accounts do
   Updates only the QAT items (toolbar customisation) for the given `user_id`.
   """
   def update_qat_items(user_id, items) do
-    update_user_settings(user_id, %{qat_items: items})
+    # Normalise a list payload (legacy shape) to a map keyed by id.
+    qat =
+      if is_list(items) do
+        Map.new(items, &{&1["id"], &1})
+      else
+        items
+      end
+
+    update_user_settings(user_id, %{qat_items: qat})
   end
 
   ## Saved signatures
@@ -379,17 +387,23 @@ defmodule Quire.Accounts do
   @doc """
   Returns saved signatures for the given `user_id`.
 
-  Signatures are stored as a list of maps under the `signatures` key in
-  user_settings. Each entry has:
+  Signatures are stored as a JSON map keyed by signature id under the
+  `signatures` key in user_settings (Ecto's `:map` type cannot hold JSON
+  arrays). Each entry has:
     `id` — UUID for identification
     `label` — user-given name
     `type` — "draw" | "type" | "upload"
     `data` — mode-specific payload (curve data, text+font, or image bytes)
     `created_at` — ISO8601 timestamp
+
+  Returns the signatures as a list, newest first.
   """
   def list_saved_signatures(user_id) do
     settings = get_user_settings(user_id)
-    Map.get(settings, :signatures) || []
+
+    (settings.signatures || %{})
+    |> Map.values()
+    |> Enum.sort_by(& &1["created_at"], :desc)
   end
 
   @doc """
@@ -408,7 +422,9 @@ defmodule Quire.Accounts do
       "created_at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
-    case update_user_settings(user_id, %{signatures: [signature | current]}) do
+    signatures = Map.put(Map.new(current, &{&1["id"], &1}), signature["id"], signature)
+
+    case update_user_settings(user_id, %{signatures: signatures}) do
       {:ok, _setting} -> {:ok, signature}
       error -> error
     end
@@ -419,8 +435,8 @@ defmodule Quire.Accounts do
   """
   def delete_saved_signature(user_id, sig_id) do
     current = list_saved_signatures(user_id)
-    updated = Enum.reject(current, &(&1["id"] == sig_id))
-    update_user_settings(user_id, %{signatures: updated})
+    signatures = Map.delete(Map.new(current, &{&1["id"], &1}), sig_id)
+    update_user_settings(user_id, %{signatures: signatures})
   end
 
   @doc """
@@ -430,10 +446,12 @@ defmodule Quire.Accounts do
     current = list_saved_signatures(user_id)
 
     updated =
-      Enum.map(current, fn
+      current
+      |> Enum.map(fn
         %{"id" => ^sig_id} = sig -> Map.put(sig, "label", new_label)
         sig -> sig
       end)
+      |> Map.new(&{&1["id"], &1})
 
     update_user_settings(user_id, %{signatures: updated})
   end
@@ -443,17 +461,23 @@ defmodule Quire.Accounts do
   @doc """
   Returns saved custom stamps for the given `user_id`.
 
-  Stamps are stored as a list of maps under the `stamps` key in
-  user_settings. Each entry has:
+  Stamps are stored as a JSON map keyed by stamp id under the `stamps` key
+  in user_settings (Ecto's `:map` type cannot hold JSON arrays). Each entry
+  has:
     `id` — UUID for identification
     `label` — user-given name
     `type` — "image" | "text"
     `data` — mode-specific payload (SVG/image data, or text+font)
     `created_at` — ISO8601 timestamp
+
+  Returns the stamps as a list, newest first.
   """
   def list_saved_stamps(user_id) do
     settings = get_user_settings(user_id)
-    Map.get(settings, :stamps) || []
+
+    (settings.stamps || %{})
+    |> Map.values()
+    |> Enum.sort_by(& &1["created_at"], :desc)
   end
 
   @doc """
@@ -472,7 +496,9 @@ defmodule Quire.Accounts do
       "created_at" => DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
-    case update_user_settings(user_id, %{stamps: [stamp | current]}) do
+    stamps = Map.put(Map.new(current, &{&1["id"], &1}), stamp["id"], stamp)
+
+    case update_user_settings(user_id, %{stamps: stamps}) do
       {:ok, _setting} -> {:ok, stamp}
       error -> error
     end
@@ -483,8 +509,8 @@ defmodule Quire.Accounts do
   """
   def delete_saved_stamp(user_id, stamp_id) do
     current = list_saved_stamps(user_id)
-    updated = Enum.reject(current, &(&1["id"] == stamp_id))
-    update_user_settings(user_id, %{stamps: updated})
+    stamps = Map.delete(Map.new(current, &{&1["id"], &1}), stamp_id)
+    update_user_settings(user_id, %{stamps: stamps})
   end
 
   @doc """
@@ -494,10 +520,12 @@ defmodule Quire.Accounts do
     current = list_saved_stamps(user_id)
 
     updated =
-      Enum.map(current, fn
+      current
+      |> Enum.map(fn
         %{"id" => ^stamp_id} = stamp -> Map.put(stamp, "label", new_label)
         stamp -> stamp
       end)
+      |> Map.new(&{&1["id"], &1})
 
     update_user_settings(user_id, %{stamps: updated})
   end

@@ -166,6 +166,9 @@ defmodule Quire.Geometry do
 
   Returns `{rotated_x, rotated_y}` in the original coordinate system
   after applying the given rotation (degrees: 0, 90, 180, 270).
+
+  `w`/`h` are the **unrotated** page dimensions (the dimensions before
+  `/Rotate` is applied to the display).
   """
   def apply_rotation(x, y, w, h, degrees) do
     case Integer.mod(degrees, 360) do
@@ -175,6 +178,47 @@ defmodule Quire.Geometry do
       270 -> {h - y, x}
     end
   end
+
+  @doc """
+  Convert PDF content-space bounds to CSS overlay coordinates.
+
+  Takes a text-span bounds map (`%{left, bottom, right, top}` — PDF points,
+  origin bottom-left, **crop-frame content space** as returned by
+  `Quire.Render.extract_text/2`) plus the page's display-oriented dimensions
+  (`page_w` × `page_h`, points — already rotated and CropBox-based, as
+  returned by `Quire.Render.page_geometry/1`) and the page's `/Rotate`
+  (0/90/180/270).
+
+  Returns a map with `:left`, `:top`, `:width`, `:height` in **points**,
+  origin top-left — ready to be scaled by `dpi / 72` for CSS pixels and
+  absolutely positioned over the rendered page image (§14.3).
+
+  ## Example
+
+      # Page 1 of rotated_pages.pdf: 792x612 display, /Rotate 90
+      span_to_css(%{left: 72.95, bottom: 719.87, right: 93.43, top: 728.63}, 792, 612, 90)
+      # => %{left: 719.87, top: 72.95, width: 8.76, height: 20.48}
+  """
+  def span_to_css(%{left: l, bottom: b, right: r, top: t}, page_w, page_h, rotation \\ 0) do
+    cw = r - l
+    ch = t - b
+    {uw, uh} = unrotated_dims(page_w, page_h, rotation)
+    {dx, dy, dw, dh} = rotate_rect(l, b, cw, ch, uw, uh, rotation)
+    %{left: dx, top: page_h - dy - dh, width: dw, height: dh}
+  end
+
+  # Display-oriented dims back to unrotated content dims: /Rotate 90/270
+  # swap width and height.
+  defp unrotated_dims(w, h, rotation) when rotation in [90, 270], do: {h, w}
+  defp unrotated_dims(w, h, _rotation), do: {w, h}
+
+  # Rotate a content-space rect (x, y, w, h) into display space, given the
+  # UNROTATED content dims (uw, uh). Result is a display-space rect whose
+  # y axis is still bottom-up; the caller applies the final Y flip.
+  defp rotate_rect(cx, cy, cw, ch, _uw, _uh, 0), do: {cx, cy, cw, ch}
+  defp rotate_rect(cx, cy, cw, ch, uw, _uh, 90), do: {cy, uw - cx - cw, ch, cw}
+  defp rotate_rect(cx, cy, cw, ch, uw, uh, 180), do: {uw - cx - cw, uh - cy - ch, cw, ch}
+  defp rotate_rect(cx, cy, cw, ch, _uw, uh, 270), do: {uh - cy - ch, cx, ch, cw}
 
   @doc """
   Check that a CSS → PDF → CSS round trip is identity within 0.01 pt.

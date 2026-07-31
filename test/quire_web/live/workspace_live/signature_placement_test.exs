@@ -34,7 +34,7 @@ defmodule QuireWeb.WorkspaceLive.SignaturePlacementTest do
       |> render_click()
 
       lv
-      |> element("button[phx-value-id=\"#{sig["id"]}\"]")
+      |> element(~s{button[phx-click="signature_use"][phx-value-id="#{sig["id"]}"]})
       |> render_click()
 
       assert_push_event(lv, "enable_signature_placement", %{"signature" => sent})

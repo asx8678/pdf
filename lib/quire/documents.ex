@@ -25,19 +25,23 @@ defmodule Quire.Documents do
     end
   end
 
-  defp do_get_document(id, scope) do
+  defp do_get_document(id, %Quire.Accounts.Scope{} = scope) do
     doc = Repo.get(Document, id)
 
     cond do
       is_nil(doc) ->
         {:error, :not_found}
 
-      doc.user_id != scope.id ->
+      doc.user_id != scope.user.id ->
         {:error, :forbidden}
 
       true ->
         {:ok, doc}
     end
+  end
+
+  defp do_get_document(_id, _other_scope) do
+    {:error, :forbidden}
   end
 
   @doc """

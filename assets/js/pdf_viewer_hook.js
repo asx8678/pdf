@@ -116,6 +116,16 @@ const PdfViewerHook = {
       this._disableEsignPlacement();
     });
 
+    // Signature placement mode (T-115): the server dispatched a saved
+    // signature; clicking the page drops a movable/resizable box.
+    this.handleEvent("enable_signature_placement", ({ signature }) => {
+      this._enableSignaturePlacement(signature);
+    });
+
+    this.handleEvent("signature_placement_failed", () => {
+      this._disableSignaturePlacement();
+    });
+
     // Toggle annotation editor mode (FreeText, etc.)
     this.handleEvent("toggle_editing", ({ mode }) => {
       if (!this._viewer) return;
@@ -216,6 +226,7 @@ const PdfViewerHook = {
   },
 
   destroyed() {
+    this._disableSignaturePlacement();
     if (this._formatBarAutoHideHandler) {
       document.removeEventListener("pointerdown", this._formatBarAutoHideHandler, true);
       this._formatBarAutoHideHandler = null;
@@ -761,6 +772,392 @@ const PdfViewerHook = {
         break;
       }
     }
+  },
+
+  // ── Signature placement (T-115) ────────────────────────────────────────
+
+  /** Enter placement mode: click a page to drop a resizable/movable box. */
+  _enableSignaturePlacement(signature) {
+    this._sigPlacementSignature = signature || null;
+    this._sigPlacementEnabled = true;
+    this._bindSignaturePlaceClick();
+    this._bindSignaturePlaceKeys();
+    // Surface a hint so the user knows what to do next
+    const hint = this.el.querySelector("#signature-placement-hint");
+    if (hint) hint.classList.remove("hidden");
+  },
+
+  _disableSignaturePlacement() {
+    this._sigPlacementEnabled = false;
+    this._unbindSignaturePlaceClick();
+    this._unbindSignaturePlaceKeys();
+    this._removeSignatureOverlay();
+    this._sigPlacementSignature = null;
+    const hint = this.el.querySelector("#signature-placement-hint");
+    if (hint) hint.classList.add("hidden");
+  },
+
+  _bindSignaturePlaceClick() {
+    this._unbindSignaturePlaceClick();
+    const container = this.el.querySelector("#pdf-viewer-container");
+    if (!container) return;
+    this._sigPlaceClickHandler = (e) => this._onSignaturePlaceClick(e);
+    container.addEventListener("click", this._sigPlaceClickHandler);
+  },
+
+  _unbindSignaturePlaceClick() {
+    if (!this._sigPlaceClickHandler) return;
+    const container = this.el.querySelector("#pdf-viewer-container");
+    if (container) {
+      container.removeEventListener("click", this._sigPlaceClickHandler);
+    }
+    this._sigPlaceClickHandler = null;
+  },
+
+  _bindSignaturePlaceKeys() {
+    this._unbindSignaturePlaceKeys();
+    this._sigPlaceKeyHandler = (e) => {
+      if (e.key === "Escape") this._disableSignaturePlacement();
+      if (e.key === "Enter") this._commitSignaturePlacement();
+    };
+    document.addEventListener("keydown", this._sigPlaceKeyHandler);
+  },
+
+  _unbindSignaturePlaceKeys() {
+    if (!this._sigPlaceKeyHandler) return;
+    document.removeEventListener("keydown", this._sigPlaceKeyHandler);
+    this._sigPlaceKeyHandler = null;
+  },
+
+  /** Find the page under the cursor and drop a default-size box there. */
+  _onSignaturePlaceClick(e) {
+    if (!this._sigPlacementEnabled || !this._viewer) return;
+
+    const pages = this._viewer._pages;
+    if (!pages) return;
+
+    for (let i = 0; i < pages.length; i++) {
+      const pv = pages[i];
+      if (!pv || !pv.div) continue;
+      const pr = pv.div.getBoundingClientRect();
+
+      if (
+        e.clientX >= pr.left && e.clientX <= pr.right &&
+        e.clientY >= pr.top && e.clientY <= pr.bottom
+      ) {
+        const vp = pv.viewport;
+        const cssX = e.clientX - pr.left;
+        const cssY = e.clientY - pr.top;
+        const [pdfX, pdfY] = vp.convertToPdfPoint(cssX, cssY);
+
+        // Default box: 40pt tall, width matching the signature's aspect
+        const aspect = this._signatureAspectRatio();
+        const h = 40;
+        const w = h * aspect;
+
+        this._createSignatureOverlay(pv, {
+          page_index: pv.id - 1,
+          rect: [pdfX, pdfY, pdfX + w, pdfY + h],
+        });
+        break;
+      }
+    }
+  },
+
+  /** Best-guess aspect ratio (width/height) for the default box size. */
+  _signatureAspectRatio() {
+    const sig = this._sigPlacementSignature;
+    if (!sig) return 3;
+    let data = {};
+    try {
+      data = JSON.parse(sig.data);
+    } catch {
+      data = {};
+    }
+    if (sig.type === "draw") {
+      const w = Number(data.width);
+      const h = Number(data.height);
+      if (w > 0 && h > 0) return Math.max(0.5, Math.min(8, w / h));
+    }
+    if (sig.type === "type") {
+      const text = String(data.text || "").length;
+      return Math.max(1, Math.min(6, text * 0.6));
+    }
+    return 3;
+  },
+
+  /** Create the draggable/resizable overlay box for the given page. */
+  _createSignatureOverlay(pageView, state) {
+    this._removeSignatureOverlay();
+    this._sigOverlayState = state;
+    this._sigOverlayPage = pageView;
+
+    const overlay = document.createElement("div");
+    overlay.className = "sig-placement-overlay";
+    overlay.setAttribute("data-testid", "signature-placement-box");
+    overlay.setAttribute("aria-label", "Signature placement — drag to move, corner handles to resize, Enter to place");
+
+    // Corner resize handles
+    for (const pos of ["nw", "ne", "sw", "se"]) {
+      const handle = document.createElement("div");
+      handle.className = `sig-placement-handle sig-placement-handle-${pos}`;
+      handle.dataset.handle = pos;
+      overlay.appendChild(handle);
+    }
+
+    // Commit / cancel controls
+    const controls = document.createElement("div");
+    controls.className = "sig-placement-controls";
+    const placeBtn = document.createElement("button");
+    placeBtn.type = "button";
+    placeBtn.className = "sig-placement-btn";
+    placeBtn.textContent = "Place";
+    placeBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._commitSignaturePlacement();
+    });
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "sig-placement-btn sig-placement-btn-cancel";
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this._disableSignaturePlacement();
+    });
+    controls.appendChild(placeBtn);
+    controls.appendChild(cancelBtn);
+    overlay.appendChild(controls);
+
+    pageView.div.appendChild(overlay);
+    this._sigOverlay = overlay;
+
+    // Pointer interactions: body drag moves, handles resize
+    overlay.addEventListener("pointerdown", (e) => {
+      if (e.target.classList.contains("sig-placement-handle")) {
+        this._beginSignatureDrag(e, e.target.dataset.handle);
+      } else if (e.target.closest(".sig-placement-controls")) {
+        // Buttons handle their own clicks
+      } else {
+        this._beginSignatureDrag(e, "move");
+      }
+    });
+
+    this._renderSignatureOverlay();
+  },
+
+  _removeSignatureOverlay() {
+    if (this._sigOverlay) {
+      this._sigOverlay.remove();
+      this._sigOverlay = null;
+    }
+    this._sigOverlayState = null;
+    this._sigOverlayPage = null;
+  },
+
+  /** Position/size the overlay from the PDF-space rect (rotation-aware). */
+  _renderSignatureOverlay() {
+    const overlay = this._sigOverlay;
+    const state = this._sigOverlayState;
+    const pageView = this._sigOverlayPage;
+    if (!overlay || !state || !pageView) return;
+
+    const vp = pageView.viewport;
+    const [x0, y0, x1, y1] = state.rect;
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const [vx, vy] = vp.convertToViewportPoint(cx, cy);
+    const wCss = (x1 - x0) * vp.scale;
+    const hCss = (y1 - y0) * vp.scale;
+
+    overlay.style.left = `${vx - wCss / 2}px`;
+    overlay.style.top = `${vy - hCss / 2}px`;
+    overlay.style.width = `${wCss}px`;
+    overlay.style.height = `${hCss}px`;
+    overlay.style.transform = `rotate(${vp.rotation}deg)`;
+    overlay.style.transformOrigin = "center";
+
+    // Keep the commit/cancel controls upright on rotated pages
+    const controls = overlay.querySelector(".sig-placement-controls");
+    if (controls) {
+      controls.style.transform = `translateX(-50%) rotate(${-vp.rotation}deg)`;
+    }
+  },
+
+  _beginSignatureDrag(e, mode) {
+    e.preventDefault();
+    const pageView = this._sigOverlayPage;
+    if (!pageView || !this._sigOverlayState) return;
+
+    const pr = pageView.div.getBoundingClientRect();
+    const vp = pageView.viewport;
+    const [pdfX, pdfY] = vp.convertToPdfPoint(e.clientX - pr.left, e.clientY - pr.top);
+
+    this._sigDrag = {
+      mode,
+      originPdf: [pdfX, pdfY],
+      originRect: this._sigOverlayState.rect.slice(),
+    };
+
+    const onMove = (ev) => {
+      const [curX, curY] = vp.convertToPdfPoint(ev.clientX - pr.left, ev.clientY - pr.top);
+      const dx = curX - this._sigDrag.originPdf[0];
+      const dy = curY - this._sigDrag.originPdf[1];
+      this._applySignatureDrag(dx, dy);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      this._sigDrag = null;
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+  },
+
+  _applySignatureDrag(dx, dy) {
+    const state = this._sigOverlayState;
+    if (!state || !this._sigDrag) return;
+    const [ox0, oy0, ox1, oy1] = this._sigDrag.originRect;
+    let [x0, y0, x1, y1] = [ox0, oy0, ox1, oy1];
+
+    switch (this._sigDrag.mode) {
+      case "move":
+        x0 = ox0 + dx; x1 = ox1 + dx;
+        y0 = oy0 + dy; y1 = oy1 + dy;
+        break;
+      case "nw":
+        x0 = Math.min(ox0 + dx, ox1 - 8); y0 = Math.min(oy0 + dy, oy1 - 8);
+        break;
+      case "ne":
+        x1 = Math.max(ox1 + dx, ox0 + 8); y0 = Math.min(oy0 + dy, oy1 - 8);
+        break;
+      case "sw":
+        x0 = Math.min(ox0 + dx, ox1 - 8); y1 = Math.max(oy1 + dy, oy0 + 8);
+        break;
+      case "se":
+        x1 = Math.max(ox1 + dx, ox0 + 8); y1 = Math.max(oy1 + dy, oy0 + 8);
+        break;
+    }
+
+    state.rect = [x0, y0, x1, y1];
+    this._renderSignatureOverlay();
+  },
+
+  /** Rasterise the signature to PNG at the box size and commit. */
+  async _commitSignaturePlacement() {
+    const state = this._sigOverlayState;
+    if (!state) return;
+
+    const [x0, y0, x1, y1] = state.rect;
+    const png = await this._rasterizeSignature(x1 - x0, y1 - y0);
+    if (!png) {
+      this.pushEvent("signature_placement_failed", { reason: "Could not rasterise signature" });
+      return;
+    }
+
+    this._disableSignaturePlacement();
+    this.pushEvent("signature_placed", {
+      page_index: state.page_index,
+      rect: [x0, y0, x1, y1],
+      png: png.split(",")[1] || png,
+    });
+  },
+
+  /** Draw the saved signature onto a fresh canvas at the target size. */
+  async _rasterizeSignature(widthPdf, heightPdf) {
+    const sig = this._sigPlacementSignature;
+    if (!sig) return null;
+
+    let data = {};
+    try {
+      data = JSON.parse(sig.data);
+    } catch {
+      data = {};
+    }
+
+    // Render at 2x for crisp print output
+    const scale = 2;
+    const w = Math.max(1, Math.round(widthPdf * scale));
+    const h = Math.max(1, Math.round(heightPdf * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+
+    if (sig.type === "draw") {
+      this._drawSignatureStrokes(ctx, data, w, h);
+    } else if (sig.type === "type") {
+      this._drawSignatureText(ctx, data, w, h);
+    } else if (sig.type === "upload") {
+      const ok = await this._drawSignatureImage(ctx, data, w, h);
+      if (!ok) return null;
+    }
+
+    return canvas.toDataURL("image/png");
+  },
+
+  _drawSignatureStrokes(ctx, data, w, h) {
+    const strokes = data.strokes || [];
+    const srcW = Number(data.width) || w;
+    const srcH = Number(data.height) || h;
+    const sx = w / srcW;
+    const sy = h / srcH;
+
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2.5 * sy;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    for (const stroke of strokes) {
+      if (!stroke || stroke.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x * sx, stroke[0].y * sy);
+      for (let i = 1; i < stroke.length; i++) {
+        ctx.lineTo(stroke[i].x * sx, stroke[i].y * sy);
+      }
+      ctx.stroke();
+    }
+  },
+
+  _drawSignatureText(ctx, data, w, h) {
+    const text = String(data.text || "");
+    if (!text) return;
+    const font = data.font || "Alex Brush";
+    const srcSize = Number(data.size) || 48;
+
+    // Fit the text within the box: start at the capture size, shrink if needed
+    let size = srcSize * (h / 100);
+    ctx.fillStyle = "#000";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+
+    const draw = (s) => {
+      ctx.font = `${s}px "${font}", cursive`;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillText(text, w / 2, h / 2);
+      return ctx.measureText(text).width <= w * 0.98;
+    };
+
+    while (size > 8 && !draw(size)) {
+      size *= 0.9;
+    }
+    draw(size);
+  },
+
+  _drawSignatureImage(ctx, data, w, h) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(w / img.width, h / img.height);
+        const dw = img.width * scale;
+        const dh = img.height * scale;
+        ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh);
+        resolve(true);
+      };
+      img.onerror = () => resolve(false);
+      img.src = data.image || "";
+    });
   },
 
   // ── Edit-mode click-to-select text (T-091, pdf-8vsn) ────────────────

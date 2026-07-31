@@ -44,6 +44,24 @@ topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
 
+// Server-initiated file downloads (T-078 HTML export, T-111 annotation
+// export). The server pushes `%{content, filename, content_type}` where
+// content is base64; decode and trigger a browser download.
+window.addEventListener("phx:download", ({detail}) => {
+  if (!detail || typeof detail.content !== "string") return
+  const binary = atob(detail.content)
+  const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+  const blob = new Blob([bytes], {type: detail.content_type || "application/octet-stream"})
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = detail.filename || "download.bin"
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+})
+
 // connect if there are any LiveViews on the page
 liveSocket.connect()
 

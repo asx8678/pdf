@@ -102,6 +102,39 @@ defmodule Quire.GeometryRoundTripTest do
         end
       end
     end
+
+    test "span_to_css places rotated spans on the display", %{ref: ref} do
+      {:ok, pages} = Quire.Render.Pdfium.page_geometry(ref)
+      {:ok, text_pages} = Quire.Render.Pdfium.extract_text(ref, [])
+
+      # One span per page; labels R0/R90/R180/R270, all drawn at the same
+      # content-space position near the top-left of an unrotated 612x792 page.
+      expected_label = fn page -> "R#{page.rotate}" end
+
+      for tp <- text_pages do
+        page = Enum.at(pages, tp.page)
+        span = hd(tp.spans)
+        assert span.text == expected_label.(page)
+
+        css = Geometry.span_to_css(span.bounds, page.width, page.height, page.rotate)
+        # Overlay must stay inside the page (allow small float slop)
+        assert css.left >= -0.01
+        assert css.top >= -0.01
+        assert css.left + css.width <= page.width + 0.01
+        assert css.top + css.height <= page.height + 0.01
+        assert css.width > 0
+        assert css.height > 0
+      end
+
+      # Rotation 0 page: content (72.95, 719.87) is near the top-left, so the
+      # CSS overlay is near the top-left too (Y flip: bottom -> top).
+      rot0 = Enum.at(pages, 0)
+      rot0_span = hd(Enum.at(text_pages, 0).spans)
+      css0 = Geometry.span_to_css(rot0_span.bounds, rot0.width, rot0.height, 0)
+      assert_in_delta css0.left, rot0_span.bounds.left, 0.01
+      # top = page_h - bottom - height
+      assert_in_delta css0.top, 792.0 - rot0_span.bounds.bottom - css0.height, 0.01
+    end
   end
 
   defp load_fixture(name) do

@@ -1543,6 +1543,86 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   @doc """
+  Generates a self-contained HTML export (T-078) in a background task.
+
+  `mode` is `"overlay"` (page WebP images + positioned selectable text) or
+  `"text_only"` (semantic reflow, no images). The result is delivered as a
+  browser download via the `{:download, ...}` handle_info.
+  """
+  def handle_event("convert_to_html", %{"mode" => mode}, socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev) do
+      title = doc.title
+      mode_atom = if mode == "text_only", do: :text_only, else: :overlay
+      filename = "#{slugify(title)}.html"
+      pid = self()
+
+      Task.start(fn ->
+        result =
+          Quire.Office.Writer.PdfHtml.write(ref, :html,
+            mode: mode_atom,
+            title: title
+          )
+
+        case result do
+          {:ok, html} ->
+            send(pid, {:html_export_done, filename, html})
+
+          {:error, reason} ->
+            send(pid, {:convert_html_error, inspect(reason)})
+        end
+      end)
+
+      {:noreply,
+       socket
+       |> assign(:convert_running, true)
+       |> assign(:convert_format, "html")
+       |> assign(:convert_error, nil)
+       |> put_flash(:info, "HTML export started for #{title}")}
+    else
+      nil ->
+        {:noreply, put_flash(socket, :error, "No PDF found for this document")}
+
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start export: #{reason}")}
+    end
+  end
+
+  @doc """
+  Delivers a finished HTML export as a browser download and clears the
+  convert-progress state.
+  """
+  def handle_info({:html_export_done, filename, html}, socket) do
+    {:noreply,
+     socket
+     |> assign(:convert_running, false)
+     |> assign(:convert_format, nil)
+     |> assign(:convert_error, nil)
+     |> push_event("download", %{
+       content: Base.encode64(html),
+       filename: filename,
+       content_type: "text/html; charset=utf-8"
+     })
+     |> put_flash(:info, "HTML export ready — #{filename} downloaded")}
+  end
+
+  @doc """
+  Marks a finished HTML export as complete (download already delivered).
+  """
+  def handle_info({:convert_html_error, reason}, socket) do
+    {:noreply,
+     socket
+     |> assign(:convert_running, false)
+     |> assign(:convert_format, nil)
+     |> assign(:convert_error, "HTML export failed: #{reason}")
+     |> put_flash(:error, "HTML export failed")}
+  end
+
+  @doc """
   Checks whether the document has any extractable text and assigns
   `show_ocr_prompt` if all pages lack a text layer.
   """
@@ -1620,9 +1700,93 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, load_saved_signatures(socket)}
   end
 
-  def handle_event("signature_use", %{"id" => _sig_id}, socket) do
-    # T-115: Place the selected signature on the page
-    {:noreply, socket}
+  def handle_event("signature_use", %{"id" => sig_id}, socket) do
+    # T-115: Place the selected signature on the page — dispatch the saved
+    # signature data to the client so it can enter placement mode.
+    user_id = socket.assigns.current_scope.user.id
+
+    case Enum.find(Quire.Accounts.list_saved_signatures(user_id), &(&1["id"] == sig_id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Signature not found")}
+
+      sig ->
+        {:noreply, push_event(socket, "enable_signature_placement", %{signature: sig})}
+    end
+  end
+
+  @doc """
+  Handles a committed signature placement (T-115): the client rasterised the
+  signature to PNG at the chosen box size and reports the rect in PDF points.
+  The server embeds the signature as a flattened XObject via the
+  `signature.place` op, journals it, flushes a new revision, and tells the
+  client to reload the document.
+  """
+  def handle_event("signature_placed", params, socket) do
+    doc_id = socket.assigns.active_document_id
+    user_id = socket.assigns.current_scope.user.id
+
+    with {:ok, page_index} <- fetch_int(params, "page_index"),
+         {:ok, rect} <- fetch_rect(params["rect"]),
+         {:ok, png} <- fetch_png(params["png"]),
+         {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, embedded} <-
+           Quire.Editing.Ops.SignaturePlace.apply(
+             %{pdf_bytes: bytes, page_index: page_index, rect: rect, png: png},
+             %{}
+           ),
+         {:ok, session_pid} <- Editing.open_session(doc_id, user_id),
+         {:ok, _} <-
+           Editing.apply(session_pid, %{
+             kind: "signature.place",
+             data: %{page_index: page_index, rect: rect}
+           }),
+         {:ok, %{revision_id: rev_id}} <-
+           Editing.flush(session_pid, embedded, "Signature placed") do
+      {:noreply,
+       socket
+       |> assign(:mutations_pending, true)
+       |> push_event("open_document", %{url: socket.assigns.document_url, password: nil})
+       |> put_flash(:info, "Signature placed (rev #{rev_id}).")}
+    else
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> push_event("signature_placement_failed", %{reason: inspect(reason)})
+         |> put_flash(:error, "Failed to place signature: #{inspect(reason)}")}
+
+      _ ->
+        {:noreply,
+         push_event(socket, "signature_placement_failed", %{reason: "Could not load document"})}
+    end
+  end
+
+  defp fetch_int(params, key) do
+    case Integer.parse(to_string(Map.get(params, key, ""))) do
+      {value, ""} when value >= 0 -> {:ok, value}
+      _ -> {:error, "#{key} must be a non-negative integer"}
+    end
+  end
+
+  defp fetch_rect([x0, y0, x1, y1]) when is_number(x0) and is_number(y0) and is_number(x1) and is_number(y1) do
+    if x1 > x0 and y1 > y0 do
+      {:ok, [x0 * 1.0, y0 * 1.0, x1 * 1.0, y1 * 1.0]}
+    else
+      {:error, :bad_rect}
+    end
+  end
+
+  defp fetch_rect(_), do: {:error, :bad_rect}
+
+  defp fetch_png(nil), do: {:error, :missing_png}
+
+  defp fetch_png(base64) when is_binary(base64) do
+    case Base.decode64(base64) do
+      {:ok, bytes} -> {:ok, bytes}
+      :error -> {:error, :bad_png_encoding}
+    end
   end
 
   defp load_saved_signatures(socket) do
@@ -1649,6 +1813,16 @@ defmodule QuireWeb.WorkspaceLive do
 
   defp rail_items(items, active_panel) do
     Enum.map(items, &Map.put(&1, :active, &1.id == active_panel))
+  end
+
+  # Filesystem-safe slug for exported filenames (T-078).
+  defp slugify(value) do
+    value
+    |> to_string()
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/, "-")
+    |> String.trim("-")
+    |> then(&if(&1 == "", do: "document", else: &1))
   end
 
   # Pushes the current query plus options to the viewer hook, or clears
@@ -2138,6 +2312,22 @@ defmodule QuireWeb.WorkspaceLive do
             phx-click="convert_to_office"
             phx-value-format="pptx"
             tooltip="PowerPoint presentation (.pptx) — best for text-based PDFs"
+            disabled={@convert_running}
+          />
+          <.ribbon_button
+            icon="hero-code-bracket"
+            label="HTML"
+            phx-click="convert_to_html"
+            phx-value-mode="overlay"
+            tooltip="Web page (.html) — page images with selectable text, single self-contained file"
+            disabled={@convert_running}
+          />
+          <.ribbon_button
+            icon="hero-document-arrow-down"
+            label="HTML text"
+            phx-click="convert_to_html"
+            phx-value-mode="text_only"
+            tooltip="Web page (.html) — text only, reflowed, no page images"
             disabled={@convert_running}
           />
         </.ribbon_group>

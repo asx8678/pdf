@@ -58,3 +58,59 @@
 }
 
 /* This file is for your main application CSS */
+
+/* Signature placement overlay (T-115) — draggable/resizable box on the page */
+.sig-placement-overlay {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #4f46e5;
+  background: rgba(79, 70, 229, 0.08);
+  cursor: move;
+  z-index: 40;
+  touch-action: none;
+}
+
+.sig-placement-overlay .sig-placement-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 2px solid #4f46e5;
+  border-radius: 2px;
+  cursor: nwse-resize;
+}
+
+.sig-placement-handle-nw { left: -6px; top: -6px; }
+.sig-placement-handle-ne { right: -6px; top: -6px; cursor: nesw-resize; }
+.sig-placement-handle-sw { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.sig-placement-handle-se { right: -6px; bottom: -6px; }
+
+.sig-placement-controls {
+  position: absolute;
+  left: 50%;
+  top: -38px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sig-placement-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #4f46e5;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sig-placement-btn:hover { background: #4338ca; }
+
+.sig-placement-btn-cancel {
+  background: #6b7280;
+}
+
+.sig-placement-btn-cancel:hover { background: #4b5563; }
+
