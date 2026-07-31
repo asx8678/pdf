@@ -28,7 +28,9 @@ defmodule Quire.ScanTest do
   defp gray_values(png_or_img) do
     img =
       case png_or_img do
-        %Image{} = img -> img
+        %Image{} = img ->
+          img
+
         bytes when is_binary(bytes) ->
           {:ok, img} = Image.new_from_buffer(bytes)
           img

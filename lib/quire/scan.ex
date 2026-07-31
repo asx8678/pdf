@@ -211,31 +211,37 @@ defmodule Quire.Scan do
   # ── Pipeline steps ─────────────────────────────────────────────────────
 
   defp load(image_bytes) do
-    cond do
-      byte_size(image_bytes) > @max_input_bytes ->
-        {:error, {:invalid_image, "Image exceeds the #{@max_input_bytes} byte limit"}}
-
-      true ->
-        case Image.new_from_buffer(image_bytes) do
-          {:ok, img} ->
-            w = Image.width(img)
-            h = Image.height(img)
-
-            if w > @max_dimension or h > @max_dimension do
-              {:error, {:invalid_image, "Image dimensions #{w}x#{h} exceed #{@max_dimension} px"}}
-            else
-              img = if Image.has_alpha?(img), do: flatten!(img), else: img
-
-              with {:ok, srgb} <- Operation.colourspace(img, :VIPS_INTERPRETATION_sRGB) do
-                {:ok, srgb}
-              end
-            end
-
-          {:error, _reason} ->
-            {:error, {:invalid_image, "The file does not appear to be a supported image format"}}
-        end
+    if byte_size(image_bytes) > @max_input_bytes do
+      {:error, {:invalid_image, "Image exceeds the #{@max_input_bytes} byte limit"}}
+    else
+      load_image(image_bytes)
     end
   end
+
+  defp load_image(image_bytes) do
+    case Image.new_from_buffer(image_bytes) do
+      {:ok, img} ->
+        w = Image.width(img)
+        h = Image.height(img)
+
+        cond do
+          w > @max_dimension or h > @max_dimension ->
+            {:error, {:invalid_image, "Image dimensions #{w}x#{h} exceed #{@max_dimension} px"}}
+
+          true ->
+            img = if Image.has_alpha?(img), do: flatten!(img), else: img
+
+            with {:ok, srgb} <- Operation.colourspace(img, :VIPS_INTERPRETATION_sRGB) do
+              {:ok, srgb}
+            end
+        end
+
+      {:error, _reason} ->
+        {:error, {:invalid_image, "The file does not appear to be a supported image format"}}
+    end
+  end
+
+  defp maybe_deskew(img, false), do: {:ok, img}
 
   defp maybe_deskew(img, true) do
     case deskew(img) do
@@ -243,8 +249,6 @@ defmodule Quire.Scan do
       {:error, reason} -> {:error, reason}
     end
   end
-
-  defp maybe_deskew(img, false), do: {:ok, img}
 
   defp flatten!(img) do
     {:ok, flat} = Operation.flatten(img)
