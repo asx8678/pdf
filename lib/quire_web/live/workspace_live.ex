@@ -131,6 +131,11 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:read_aloud_playing, false)
       |> assign(:mutations_pending, false)
       |> assign(:pending_server_op, nil)
+      |> assign(:add_text_active, false)
+      |> assign(:edit_text_active, false)
+      |> assign(:format_painter_active, false)
+      |> assign(:format_painter_available, false)
+      |> assign(:select_text_active, false)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
@@ -972,6 +977,67 @@ defmodule QuireWeb.WorkspaceLive do
       |> push_event("toggle_annot_mode", %{mode: mode})
 
     {:noreply, socket}
+  end
+
+  # Edit-tab tool toggles (T-094). These update the ribbon active state
+  # and forward the chosen tool to the client's PdfViewerHook, which owns
+  # the pdf.js annotation editor / select-text pointer behaviour.
+  #
+  # Turning one Edit tool on is exclusive with the others so that at most
+  # one of Add text / Edit text / Format painter / Select text is active.
+  def handle_event("toggle_editing", %{"mode" => mode}, socket)
+      when mode in ~w(add_text edit_text) do
+    socket =
+      socket
+      |> assign(:add_text_active, mode == "add_text" and !socket.assigns.add_text_active)
+      |> assign(:edit_text_active, mode == "edit_text" and !socket.assigns.edit_text_active)
+      |> assign(:format_painter_active, false)
+      |> assign(:select_text_active, false)
+      |> push_event("toggle_editing", %{mode: mode})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_format_painter", _params, socket) do
+    active = not socket.assigns.format_painter_active
+
+    socket =
+      socket
+      |> assign(:format_painter_active, active)
+      |> assign(:add_text_active, false)
+      |> assign(:edit_text_active, false)
+      |> assign(:select_text_active, false)
+      |> push_event("toggle_format_painter", %{active: active})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_select_text", _params, socket) do
+    active = not socket.assigns.select_text_active
+
+    socket =
+      socket
+      |> assign(:select_text_active, active)
+      |> assign(:add_text_active, false)
+      |> assign(:edit_text_active, false)
+      |> assign(:format_painter_active, false)
+      |> assign(:format_painter_available, false)
+      |> push_event("toggle_select_text", %{active: active})
+
+    {:noreply, socket}
+  end
+
+  # The client reports whether an editable object is currently selected.
+  # This drives the Format painter button's enabled state — the painter is
+  # only usable once something is selected (Done-when #1).
+  def handle_event("edit_selection_changed", %{"selected" => selected}, socket) do
+    {:noreply, assign(socket, :format_painter_available, !!selected)}
+  end
+
+  # The client applied the copied style to a second object, de-arming the
+  # single-shot format painter in the ribbon.
+  def handle_event("format_painter_applied", _params, socket) do
+    {:noreply, assign(socket, :format_painter_active, false)}
   end
 
   @doc """
@@ -3465,6 +3531,11 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:stamp_mode_active, fn -> false end)
       |> assign_new(:measure_mode_active, fn -> false end)
       |> assign_new(:active_measure_mode, fn -> nil end)
+      |> assign_new(:add_text_active, fn -> false end)
+      |> assign_new(:edit_text_active, fn -> false end)
+      |> assign_new(:format_painter_active, fn -> false end)
+      |> assign_new(:format_painter_available, fn -> false end)
+      |> assign_new(:select_text_active, fn -> false end)
       |> assign_new(:calibrating, fn -> false end)
       |> assign_new(:convert_running, fn -> false end)
       |> assign_new(:convert_format, fn -> nil end)
@@ -3582,6 +3653,49 @@ defmodule QuireWeb.WorkspaceLive do
             <.icon name="hero-exclamation-circle" class="size-3.5" />
             <span>{error_message(@scan_error)}</span>
           </div>
+        </.ribbon_group>
+      </div>
+
+      <!-- Edit tab ribbon groups (T-090/T-094) -->
+      <div :if={@active_tab == "edit"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Add">
+          <.ribbon_button
+            icon="hero-plus"
+            label="Add text"
+            active={@add_text_active}
+            phx-click="toggle_editing"
+            phx-value-mode="add_text"
+            tooltip="Add text — click or drag to place a text box (opens the format bar)"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Edit">
+          <.ribbon_button
+            icon="hero-pencil-square"
+            label="Edit text"
+            active={@edit_text_active}
+            phx-click="toggle_editing"
+            phx-value-mode="edit_text"
+            tooltip="Edit existing text — click a run to edit it"
+          />
+          <.ribbon_button
+            icon="hero-paint-brush"
+            label="Format painter"
+            active={@format_painter_active}
+            disabled={not @format_painter_available and not @format_painter_active}
+            phx-click="toggle_format_painter"
+            tooltip="Format painter — copy the style of a selected object, then click another to apply"
+          />
+        </.ribbon_group>
+
+        <.ribbon_group label="Mode">
+          <.ribbon_button
+            icon="hero-cursor-arrow-rays"
+            label="Select text"
+            active={@select_text_active}
+            phx-click="toggle_select_text"
+            tooltip="Select text mode — drag to select existing text instead of moving objects"
+          />
         </.ribbon_group>
       </div>
 

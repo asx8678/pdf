@@ -418,6 +418,11 @@ const AnnotEditHook = {
   _switchMode(modeStr) {
     if (!this._viewer) return;
 
+    // Object-selection / annotation tools are exclusive with the Edit tab's
+    // select-text and format-painter modes (T-094).
+    if (typeof this.el._deactivateSelectText === "function") this.el._deactivateSelectText();
+    if (typeof this.el._deactivateFormatPainter === "function") this.el._deactivateFormatPainter();
+
     // Teardown any active custom modes before switching.
     this._deactivateStampMode();
     this._deactivateAttachmentMode();

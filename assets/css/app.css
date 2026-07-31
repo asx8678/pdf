@@ -133,3 +133,34 @@
 
 .sig-placement-btn-cancel:hover { background: #4b5563; }
 
+
+/* Edit tab select-text mode (T-094) — switch pointer to text selection */
+#pdf-viewer-container.select-text-mode,
+#pdf-viewer-container-left.select-text-mode,
+#pdf-viewer-container-right.select-text-mode {
+  cursor: text;
+}
+
+#pdf-viewer-container.select-text-mode .textLayer,
+#pdf-viewer-container.select-text-mode .textLayer span {
+  -webkit-user-select: text;
+  -moz-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
+/* While select-text is active, the annotation editor layer must not
+   swallow pointer events (keeps the mode exclusive with object tools). */
+#pdf-viewer-container.select-text-mode .annotationEditorLayer,
+#pdf-viewer-container.select-text-mode .annotationEditorLayer .annotationEditor,
+#pdf-viewer-container.select-text-mode .annotationEditorLayer .freeTextEditor {
+  pointer-events: none;
+}
+
+/* Format painter armed cursor (T-094) */
+#pdf-viewer-container.format-painter-armed {
+  cursor: copy;
+}
+#pdf-viewer-container.format-painter-armed .annotationEditorLayer {
+  cursor: copy;
+}

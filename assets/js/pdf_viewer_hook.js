@@ -23,6 +23,14 @@ const PdfViewerHook = {
     this._activeEditor = null;
     this._formatBar = null;
     this._formatBarAutoHideHandler = null;
+    this._formatPainterActive = false;
+    this._formatPainterStyle = null;
+    this._formatPainterClickHandler = null;
+    this._selectTextActive = false;
+    // Expose mode-switch helpers to sibling hooks (AnnotEditHook) so the
+    // select-text mode stays exclusive with object-selection tools.
+    this.el._deactivateSelectText = () => this._deactivateSelectText();
+    this.el._deactivateFormatPainter = () => this._deactivateFormatPainter();
     this._scriptingEnabled = false;
     this._scriptingManager = null;
     this._docKey = null; // sha256(documentUrl) — OPFS render-cache key prefix (§14.2)
@@ -154,6 +162,11 @@ const PdfViewerHook = {
       if (!this._viewer) return;
       const { AnnotationEditorType } = pdfjsLib;
 
+      // Edit tools are exclusive: starting Add/Edit text turns off the
+      // format painter and select-text modes.
+      this._deactivateSelectTextMode();
+      this._deactivateFormatPainter();
+
       if (mode === "add_text") {
         const currentMode = this._viewer.annotationEditorMode;
         if (currentMode === AnnotationEditorType.FREETEXT) {
@@ -184,6 +197,49 @@ const PdfViewerHook = {
           this.pushEvent("edit_mode_changed", { active: true });
         }
       }
+    });
+
+    // Format painter (T-094): copy the style of the currently selected
+    // text/annotation object, then apply it to the next object clicked.
+    // Reacts to the server ribbon button (`toggle_format_painter`).
+    this.handleEvent("toggle_format_painter", ({ active }) => {
+      if (!active) {
+        this._deactivateFormatPainter();
+        return;
+      }
+
+      // Capture the style of the currently selected editor.
+      if (!this._uiManager) {
+        this.pushEvent("format_painter_state", { active: false, reason: "no_ui_manager" });
+        return;
+      }
+      const editor = this._uiManager.getActive();
+      if (!editor || !editor.editorDiv) {
+        this.pushEvent("format_painter_state", { active: false, reason: "nothing_selected" });
+        return;
+      }
+
+      this._formatPainterStyle = this._collectEditorStyles(editor);
+      this._formatPainterActive = true;
+      this._activateFormatPainterCursor();
+      this._bindFormatPainterClick();
+    });
+
+    // Select text mode (T-094): switch the pointer to select the page's
+    // existing (rendered) text rather than moving/editing objects. This is
+    // exclusive with the annotation-editor object-selection modes.
+    this.handleEvent("toggle_select_text", ({ active }) => {
+      if (!active) {
+        this._deactivateSelectText();
+        return;
+      }
+      // Exclusive: leaving any editor/text-add mode.
+      this._deactivateFormatPainter();
+      if (this._editModeEnabled) {
+        this._editModeEnabled = false;
+        this._unbindEditTextClick();
+      }
+      this._activateSelectText();
     });
 
     // Ctrl+scroll zoom (T-051 §14.2: debounce re-render, CSS transform interim)
@@ -250,6 +306,8 @@ const PdfViewerHook = {
 
   destroyed() {
     this._disableSignaturePlacement();
+    this._deactivateFormatPainter();
+    this._deactivateSelectText();
     if (this._formatBarAutoHideHandler) {
       document.removeEventListener("pointerdown", this._formatBarAutoHideHandler, true);
       this._formatBarAutoHideHandler = null;
@@ -320,10 +378,17 @@ const PdfViewerHook = {
     // Capture the AnnotationEditorUIManager reference for format bar
     this._eventBus.on("annotationeditoruimanager", ({ uiManager }) => {
       this._uiManager = uiManager;
+      // Expose for the Playwright tests and sibling hooks.
+      this.el._uiManager = uiManager;
     });
 
     // Track editor selection changes to show/hide the format bar
     this._eventBus.on("editingstateschanged", ({ details }) => {
+      // Report selection so the server can enable/disable the Format
+      // painter ribbon button (T-094 done-when #1) — it is only usable
+      // once a text/annotation object is selected.
+      this.pushEvent("edit_selection_changed", { selected: !!details.hasSelectedEditor });
+
       if (!this._formatBar) return;
       if (details.hasSelectedEditor) {
         this._showFormatBar();
@@ -490,6 +555,8 @@ const PdfViewerHook = {
       document.removeEventListener("pointerdown", this._formatBarAutoHideHandler, true);
       this._formatBarAutoHideHandler = null;
     }
+    this._deactivateFormatPainter();
+    this._deactivateSelectText();
     this._hideFormatBar();
     this._viewer = null;
     this._eventBus = null;
@@ -809,6 +876,140 @@ const PdfViewerHook = {
     const g = parseInt(m[2], 10).toString(16).padStart(2, "0");
     const b = parseInt(m[3], 10).toString(16).padStart(2, "0");
     return `#${r}${g}${b}`;
+  },
+
+  // ── Format painter (T-094) ────────────────────────────────────────
+
+  /**
+   * Set the armed crosshair cursor while the format painter is on.
+   */
+  _activateFormatPainterCursor() {
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.classList.add("format-painter-armed");
+  },
+
+  /**
+   * Bind a click handler that applies the captured format to the next
+   * text/annotation object the user clicks.
+   */
+  _bindFormatPainterClick() {
+    this._unbindFormatPainterClick();
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    const handler = (e) => {
+      if (!this._formatPainterActive || !this._formatPainterStyle) return;
+      const editor = this._findEditorAtTarget(e.target);
+      if (editor && editor.editorDiv) {
+        e.preventDefault();
+        this._applyCapturedStyle(editor, this._formatPainterStyle);
+        this._deactivateFormatPainter();
+        this.pushEvent("format_painter_applied", { applied: true });
+      }
+    };
+    this._formatPainterClickHandler = handler;
+    container.addEventListener("click", handler);
+  },
+
+  _unbindFormatPainterClick() {
+    if (!this._formatPainterClickHandler) return;
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.removeEventListener("click", this._formatPainterClickHandler);
+    this._formatPainterClickHandler = null;
+  },
+
+  /**
+   * Deactivate the format painter: unbind the click handler, clear the
+   * captured style and armed cursor.
+   */
+  _deactivateFormatPainter() {
+    this._unbindFormatPainterClick();
+    this._formatPainterActive = false;
+    this._formatPainterStyle = null;
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.classList.remove("format-painter-armed");
+  },
+
+  /**
+   * Locate the pdf.js editor (annotation-layer object) under a DOM target
+   * by walking up to an editor wrapper and matching it against every live
+   * editor in the uiManager.
+   *
+   * @returns {object|null} the matched FreeText / annotation editor
+   */
+  _findEditorAtTarget(target) {
+    if (!target || !this._uiManager) return null;
+    const wrapper = target.closest(".freeTextEditor, .annotationEditor");
+    if (!wrapper) return null;
+
+    const pages = this._viewer ? this._viewer._pages : [];
+    for (let i = 0; i < pages.length; i++) {
+      const editors = this._uiManager.getEditors(i);
+      for (const editor of editors) {
+        if (editor && editor.div === wrapper) return editor;
+      }
+    }
+    return null;
+  },
+
+  /**
+   * Apply a captured style object (from `_collectEditorStyles`) to the
+   * contenteditable div of the target editor.
+   */
+  _applyCapturedStyle(editor, styles) {
+    if (!editor || !editor.editorDiv) return;
+    const div = editor.editorDiv;
+    if (styles.fontFamily) div.style.fontFamily = styles.fontFamily;
+    if (styles.fontSize) div.style.fontSize = `${styles.fontSize}px`;
+    if (typeof styles.bold === "boolean") {
+      div.style.fontWeight = styles.bold ? "bold" : "normal";
+    }
+    if (styles.italic) div.style.fontStyle = "italic";
+    if (styles.fontColor) {
+      div.style.color = styles.fontColor;
+      if (editor.setColor) editor.setColor(styles.fontColor);
+    }
+    if (styles.highlightColor) div.style.backgroundColor = styles.highlightColor;
+    if (styles.alignment) div.style.textAlign = styles.alignment;
+    if (styles.underline) {
+      const lines = div.style.textDecorationLine || "";
+      if (!lines.includes("underline")) div.style.textDecorationLine = `${lines} underline`.trim();
+    }
+    if (styles.strikethrough) {
+      const lines = div.style.textDecorationLine || "";
+      if (!lines.includes("line-through")) div.style.textDecorationLine = `${lines} line-through`.trim();
+    }
+  },
+
+  // ── Select text mode (T-094) ───────────────────────────────────────
+
+  /**
+   * Activate select-text mode: switch the pointer so dragging selects the
+   * page's existing rendered text instead of selecting/moving objects.
+   * Exits any annotation-editor mode and turns off the format painter so
+   * the mode is exclusive with object selection.
+   */
+  _activateSelectText() {
+    this._selectTextActive = true;
+
+    const { AnnotationEditorType } = pdfjsLib;
+    if (this._viewer) {
+      try {
+        this._viewer.annotationEditorMode = { mode: AnnotationEditorType.NONE };
+      } catch (_) { /* ignore */ }
+    }
+
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.classList.add("select-text-mode");
+  },
+
+  _deactivateSelectText() {
+    if (!this._selectTextActive) return;
+    this._selectTextActive = false;
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.classList.remove("select-text-mode");
+  },
+
+  _deactivateSelectTextMode() {
+    this._deactivateSelectText();
   },
 
   // Serialize committed editors (FreeText etc.) from annotationStorage

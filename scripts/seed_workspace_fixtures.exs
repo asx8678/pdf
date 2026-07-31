@@ -20,6 +20,7 @@ fixtures = [
   {"rtl_arabic.pdf", "rtl_arabic.pdf"},
   {"rotated_pages.pdf", "rotated_pages.pdf"},
   {"cropped_nonzero_origin.pdf", "cropped_nonzero_origin.pdf"},
+  {"simple_text.pdf", "simple_text.pdf"},
   {"500_pages.pdf", "500_pages.pdf"},
   {"50mb_images.pdf", "50mb_images.pdf"}
 ]
