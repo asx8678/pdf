@@ -14,7 +14,7 @@ defmodule Quire.Documents.PageText do
     field :revision_id, :binary_id
     field :page_index, :integer
     field :content, :string
-    field :spans, :map
+    field :spans, Quire.Ecto.JsonArray
 
     timestamps(type: :utc_datetime, updated_at: false)
   end

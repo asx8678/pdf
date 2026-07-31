@@ -125,8 +125,19 @@ export function createViewer(container, { scriptingEnabled = false } = {}) {
     linkService,
   });
 
+  // pdf.js 6.x PDFViewer requires both a container and a child viewer
+  // element (container.firstElementChild must be a DIV). Our workspace
+  // container starts empty, so create the .pdfViewer div when missing.
+  let viewerEl = container.firstElementChild;
+  if (!viewerEl) {
+    viewerEl = document.createElement("div");
+    viewerEl.className = "pdfViewer";
+    container.appendChild(viewerEl);
+  }
+
   const viewerOptions = {
     container,
+    viewer: viewerEl,
     eventBus,
     linkService,
     findController,

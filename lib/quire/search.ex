@@ -54,28 +54,42 @@ defmodule Quire.Search do
     whole_word = Keyword.get(opts, :whole_word, false)
     page_filter = Keyword.get(opts, :page)
 
-    with {:ok, candidate_pages} <- prefilter(revision_id, query, page_filter),
-         {:ok, hits} <- scan_pages(candidate_pages, query, match_case, whole_word) do
-      {:ok, hits}
+    if String.trim(query) == "" do
+      {:ok, []}
+    else
+      with {:ok, candidate_pages} <- prefilter(revision_id, query, page_filter),
+           {:ok, hits} <- scan_pages(candidate_pages, query, match_case, whole_word) do
+        {:ok, hits}
+      end
     end
   end
 
   # ── Stage 1: GIN/tsvector pre-filter ────────────────────────────────────
 
   defp prefilter(revision_id, query, page_filter) do
-    # Build a tsquery from the user's search string.
-    # Use websearch_to_tsquery which handles quoting, OR, etc.
-    tsquery = "websearch_to_tsquery('simple', #{escape_tsquery(query)})"
+    # Sanitise the raw query, then bind it as a parameter — websearch_to_tsquery
+    # is called with a bound argument, never with interpolated SQL (Ecto
+    # fragment/1 rejects ^-interpolated SQL strings as an injection risk).
+    tsquery = sanitize_query(query)
+
+    # PDFFindController is a substring matcher: "Page 1" hits "Page 10".
+    # A pure tsvector prefilter is token-based ("1" is not a lexeme of
+    # "10"), so it would prune pages the client finds. Prune with tsquery
+    # OR substring (ILIKE/LIKE) — the exact Elixir scan (stage 2) is what
+    # decides the final hit set, so the prefilter only needs to keep all
+    # pages the client could match.
+    like_pattern = "%" <> tsquery <> "%"
 
     base =
       from pt in PageText,
         where: pt.revision_id == ^revision_id,
-        # rub: false — rub   only if something is not a full match
         where:
           fragment(
-            "? @@ ?",
+            "(? @@ websearch_to_tsquery('simple', ?)) OR (? ILIKE ?)",
             pt.search,
-            fragment(^tsquery)
+            ^tsquery,
+            pt.content,
+            ^like_pattern
           ),
         select: %{page_index: pt.page_index, content: pt.content, spans: pt.spans}
 
@@ -92,14 +106,13 @@ defmodule Quire.Search do
       {:error, "Search query error: #{Exception.message(e)}"}
   end
 
-  defp escape_tsquery(query) do
+  defp sanitize_query(query) do
     # Sanitise the query for websearch_to_tsquery: remove characters that
     # could break the tsquery parser, keep basic operators.
     query
     |> String.replace(~r/[^\w\s"\-]/, " ")
     |> String.replace(~r/\s+/, " ")
     |> String.trim()
-    |> then(fn q -> "'#{q}'" end)
   end
 
   # ── Stage 2: Elixir substring scan ───────────────────────────────────────
@@ -181,13 +194,13 @@ defmodule Quire.Search do
   end
 
   defp run_regex_scan(text, %Regex{} = pattern) do
-    # Use :re.run directly to avoid Elixir type checker ambiguity.
-    # pattern.regex is the internal compiled form.
-    opts = [{:return, :index}]
-
-    case :re.run(text, pattern.re_pattern, opts) do
+    # Use :re.run directly on the compiled pattern. `:global` yields every
+    # match as [{offset, length}] tuples (the default capture mode); the
+    # `{:capture, :index, ...}` option tuples are rejected by this OTP's
+    # :re.run and `{:return, :index}` is not an option at all.
+    case :re.run(text, pattern.re_pattern, [:global]) do
       {:match, results} ->
-        Enum.map(results, fn [{offset, _len}] -> offset end)
+        Enum.map(results, fn [{offset, _len} | _] -> offset end)
 
       :nomatch ->
         []

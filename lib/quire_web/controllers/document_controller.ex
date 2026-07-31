@@ -165,12 +165,11 @@ defmodule QuireWeb.DocumentController do
   # Wraps Plug.Conn.send_chunked to work around Elixir 1.20's gradual type
   # checker — it cannot see that send_chunked promotes conn.state from :set to
   # :chunked, producing a false `pattern will never match` warning.
+  #
+  # NOTE: in this Plug version send_chunked/2 returns the conn itself (only
+  # Plug.Conn.chunk/2 returns {:ok, conn}), so no tuple is unwrapped here.
   defp begin_chunked(conn, status) do
-    # send_chunked always returns {:ok, conn}. Use send_chunked via
-    # apply/3 + elem/2 to avoid Elixir 1.20's gradual type checker false
-    # positive on the conn.state transition from :set to :chunked.
-    {:ok, conn} = :erlang.apply(Plug.Conn, :send_chunked, [conn, status])
-    conn
+    :erlang.apply(Plug.Conn, :send_chunked, [conn, status])
   end
 
   defp etag_for(doc) do

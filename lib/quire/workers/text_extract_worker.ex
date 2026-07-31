@@ -65,7 +65,8 @@ defmodule Quire.Workers.TextExtractWorker do
 
   defp do_extract(ref, revision_id) do
     with {:ok, page_results} <- Quire.Render.extract_text(ref) do
-      now = DateTime.utc_now()
+      # document_page_text uses :utc_datetime — no microseconds allowed.
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       rows =
         Enum.map(page_results, fn %{page: page_idx, spans: spans} ->

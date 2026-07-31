@@ -8,6 +8,7 @@
 
 import { init, openDocument, createViewer, pdfjsLib } from "./pdf_viewer.js";
 import { TextFormatBar } from "./text_format_bar.js";
+import OpfsCache from "./opfs_cache_hook.js";
 
 const PdfViewerHook = {
   mounted() {
@@ -24,6 +25,8 @@ const PdfViewerHook = {
     this._formatBarAutoHideHandler = null;
     this._scriptingEnabled = false;
     this._scriptingManager = null;
+    this._docKey = null; // sha256(documentUrl) — OPFS render-cache key prefix (§14.2)
+    OpfsCache._init();
 
     // Initialise pdf.js (idempotent)
     init().then(() => {
@@ -285,6 +288,19 @@ const PdfViewerHook = {
       if (this._formDetectFields) this._showFormDetectionOverlay(this._formDetectFields);
     });
 
+    // OPFS render cache (§14.2): on pagerender (before the draw) restore
+    // a cached bitmap for an instant paint; pdf.js then re-renders over it
+    // asynchronously (same-scale hits are pixel-identical, so the extra
+    // render is invisible). On pagerendered, store the finished canvas.
+    this._eventBus.on("pagerender", ({ pageNumber }) => {
+      this._restorePageFromOpfs(pageNumber);
+    });
+
+    this._eventBus.on("pagerendered", (evt) => {
+      if (!evt || evt.cssTransform || evt.isDetailView) return;
+      this._cachePageToOpfs(evt);
+    });
+
     // FindState: 0=FOUND, 1=NOT_FOUND — the search has settled, so
     // report the flattened match list to the search panel.
     this._eventBus.on("updatefindcontrolstate", ({ state }) => {
@@ -327,34 +343,111 @@ const PdfViewerHook = {
     });
   },
 
-  // Flattens the find controller's per-page matches into
-  // [%{page, text}] rows with a short context snippet for the panel.
+  // ── OPFS page-render cache (§14.2) ─────────────────────────────────────
+
+  // Key = sha256(docUrl):page:scale — the plan's "sha256 + page + scale".
+  // LRU-bounded (60 entries) through OpfsCache.putLRU.
+  async _hashDocUrl(url) {
+    try {
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(url));
+      this._docKey = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    } catch {
+      this._docKey = "doc:" + url.replace(/[^a-zA-Z0-9]/g, "");
+    }
+  },
+
+  _opfsKey(pageNumber, scale) {
+    if (!this._docKey) return null;
+    const s = Math.round(scale * 100) / 100;
+    return `${this._docKey}:${pageNumber}:${s}`;
+  },
+
+  _cachePageToOpfs(evt) {
+    if (!this._viewer || !this._pdfDocument || !evt || !evt.source) return;
+    const key = this._opfsKey(evt.pageNumber, evt.scale || this._viewer.currentScale);
+    if (!key) return;
+    const canvas = evt.source?.canvas;
+    if (!canvas || !canvas.width || !canvas.height) return;
+    try {
+      canvas.toBlob((blob) => {
+        if (blob && blob.size > 0) OpfsCache.putLRU(key, blob, 60);
+      }, "image/png");
+    } catch {
+      // Caching is best-effort — never break rendering.
+    }
+  },
+
+  _restorePageFromOpfs(pageNumber) {
+    if (!this._docKey) return;
+    const scale = this._viewer ? this._viewer.currentScale : 1;
+    const key = this._opfsKey(pageNumber, scale);
+    if (!key) return;
+    OpfsCache.getLRU(key)
+      .then((blob) => {
+        if (!blob || !this._viewer) return;
+        const pageView = this._viewer.getPageView(pageNumber - 1);
+        if (!pageView || !pageView.canvas) return;
+        // Guard against scale changes racing the async read.
+        if (Math.round(this._viewer.currentScale * 100) / 100 !== Math.round(scale * 100) / 100) return;
+        return createImageBitmap(blob).then((bmp) => {
+          if (pageView.canvas.width === 0) return;
+          pageView.canvas.getContext("2d").drawImage(bmp, 0, 0);
+          bmp.close();
+        });
+      })
+      .catch(() => {});
+  },
+
   _pushSearchResults() {
     const fc = this._findController;
     if (!fc) return;
 
-    const results = [];
-    const pageMatches = fc._pageMatches || [];
-    const pageContents = fc._pageContents || [];
+    // pdf.js 6.x computes matches incrementally: updatefindcontrolstate
+    // (FOUND) fires as soon as the FIRST matching page is ready, while
+    // remaining pages are still being matched. Wait for every page's text
+    // extraction promise to settle before reading _pageMatches, so the
+    // server receives the COMPLETE hit set (Gate 2 verify #5).
+    const extractPromises = fc._extractTextPromises || [];
+    const query = fc.state ? fc.state.query : "";
+    const matchCase = fc.state ? fc.state.caseSensitive : false;
+    const wholeWord = fc.state ? fc.state.entireWord : false;
 
-    pageMatches.forEach((matches, pageIdx) => {
-      const text = pageContents[pageIdx] || "";
-      (matches || []).forEach((idx) => {
-        const start = Math.max(0, idx - 40);
-        const end = Math.min(text.length, idx + 60);
-        results.push({
-          page: pageIdx + 1,
-          text: text.slice(start, end).replace(/\s+/g, " ").trim(),
+    Promise.all(extractPromises)
+      .then(() => {
+        // A newer search may have started while we waited — drop stale results.
+        const state = fc.state;
+        if (!state || state.query !== query) return;
+        if (state.caseSensitive !== matchCase || state.entireWord !== wholeWord) return;
+
+        const results = [];
+        const pageMatches = fc._pageMatches || [];
+        const pageContents = fc._pageContents || [];
+
+        pageMatches.forEach((matches, pageIdx) => {
+          const text = pageContents[pageIdx] || "";
+          (matches || []).forEach((idx) => {
+            const start = Math.max(0, idx - 40);
+            const end = Math.min(text.length, idx + 60);
+            results.push({
+              page: pageIdx + 1,
+              text: text.slice(start, end).replace(/\s+/g, " ").trim(),
+            });
+          });
         });
-      });
-    });
 
-    this.pushEvent("search_results", { results, total: results.length });
+        this.pushEvent("search_results", { results, total: results.length });
+      })
+      .catch(() => {});
   },
 
   _openDocument(url, password) {
     if (!this._viewer) return;
     this._closeDocument();
+
+    // OPFS render-cache key prefix — sha256 of the document URL (stable per
+    // document). Compute async; cache hits simply miss until it resolves.
+    this._docKey = null;
+    this._hashDocUrl(url);
 
     const opts = { scriptingEnabled: this._scriptingEnabled };
     if (password) opts.password = password;
@@ -362,6 +455,15 @@ const PdfViewerHook = {
     openDocument(url, opts)
       .then((pdfDocument) => {
         this._pdfDocument = pdfDocument;
+        // Wire the link service BEFORE the viewer: PDFFindController reads
+        // linkService.pagesCount/page, which need pdfDocument on the link
+        // service (and the viewer on it for page navigation). pdf.js's own
+        // viewer app does this in PDFViewerApplication; our hook must too
+        // (Gate 2 verify #5 — the client search path).
+        if (this._linkService) {
+          this._linkService.setViewer(this._viewer);
+          this._linkService.setDocument(pdfDocument);
+        }
         this._viewer.setDocument(pdfDocument);
         if (this._findController) this._findController.setDocument(pdfDocument);
       })
@@ -419,6 +521,7 @@ const PdfViewerHook = {
     // Re-expose on the element for sibling hooks
     this.el._pdfViewer = this._viewer;
     this.el._eventBus = this._eventBus;
+    this.el._findController = this._findController;
 
     // Re-init the format bar
     this._initFormatBar();

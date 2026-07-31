@@ -1,7 +1,7 @@
 <Layouts.workspace flash={@flash}>
   <div
     id="workspace-shell"
-    phx-hook=".KeyboardShortcuts .DownloadFile"
+    phx-hook=".KeyboardShortcuts"
     phx-keydown="keydown"
     phx-keyup="keyup"
     tabindex="-1"
@@ -9,6 +9,9 @@
     aria-hidden={@backstage_open}
     class={if(@fullscreen, do: "fullscreen-mode")}
   >
+    <%!-- LV 1.2.x phx-hook takes a single hook name — DownloadFile needs
+         its own element (it only listens for push_events). --%>
+    <div id="download-hook" phx-hook=".DownloadFile" class="hidden"></div>
     <.title_bar
       document_title={@document_title}
       dirty={Enum.any?(@documents, & &1.dirty)}
@@ -58,7 +61,7 @@
         signatures={@signatures}
         initials={@initials}
         search_query={@search_query}
-        search_results={@search_results}
+        search_results={@streams.search_results}
         search_total={@search_total}
         search_current={@search_current}
         search_match_case={@search_match_case}
@@ -68,7 +71,7 @@
 
       <main
         id="document-canvas"
-        phx-hook="PdfViewerHook SnapshotHook ReadAloudHook DocMutateHook"
+        phx-hook="WorkspaceCanvasHook"
         data-document-url={@document_url}
         data-snapshot-active={@snapshot_active}
         class="flex-1 min-w-0 relative overflow-hidden bg-canvas dark:bg-gray-900"
@@ -81,13 +84,26 @@
         >
           <.no_document_placeholder />
         </div>
+        <%!--
+          The PdfViewerHook (via WorkspaceCanvasHook) manages the DOM inside
+          these containers (pdf.js page divs + canvases). Without
+          phx-update="ignore" any LiveView patch morphs the container's
+          children away and wipes the rendered document (Gate 2 / T-058).
+        --%>
         <%= if @split_view do %>
           <div class="absolute inset-0 flex divide-x divide-chrome-border dark:divide-gray-600">
-            <div id="pdf-viewer-container-left" class="flex-1 overflow-auto"></div>
-            <div id="pdf-viewer-container-right" class="flex-1 overflow-auto"></div>
+            <div id="pdf-viewer-container-left" phx-update="ignore" class="flex-1 overflow-auto">
+            </div>
+            <div id="pdf-viewer-container-right" phx-update="ignore" class="flex-1 overflow-auto">
+            </div>
           </div>
         <% else %>
-          <div id="pdf-viewer-container" class="absolute inset-0 overflow-auto"></div>
+          <div
+            id="pdf-viewer-container"
+            phx-update="ignore"
+            class="absolute inset-0 overflow-auto"
+          >
+          </div>
         <% end %>
 
         <div
@@ -158,7 +174,7 @@
         signatures={@signatures}
         initials={@initials}
         search_query={@search_query}
-        search_results={@search_results}
+        search_results={@streams.search_results}
         search_total={@search_total}
         search_current={@search_current}
         search_match_case={@search_match_case}

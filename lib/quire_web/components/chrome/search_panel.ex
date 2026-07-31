@@ -80,18 +80,24 @@ defmodule QuireWeb.Chrome.SearchPanel do
         Searching…
       </div>
 
-      <div class="flex flex-col gap-1" role="listbox" aria-label="Search results">
+      <div
+        id="search-results"
+        phx-update="stream"
+        class="flex flex-col gap-1"
+        role="listbox"
+        aria-label="Search results"
+      >
         <button
-          :for={{result, idx} <- Enum.with_index(@results)}
+          :for={{id, result} <- @results}
+          id={id}
           type="button"
           phx-click="search_navigate"
           phx-value-page={result.page}
-          phx-value-index={idx}
           role="option"
-          aria-selected={idx == @current_result}
+          aria-selected={result.index == @current_result}
           class={[
             "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer",
-            if(idx == @current_result,
+            if(result.index == @current_result,
               do: "bg-accent/10 text-accent",
               else: "text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
             )
@@ -102,7 +108,7 @@ defmodule QuireWeb.Chrome.SearchPanel do
         </button>
       </div>
 
-      <div :if={@query == "" && @results == []} class="py-12 text-center">
+      <div :if={@query == ""} class="py-12 text-center">
         <.icon
           name="hero-magnifying-glass"
           class="size-8 text-gray-300 dark:text-gray-600 mx-auto mb-2"

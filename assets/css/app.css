@@ -3,6 +3,10 @@
 
 @import "tailwindcss" source(none);
 @import "phoenix-colocated/quire/colocated.css";
+/* pdf.js viewer chrome + page sizing (T-040): pdf.js 6.x sizes .page divs
+   via --total-scale-factor/--scale-round-* custom properties defined in
+   pdf_viewer.css — without it pages have zero height and never render. */
+@import "../../priv/static/vendor/pdfjs/pdf_viewer.css";
 @source "../css";
 @source "../js";
 @source "../../lib/quire_web";

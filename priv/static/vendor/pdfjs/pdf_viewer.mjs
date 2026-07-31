@@ -7911,7 +7911,7 @@ class PDFRenderingQueue {
 
 
 
-const DEFAULT_CACHE_SIZE = 10;
+const DEFAULT_CACHE_SIZE = 4;
 const PagesCountLimit = {
   FORCE_SCROLL_MODE_PAGE: 10000,
   FORCE_LAZY_PAGE_INIT: 5000,

@@ -78,19 +78,77 @@ defmodule GenerateFixtures do
     out
   end
 
+  # ── Chrome-backed fixtures (cjk, rtl) ──────────────────────────────────
+
+  # Resolve a Chrome binary: CHROME_EXECUTABLE env, the Playwright cache, or
+  # the system chromium. chromic_pdf reads the executable from the app env at
+  # print time, so put_env before ensure_all_started is enough even when
+  # `mix run` has already booted :quire.
+  defp chrome_path do
+    System.get_env("CHROME_EXECUTABLE") ||
+      Path.expand(
+        "~/Library/Caches/ms-playwright/chromium-1234/chrome-mac-arm64/" <>
+          "Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"
+      ) || "/usr/bin/chromium"
+  end
+
+  defp chrome_pdf(name, html) do
+    chrome = chrome_path()
+
+    unless File.exists?(chrome) do
+      raise "cannot generate #{name}: no Chrome at #{chrome}. " <>
+              "Set CHROME_EXECUTABLE or run the Playwright browser install."
+    end
+
+    Application.put_env(:chromic_pdf, :chrome_executable, chrome)
+    {:ok, _} = Application.ensure_all_started(:quire)
+    ChromicPDF.put_dynamic_name(ChromicPDF.Supervisor)
+
+    opts = [
+      discard_stderr: true,
+      print_to_pdf: %{
+        paperWidth: 8.5,
+        paperHeight: 11.0,
+        marginTop: 0.5,
+        marginBottom: 0.5,
+        marginLeft: 0.5,
+        marginRight: 0.5
+      }
+    ]
+
+    case ChromicPDF.print_to_pdf({:html, html}, opts) do
+      {:ok, base64} -> write(@pdf, name, Base.decode64!(base64))
+      err -> raise "ChromicPDF failed for #{name}: #{inspect(err)}"
+    end
+  end
+
   defp multi_page(count) do
-    cs = "BT /F1 12 Tf 72 720 Td (Page) Tj ET\n"
-    cs_obj = {6, "6 0 obj\n<< /Length #{byte_size(cs)} >>\nstream\n#{cs}endstream\nendobj\n"}
+    # Each page gets its own content stream with a "Page N" label AND the
+    # /Resources entry pointing at the font — without /Resources on the page
+    # dict, viewers report "Unknown font tag F1" and the numbers were never
+    # drawn at all. Gate 2 (pdf-4k4) depends on 500_pages.pdf having
+    # page-distinct searchable text.
+    objs =
+      Enum.flat_map(0..(count - 1), fn i ->
+        cs = "BT /F1 12 Tf 72 720 Td (Page #{i + 1}) Tj ET\n"
+        cn = 7 + i * 2
+        pn = 8 + i * 2
 
-    pages =
-      Enum.map(0..(count - 1), fn i ->
-        n = 7 + i
-
-        {n,
-         "#{n} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R >>\nendobj\n"}
+        [
+          {cn,
+           "#{cn} 0 obj\n<< /Length #{byte_size(cs)} >>\nstream\n#{cs}endstream\nendobj\n"},
+          {pn,
+           "#{pn} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]\n   /Resources << /Font << /F1 3 0 R >> >>\n   /Contents #{cn} 0 R >>\nendobj\n"}
+        ]
       end)
 
-    kids = Enum.map_join(pages, " ", fn {n, _} -> "#{n} 0 R" end)
+    # Kids must reference only the /Type /Page objects - content streams are
+    # interleaved in objs and would otherwise land in the Kids array
+    # ("Kid object is wrong type (stream)").
+    kids =
+      objs
+      |> Enum.filter(fn {_, t} -> String.contains?(t, "/Type /Page") end)
+      |> Enum.map_join(" ", fn {n, _} -> "#{n} 0 R" end)
 
     write(
       @pdf,
@@ -99,9 +157,8 @@ defmodule GenerateFixtures do
         [
           {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
           {2, "2 0 obj\n<< /Type /Pages /Kids [#{kids}] /Count #{count} >>\nendobj\n"},
-          {3, "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"},
-          cs_obj
-        ] ++ pages
+          {3, "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"}
+        ] ++ objs
       )
     )
   end
@@ -109,14 +166,34 @@ defmodule GenerateFixtures do
   defp big_image(count) do
     w = 1000
     h = 200
-    raw = :binary.copy(<<128>>, w * h)
+
+    # Deterministic pseudo-random image data (fixed seed) so PDFium's
+    # re-serialisation cannot Flate-compress the pages to nothing: the
+    # fixture must stay ~50 MB for the T-058 first-page budget on a large
+    # document (§14.1). Constant grey compressed to 178 KB, which made the
+    # fixture useless as a perf target.
+    :rand.seed(:exsss, {101, 202, 303})
+    raw = :rand.bytes(w * h)
 
     pages =
       Enum.map(0..(count - 1), fn i ->
         in_ = 6 + i * 3
         cn_ = 7 + i * 3
         pn_ = 8 + i * 3
-        cs = "BT /F1 12 Tf 72 720 Td (I#{i}) Tj ET\n"
+        # Content stream: draw the label AND the image (1000x200 device-gray
+        # mapped to a 468x200 box at 72,72). Without /Im0 Do the images were
+        # dead weight — 250 × 200 KB objects never decoded, so T-058's render
+        # budget was never actually exercised.
+        #
+        # NOTE on the cm matrix: for an image XObject the CTM maps image space
+        # to user space, and image space is a UNIT SQUARE — so the a and d
+        # entries are the TARGET WIDTH/HEIGHT in points, not scale factors.
+        # "0.468 0 0 1" (scale factors) paints a sub-pixel sliver that every
+        # renderer (pdfium, poppler, pdf.js) draws as ~1px; "468 0 0 200" is
+        # what actually paints the 468x200 box.
+        cs =
+          "BT /F1 12 Tf 72 720 Td (I#{i}) Tj ET\n" <>
+            "q 468 0 0 200 72 72 cm /Im0 Do Q\n"
 
         img_src =
           IO.iodata_to_binary([
@@ -191,9 +268,29 @@ defmodule GenerateFixtures do
     )
 
     IO.puts("  scanned_300dpi.pdf")
-    spdf("cjk.pdf", "CJK placeholder")
+
+    # cjk.pdf / rtl_arabic.pdf — Gate 2 (pdf-4k4) requires real CJK and Arabic
+    # text with embedded fonts, so the vendored pdf.js cmaps/fonts path is
+    # actually exercised. Headless Chrome embeds system-font subsets with
+    # ToUnicode CMaps (the old spdf() placeholders were Helvetica-only).
+    chrome_pdf("cjk.pdf", ~S"""
+      <html lang="zh-CN"><head><meta charset="utf-8"><style>
+        body { font-family: "Hiragino Sans GB", "Heiti SC", sans-serif; font-size: 16pt; line-height: 1.8; }
+      </style></head><body>
+        <p>简体中文测试：你好，世界。</p>
+        <p>这是一段用于验证中文渲染与文本提取的文本。</p>
+        <p>第二行文本。</p>
+      </body></html>
+    """)
     IO.puts("  cjk.pdf")
-    spdf("rtl_arabic.pdf", "RTL placeholder")
+    chrome_pdf("rtl_arabic.pdf", ~S"""
+      <html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>
+        body { font-family: "Geeza Pro", sans-serif; font-size: 16pt; line-height: 1.8; }
+      </style></head><body>
+        <p>السلام عليكم، هذا نص عربي للاختبار.</p>
+        <p>مرحبا بالعالم — سطر ثانٍ.</p>
+      </body></html>
+    """)
     IO.puts("  rtl_arabic.pdf")
 
     # acroform.pdf
@@ -281,20 +378,24 @@ defmodule GenerateFixtures do
       end)
       |> List.flatten()
 
-    # kids inline below
+    # kids inline below. Re-serialised through PDFium (normalize) so the
+    # app ingest pipeline (Quire.Pdf.open) accepts it — Gate 2 (pdf-4k4)
+    # opens rotated_pages.pdf in the real viewer.
     write(
       @pdf,
       "rotated_pages.pdf",
-      assemble(
-        [
-          {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
-          {2,
-           "2 0 obj\n<< /Type /Pages /Kids [#{Enum.map_join(rots, " ", fn r ->
-             n = 7 + div(r, 90) * 2
-             "#{n} 0 R"
-           end)}] /Count 4 >>\nendobj\n"},
-          {3, "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"}
-        ] ++ rpages
+      normalize(
+        assemble(
+          [
+            {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
+            {2,
+             "2 0 obj\n<< /Type /Pages /Kids [#{Enum.map_join(rots, " ", fn r ->
+               n = 7 + div(r, 90) * 2
+               "#{n} 0 R"
+             end)}] /Count 4 >>\nendobj\n"},
+            {3, "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"}
+          ] ++ rpages
+        )
       )
     )
     |> then(fn _ -> IO.puts("  rotated_pages.pdf") end)
@@ -302,26 +403,43 @@ defmodule GenerateFixtures do
     # cropped_nonzero_origin.pdf
     ct = "BT /F1 12 Tf 72 720 Td (Cropped) Tj ET\n"
 
+    # Normalized through PDFium so ingest accepts it (Gate 2 opens it in
+    # the viewer and clicks must map to CropBox-relative user space).
     write(
       @pdf,
       "cropped_nonzero_origin.pdf",
-      assemble([
-        {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
-        {2, "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"},
-        {3,
-         "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /CropBox [72 72 540 720]\n   /Resources << /Font << /F1 4 0 R >> >>\n   /Contents 5 0 R >>\nendobj\n"},
-        {4, "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"},
-        {5, "5 0 obj\n<< /Length #{byte_size(ct)} >>\nstream\n#{ct}endstream\nendobj\n"}
-      ])
+      normalize(
+        assemble([
+          {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
+          {2, "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"},
+          {3,
+           "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /CropBox [72 72 540 720]\n   /Resources << /Font << /F1 4 0 R >> >>\n   /Contents 5 0 R >>\nendobj\n"},
+          {4, "4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"},
+          {5, "5 0 obj\n<< /Length #{byte_size(ct)} >>\nstream\n#{ct}endstream\nendobj\n"}
+        ])
+      )
     )
     |> then(fn _ -> IO.puts("  cropped_nonzero_origin.pdf") end)
 
-    # 500_pages.pdf
+    # 500_pages.pdf — Gate 2 (pdf-4k4) opens it through the app ingest
+    # pipeline (Quire.Pdf.open), which rejects hand-assembled xref tables.
+    # Re-serialise through PDFium so ingest + document_page_text work.
     multi_page(500)
+    write(
+      @pdf,
+      "500_pages.pdf",
+      normalize(File.read!(Path.join(@pdf, "500_pages.pdf")))
+    )
     IO.puts("  five_hundred_pages.pdf")
 
-    # 50mb_images.pdf — 250 images at 1000x200 device-gray (~50 MB)
+    # 50mb_images.pdf — 250 images at 1000x200 device-gray (~50 MB).
+    # Normalized so ingest accepts it (T-058 measures first-page time on it).
     big_image(250)
+    write(
+      @pdf,
+      "50mb_images.pdf",
+      normalize(File.read!(Path.join(@pdf, "50mb_images.pdf")))
+    )
     IO.puts("  50mb_images.pdf")
 
     # corrupt_xref.pdf — build with deliberately wrong xref offset for object 5
@@ -429,12 +547,14 @@ defmodule GenerateFixtures do
     write(
       @pdf,
       "mixed_page_sizes.pdf",
-      assemble(
-        [
-          {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
-          {2, "2 0 obj\n<< /Type /Pages /Kids [#{mpage_ids}] /Count 4 >>\nendobj\n"},
-          {3, "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"}
-        ] ++ mpages
+      normalize(
+        assemble(
+          [
+            {1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"},
+            {2, "2 0 obj\n<< /Type /Pages /Kids [#{mpage_ids}] /Count 4 >>\nendobj\n"},
+            {3, "3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n"}
+          ] ++ mpages
+        )
       )
     )
     |> then(fn _ -> IO.puts("  mixed_page_sizes.pdf") end)

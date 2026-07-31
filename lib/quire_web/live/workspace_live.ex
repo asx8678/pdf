@@ -112,8 +112,9 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:signing_date_format, "%Y-%m-%d")
       |> assign(:signer_name, nil)
       |> assign(:search_query, "")
-      |> assign(:search_results, [])
+      |> assign(:search_pages, [])
       |> assign(:search_total, 0)
+      |> stream(:search_results, [], reset: true)
       |> assign(:search_current, 0)
       |> assign(:search_match_case, false)
       |> assign(:search_whole_word, false)
@@ -1267,22 +1268,36 @@ defmodule QuireWeb.WorkspaceLive do
   end
 
   # The viewer hook's answer to "find": a flat list of matches across
-  # pages, each %{"page" => n, "text" => snippet}.
+  # pages, each %{"page" => n, "text" => snippet}. Rendered through a
+  # LiveView stream (§14.2 "phx-update=stream for all long lists") so only
+  # changed rows cross the wire; search_pages (small integer list) keeps
+  # next/prev navigation indexable.
   def handle_event("search_results", %{"results" => results, "total" => total}, socket) do
-    results = Enum.map(results, &%{page: &1["page"], text: &1["text"]})
+    results =
+      results
+      |> Enum.with_index()
+      |> Enum.map(fn {r, i} ->
+        %{id: "sr-#{i}", page: r["page"], text: r["text"], index: i}
+      end)
 
     {:noreply,
      socket
-     |> assign(:search_results, results)
+     |> stream(:search_results, results, reset: true)
+     |> assign(:search_pages, Enum.map(results, & &1.page))
      |> assign(:search_total, total)
      |> assign(:search_current, 0)
      |> assign(:searching, false)}
   end
 
-  def handle_event("search_navigate", %{"page" => page, "index" => index}, socket) do
-    with {page, _} <- Integer.parse(to_string(page)),
-         {index, _} <- Integer.parse(to_string(index)) do
+  def handle_event("search_navigate", %{"page" => page}, socket) do
+    with {page, _} <- Integer.parse(to_string(page)) do
       page = page |> max(1) |> min(socket.assigns.total_pages)
+
+      index =
+        case Enum.find_index(socket.assigns.search_pages, &(&1 == page)) do
+          nil -> 0
+          i -> i
+        end
 
       {:noreply,
        socket
@@ -2038,7 +2053,8 @@ defmodule QuireWeb.WorkspaceLive do
   defp run_search(socket) do
     if socket.assigns.search_query == "" do
       socket
-      |> assign(:search_results, [])
+      |> stream(:search_results, [], reset: true)
+      |> assign(:search_pages, [])
       |> assign(:search_total, 0)
       |> assign(:search_current, 0)
       |> assign(:searching, false)
@@ -2056,15 +2072,14 @@ defmodule QuireWeb.WorkspaceLive do
   # Moves the current result by `delta`, wrapping at both ends, and
   # scrolls the viewer to the newly selected match's page.
   defp step_search(socket, delta) do
-    results = socket.assigns.search_results
+    pages = socket.assigns.search_pages
 
-    if results == [] do
+    if pages == [] do
       socket
     else
-      index = rem(socket.assigns.search_current + delta + length(results), length(results))
+      index = rem(socket.assigns.search_current + delta + length(pages), length(pages))
 
-      page =
-        results |> Enum.at(index) |> Map.get(:page) |> max(1) |> min(socket.assigns.total_pages)
+      page = Enum.at(pages, index) |> max(1) |> min(socket.assigns.total_pages)
 
       socket
       |> assign(:search_current, index)

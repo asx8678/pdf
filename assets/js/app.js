@@ -24,6 +24,7 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/quire"
 import PdfViewerHook from "./pdf_viewer_hook.js"
+import WorkspaceCanvasHook from "./workspace_canvas_hook.js"
 import DocMutateHook from "./doc_mutate_hook.js"
 import AnnotEditHook from "./hooks/annot_edit_hook.js"
 import { SignatureDraw, SignatureDrawClear, SignatureDrawSave, SignatureTypeSave, SignatureUploadSave } from "./hooks/signature_hooks.js"
@@ -37,7 +38,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, PdfViewerHook, SnapshotHook, ReadAloudHook, DocMutateHook, AnnotEditHook, SignatureDraw, SignatureDrawClear, SignatureDrawSave, SignatureTypeSave, SignatureUploadSave, ImportFile, ClipboardPdf, ClipboardPasteTarget},
+  hooks: {...colocatedHooks, WorkspaceCanvasHook, PdfViewerHook, SnapshotHook, ReadAloudHook, DocMutateHook, AnnotEditHook, SignatureDraw, SignatureDrawClear, SignatureDrawSave, SignatureTypeSave, SignatureUploadSave, ImportFile, ClipboardPdf, ClipboardPasteTarget},
 })
 
 // Show progress bar on live navigation and form submits

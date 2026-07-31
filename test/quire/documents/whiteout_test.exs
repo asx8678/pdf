@@ -21,8 +21,6 @@ defmodule Quire.Documents.WhiteoutTest do
     end
 
     test "no redaction kind is registered alongside whiteout" do
-      kind_values = Annotation.__info__(:struct_fields)
-      # The kind_values are defined in @kind_values used for validate_inclusion
       # Direct check: a changeset with kind "redaction" should be invalid
       changeset =
         Annotation.changeset(%Annotation{}, %{

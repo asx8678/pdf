@@ -282,7 +282,7 @@ defmodule Quire.EngineTest do
   describe "Quire.Engine registry" do
     test "registered_engines lists behaviour modules" do
       engines = Quire.Engine.registered_engines()
-      assert length(engines) == 7
+      assert length(engines) == 8
       assert Enum.any?(engines, fn {_desc, mod} -> mod == Quire.Render end)
       assert Enum.any?(engines, fn {_desc, mod} -> mod == Quire.Pades end)
     end
