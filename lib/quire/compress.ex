@@ -206,15 +206,11 @@ defmodule Quire.Compress do
       Enum.reduce_while(grouped, :ok, fn {page, imgs}, :ok ->
         xobjects = page_xobjects_for(page_xobjects, page)
 
-        case pair_images(xobjects, imgs) do
-          {:ok, pairs} ->
-            case replace_all(q, pairs) do
-              :ok -> {:cont, :ok}
-              {:error, reason} -> {:halt, {:error, reason}}
-            end
+        {:ok, pairs} = pair_images(xobjects, imgs)
 
-          {:error, reason} ->
-            {:halt, {:error, reason}}
+        case replace_all(q, pairs) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
         end
       end)
     end

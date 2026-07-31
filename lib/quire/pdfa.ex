@@ -55,6 +55,23 @@ defmodule Quire.PdfA do
     end
   end
 
+  @doc false
+  def check do
+    with {:ok, bytes} <-
+           ExPdfium.new()
+           |> then(fn {:ok, doc} -> ExPdfium.add_page(doc, {595.0, 842.0}) end)
+           |> then(fn {:ok, doc} -> ExPdfium.save_to_bytes(doc) end) do
+      case validate(bytes) do
+        {:ok, _} -> :ok
+        {:error, reason} -> {:error, inspect(reason)}
+      end
+    else
+      {:error, reason} -> {:error, inspect(reason)}
+    end
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   @doc """
   Runs the structural conformance report without modifying the document.
 

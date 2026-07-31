@@ -3878,7 +3878,6 @@ defmodule QuireWeb.WorkspaceLive do
   # ── Merge wizard (T-081) ──────────────────────────────────────────────
 
   @merge_max_files 12
-  @merge_max_bytes 200_000_000
 
   @impl true
   def handle_event("open_merge_wizard", _params, socket) do

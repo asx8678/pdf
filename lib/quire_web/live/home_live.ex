@@ -420,6 +420,18 @@ defmodule QuireWeb.HomeLive do
     end
   end
 
+  def handle_event("cancel_password", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_password_prompt, false)
+     |> assign(:pending_bytes, nil)
+     |> assign(:pending_title, nil)}
+  end
+
+  def handle_event("clear_recent", _params, socket) do
+    {:noreply, assign(socket, :recent_docs, [])}
+  end
+
   # ── Batch (T-087) ──────────────────────────────────────────────────────
 
   @impl true
@@ -516,22 +528,12 @@ defmodule QuireWeb.HomeLive do
         |> assign(:batch_running, false)
         |> assign(:batch_error, "Choose at least one file to process")
       else
-        case Quire.Batch.run_recipe(
-               current_user_id(socket),
-               socket.assigns.batch_name,
-               steps,
-               files
-             ) do
-          {:ok, count} ->
-            socket
-            |> assign(:batch_running, false)
-            |> put_flash(:info, "Queued #{count} batch job(s) on the batch queue")
+        {:ok, count} =
+          Quire.Batch.run_recipe(current_user_id(socket), socket.assigns.batch_name, steps, files)
 
-          {:error, reason} ->
-            socket
-            |> assign(:batch_running, false)
-            |> assign(:batch_error, "Batch failed: #{inspect(reason)}")
-        end
+        socket
+        |> assign(:batch_running, false)
+        |> put_flash(:info, "Queued #{count} batch job(s) on the batch queue")
       end
     end
   end
@@ -543,18 +545,6 @@ defmodule QuireWeb.HomeLive do
       nil -> id
       step -> step.label
     end
-  end
-
-  def handle_event("cancel_password", _params, socket) do
-    {:noreply,
-     socket
-     |> assign(:show_password_prompt, false)
-     |> assign(:pending_bytes, nil)
-     |> assign(:pending_title, nil)}
-  end
-
-  def handle_event("clear_recent", _params, socket) do
-    {:noreply, assign(socket, :recent_docs, [])}
   end
 
   # ── Components ────────────────────────────────────────────────────────────
