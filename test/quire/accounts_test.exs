@@ -548,4 +548,40 @@ defmodule Quire.AccountsTest do
 
     defp refresh(user), do: Quire.Repo.reload!(user)
   end
+
+  describe "saved initials" do
+    test "save_initials/2 stores in the initials slot only" do
+      user = user_fixture()
+
+      assert {:ok, saved} =
+               Accounts.save_initials(user.id, %{
+                 "label" => "AB",
+                 "type" => "type",
+                 "data" => Jason.encode!(%{text: "AB", font: "Alex Brush", size: 48})
+               })
+
+      assert saved["label"] == "AB"
+      assert Accounts.list_saved_initials(user.id) == [saved]
+      # Independent of the signatures slot
+      assert Accounts.list_saved_signatures(user.id) == []
+    end
+
+    test "delete_saved_initials/2 removes only the target entry" do
+      user = user_fixture()
+      {:ok, a} = Accounts.save_initials(user.id, %{"label" => "A", "type" => "type", "data" => "{}"})
+      {:ok, b} = Accounts.save_initials(user.id, %{"label" => "B", "type" => "type", "data" => "{}"})
+
+      assert {:ok, _} = Accounts.delete_saved_initials(user.id, a["id"])
+      assert Accounts.list_saved_initials(user.id) == [b]
+    end
+
+    test "update_initials_label/3 renames the entry" do
+      user = user_fixture()
+      {:ok, saved} = Accounts.save_initials(user.id, %{"label" => "Old", "type" => "type", "data" => "{}"})
+
+      assert {:ok, _} = Accounts.update_initials_label(user.id, saved["id"], "New")
+      [updated] = Accounts.list_saved_initials(user.id)
+      assert updated["label"] == "New"
+    end
+  end
 end

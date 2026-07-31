@@ -48,6 +48,7 @@ defmodule QuireWeb.WorkspaceLive do
     %{id: :bookmarks, icon: "hero-bookmark", label: "Bookmarks"},
     %{id: :layers, icon: "hero-rectangle-stack", label: "Layers"},
     %{id: :signatures, icon: "hero-pencil", label: "Signatures"},
+    %{id: :initials, icon: "hero-pencil-square", label: "Initials"},
     %{id: :comments, icon: "hero-chat-bubble-left-right", label: "Comments"},
     %{id: :confidence, icon: "hero-chart-bar", label: "OCR Confidence"}
   ]
@@ -65,6 +66,7 @@ defmodule QuireWeb.WorkspaceLive do
     :search,
     :attachments,
     :signatures,
+    :initials,
     :comments,
     :confidence,
     :translate
@@ -106,6 +108,9 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:layers, [])
       |> assign(:attachments, [])
       |> assign(:signatures, [])
+      |> assign(:initials, [])
+      |> assign(:signing_date_format, "%Y-%m-%d")
+      |> assign(:signer_name, nil)
       |> assign(:search_query, "")
       |> assign(:search_results, [])
       |> assign(:search_total, 0)
@@ -183,6 +188,7 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_results, [])
       |> load_user_settings()
       |> load_saved_signatures()
+      |> load_saved_initials()
       |> allow_upload(:image,
         accept: ~w(image/png image/jpeg image/webp),
         max_entries: 1,
@@ -1717,6 +1723,77 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
+  # ── Initials capture handlers (T-116) ───────────────────────────────────
+
+  def handle_event("save_initials", params, socket) do
+    user_id = socket.assigns.current_scope.user.id
+
+    params =
+      if is_binary(params["data"]),
+        do: Map.put(params, "data", Jason.decode!(params["data"])),
+        else: params
+
+    case Quire.Accounts.save_initials(user_id, params) do
+      {:ok, _initials} ->
+        {:noreply, load_saved_initials(socket) |> put_flash(:info, "Initials saved")}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Failed to save initials")}
+    end
+  end
+
+  def handle_event("delete_initials", %{"id" => initials_id}, socket) do
+    user_id = socket.assigns.current_scope.user.id
+    Quire.Accounts.delete_saved_initials(user_id, initials_id)
+    {:noreply, load_saved_initials(socket)}
+  end
+
+  def handle_event("initials_label_updated", %{"id" => initials_id, "label" => label}, socket) do
+    user_id = socket.assigns.current_scope.user.id
+    Quire.Accounts.update_initials_label(user_id, initials_id, label)
+    {:noreply, load_saved_initials(socket)}
+  end
+
+  def handle_event("initials_use", %{"id" => initials_id}, socket) do
+    user_id = socket.assigns.current_scope.user.id
+
+    case Enum.find(Quire.Accounts.list_saved_initials(user_id), &(&1["id"] == initials_id)) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Initials not found")}
+
+      initials ->
+        {:noreply,
+         push_event(socket, "enable_signature_placement", %{signature: initials, kind: "initials"})}
+    end
+  end
+
+  # ── Text-stamp handlers (T-116): signer name + signing date ──────────────
+
+  def handle_event("name_stamp_use", _params, socket) do
+    name = signer_name(socket)
+    {:noreply, push_event(socket, "enable_name_stamp_placement", %{text: name})}
+  end
+
+  def handle_event("date_stamp_use", _params, socket) do
+    format = socket.assigns.signing_date_format || "%Y-%m-%d"
+
+    text =
+      try do
+        Calendar.strftime(DateTime.utc_now(), format)
+      rescue
+        _ -> Calendar.strftime(DateTime.utc_now(), "%Y-%m-%d")
+      end
+
+    {:noreply, push_event(socket, "enable_date_stamp_placement", %{text: text})}
+  end
+
+  defp signer_name(socket) do
+    case socket.assigns do
+      %{signer_name: name} when is_binary(name) and name != "" -> name
+      _ -> socket.assigns.current_scope.user.email
+    end
+  end
+
   @doc """
   Handles a committed signature placement (T-115): the client rasterised the
   signature to PNG at the chosen box size and reports the rect in PDF points.
@@ -1744,7 +1821,11 @@ defmodule QuireWeb.WorkspaceLive do
          {:ok, _} <-
            Editing.apply(session_pid, %{
              kind: "signature.place",
-             data: %{page_index: page_index, rect: rect}
+             data: %{
+               page_index: page_index,
+               rect: rect,
+               kind: Map.get(params, "kind", "signature")
+             }
            }),
          {:ok, %{revision_id: rev_id}} <-
            Editing.flush(session_pid, embedded, "Signature placed") do
@@ -1799,6 +1880,12 @@ defmodule QuireWeb.WorkspaceLive do
     assign(socket, :signatures, signatures)
   end
 
+  defp load_saved_initials(socket) do
+    user_id = socket.assigns.current_scope.user.id
+    initials = Quire.Accounts.list_saved_initials(user_id)
+    assign(socket, :initials, initials)
+  end
+
   defp load_user_settings(socket) do
     user_id = socket.assigns.current_scope.user.id
 
@@ -1809,6 +1896,8 @@ defmodule QuireWeb.WorkspaceLive do
       socket
       |> assign(:whiteout_warning_dismissed, dismissed || false)
       |> assign(:scripting_enabled, settings.scripting_enabled || false)
+      |> assign(:signing_date_format, settings.signing_date_format || "%Y-%m-%d")
+      |> assign(:signer_name, settings.signer_name)
 
     push_event(socket, "set_scripting", %{enabled: settings.scripting_enabled || false})
   end
@@ -2517,6 +2606,7 @@ defmodule QuireWeb.WorkspaceLive do
   attr :layers, :list, default: []
   attr :attachments, :list, default: []
   attr :signatures, :list, default: []
+  attr :initials, :list, default: []
   attr :search_query, :string, default: ""
   attr :search_results, :list, default: []
   attr :search_total, :integer, default: 0
@@ -2559,7 +2649,9 @@ defmodule QuireWeb.WorkspaceLive do
         <% @panel == :attachments -> %>
           <.attachments_panel attachments={@attachments} />
         <% @panel == :signatures -> %>
-          <.signatures_panel signatures={@signatures} />
+          <.signatures_panel slot="signature" signatures={@signatures} />
+        <% @panel == :initials -> %>
+          <.signatures_panel slot="initials" signatures={@initials} />
         <% @panel == :confidence -> %>
           <.ocr_confidence_panel />
         <% @panel == :search -> %>
@@ -2637,6 +2729,7 @@ defmodule QuireWeb.WorkspaceLive do
   defp panel_title(:search), do: "Search"
   defp panel_title(:attachments), do: "Attachments"
   defp panel_title(:signatures), do: "Signatures"
+  defp panel_title(:initials), do: "Initials"
   defp panel_title(:comments), do: "Comments"
   defp panel_title(:translate), do: "Translate"
 

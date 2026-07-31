@@ -530,6 +530,80 @@ defmodule Quire.Accounts do
     update_user_settings(user_id, %{stamps: updated})
   end
 
+  ## Saved initials
+
+  @doc """
+  Returns saved initials for the given `user_id`.
+
+  Initials are stored the same way as signatures — a JSON map keyed by id
+  under the `initials` key in user_settings (Ecto's `:map` type cannot hold
+  JSON arrays). Each entry has:
+    `id` — UUID for identification
+    `label` — user-given name
+    `type` — "draw" | "type" | "upload"
+    `data` — mode-specific payload (curve data, text+font, or image bytes)
+    `created_at` — ISO8601 timestamp
+
+  Returns the initials as a list, newest first.
+  """
+  def list_saved_initials(user_id) do
+    settings = get_user_settings(user_id)
+
+    (settings.initials || %{})
+    |> Map.values()
+    |> Enum.sort_by(& &1["created_at"], :desc)
+  end
+
+  @doc """
+  Saves new initials for the given `user_id`.
+
+  Returns `{:ok, initials}` or `{:error, reason}`.
+  """
+  def save_initials(user_id, attrs) do
+    current = list_saved_initials(user_id)
+
+    initials = %{
+      "id" => Ecto.UUID.generate(),
+      "label" => attrs["label"] || attrs[:label] || "Initials",
+      "type" => attrs["type"] || attrs[:type],
+      "data" => attrs["data"] || attrs[:data],
+      "created_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    initials_map = Map.put(Map.new(current, &{&1["id"], &1}), initials["id"], initials)
+
+    case update_user_settings(user_id, %{initials: initials_map}) do
+      {:ok, _setting} -> {:ok, initials}
+      error -> error
+    end
+  end
+
+  @doc """
+  Deletes saved initials by `id` for the given `user_id`.
+  """
+  def delete_saved_initials(user_id, initials_id) do
+    current = list_saved_initials(user_id)
+    initials_map = Map.delete(Map.new(current, &{&1["id"], &1}), initials_id)
+    update_user_settings(user_id, %{initials: initials_map})
+  end
+
+  @doc """
+  Updates saved initials' label for the given `user_id`.
+  """
+  def update_initials_label(user_id, initials_id, new_label) do
+    current = list_saved_initials(user_id)
+
+    updated =
+      current
+      |> Enum.map(fn
+        %{"id" => ^initials_id} = initials -> Map.put(initials, "label", new_label)
+        initials -> initials
+      end)
+      |> Map.new(&{&1["id"], &1})
+
+    update_user_settings(user_id, %{initials: updated})
+  end
+
   ## Token helper
 
   defp update_user_and_delete_all_tokens(changeset) do

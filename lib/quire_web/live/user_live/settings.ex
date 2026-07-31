@@ -169,6 +169,35 @@ defmodule QuireWeb.UserLive.Settings do
               ></span>
             </button>
           </div>
+
+          <div class="flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div>
+              <p class="text-sm font-medium text-gray-700 dark:text-gray-200">Signing date format</p>
+              <p class="text-xs text-gray-500 mt-1">Used when placing a signing-date stamp (T-116)</p>
+            </div>
+            <select
+              name="format"
+              aria-label="Signing date format"
+              phx-change="update_signing_date_format"
+              class="px-2 py-1.5 text-xs border border-chrome-border dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200"
+            >
+              <option value="%Y-%m-%d" selected={@signing_date_format == "%Y-%m-%d"}>
+                2026-07-31 (ISO)
+              </option>
+              <option value="%d %b %Y" selected={@signing_date_format == "%d %b %Y"}>
+                31 Jul 2026
+              </option>
+              <option value="%B %d, %Y" selected={@signing_date_format == "%B %d, %Y"}>
+                July 31, 2026
+              </option>
+              <option value="%d/%m/%Y" selected={@signing_date_format == "%d/%m/%Y"}>
+                31/07/2026
+              </option>
+              <option value="%m/%d/%Y" selected={@signing_date_format == "%m/%d/%Y"}>
+                07/31/2026
+              </option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -679,6 +708,13 @@ defmodule QuireWeb.UserLive.Settings do
           setting -> setting.highlight_fields
         end
       )
+      |> assign(
+        :signing_date_format,
+        case Quire.Repo.get_by(Quire.Accounts.UserSetting, user_id: user.id) do
+          nil -> "%Y-%m-%d"
+          setting -> setting.signing_date_format || "%Y-%m-%d"
+        end
+      )
       |> assign(:engine_check, nil)
 
     self = self()
@@ -843,6 +879,19 @@ defmodule QuireWeb.UserLive.Settings do
     )
 
     {:noreply, assign(socket, :highlight_fields, new_value)}
+  end
+
+  def handle_event("update_signing_date_format", %{"format" => format}, socket) do
+    user = socket.assigns.current_scope.user
+
+    Quire.Repo.insert_all(
+      Quire.Accounts.UserSetting,
+      [%{user_id: user.id, signing_date_format: format}],
+      on_conflict: [set: [signing_date_format: format]],
+      conflict_target: :user_id
+    )
+
+    {:noreply, assign(socket, :signing_date_format, format)}
   end
 
   # ── Tessdata helpers ─────────────────────────────────────────────────

@@ -18,9 +18,12 @@ defmodule Quire.Accounts.UserSetting do
     field :ruler_visible, :boolean, default: true
     field :grid_visible, :boolean, default: false
 
-    field :qat_items, :map
-    field :signatures, :map
-    field :stamps, :map
+    field :qat_items, :map, default: %{}
+    field :signatures, :map, default: %{}
+    field :stamps, :map, default: %{}
+    field :initials, :map, default: %{}
+    field :signing_date_format, :string, default: "%Y-%m-%d"
+    field :signer_name, :string
 
     field :recent_limit, :integer, default: 20
     field :ocr_default_lang, :string, default: "eng"
@@ -49,6 +52,9 @@ defmodule Quire.Accounts.UserSetting do
       :qat_items,
       :signatures,
       :stamps,
+      :initials,
+      :signing_date_format,
+      :signer_name,
       :recent_limit,
       :ocr_default_lang,
       :ocr_auto_deskew,

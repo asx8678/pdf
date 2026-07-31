@@ -118,12 +118,32 @@ const PdfViewerHook = {
 
     // Signature placement mode (T-115): the server dispatched a saved
     // signature; clicking the page drops a movable/resizable box.
-    this.handleEvent("enable_signature_placement", ({ signature }) => {
-      this._enableSignaturePlacement(signature);
+    this.handleEvent("enable_signature_placement", ({ signature, kind }) => {
+      this._enableSignaturePlacement({ signature, kind: kind || "signature" });
+    });
+
+    // Text-stamp placement (T-116): signer's name and signing date are
+    // drawn as text directly by the client — no saved slot involved.
+    this.handleEvent("enable_name_stamp_placement", ({ text }) => {
+      this._enableSignaturePlacement({ text, kind: "name" });
+    });
+
+    this.handleEvent("enable_date_stamp_placement", ({ text }) => {
+      this._enableSignaturePlacement({ text, kind: "date" });
     });
 
     this.handleEvent("signature_placement_failed", () => {
       this._disableSignaturePlacement();
+    });
+
+    // Form-field detection preview (T-125): server drew detected boxes
+    // over the scanned form; accept/discard clears them.
+    this.handleEvent("form_detection_preview", ({ fields }) => {
+      this._showFormDetectionOverlay(fields);
+    });
+
+    this.handleEvent("form_detection_clear", () => {
+      this._clearFormDetectionOverlay();
     });
 
     // Toggle annotation editor mode (FreeText, etc.)
@@ -260,6 +280,9 @@ const PdfViewerHook = {
 
     this._eventBus.on("scalechanging", ({ scale }) => {
       this.pushEvent("zoom_changed", { zoom: Math.round(scale * 100) });
+      // Re-render any form-detection preview overlays (page views are
+      // recreated on scale change).
+      if (this._formDetectFields) this._showFormDetectionOverlay(this._formDetectFields);
     });
 
     // FindState: 0=FOUND, 1=NOT_FOUND — the search has settled, so
@@ -774,11 +797,64 @@ const PdfViewerHook = {
     }
   },
 
+  // ── Form-field detection preview (T-125) ───────────────────────────────
+
+  /**
+   * Draw dashed rectangles over detected form fields.
+   *
+   * Server sends rects in PDF user space (points, y-up, crop-origin
+   * included); pdf.js viewports convert them straight to CSS pixels via
+   * `convertToViewportPoint`, which already applies rotation + scale.
+   */
+  _showFormDetectionOverlay(fields) {
+    this._clearFormDetectionOverlay();
+    if (!this._viewer || !fields || !fields.length) return;
+
+    this._formDetectFields = fields;
+    const pages = this._viewer._pages;
+    if (!pages) return;
+
+    for (const pv of pages) {
+      if (!pv || !pv.div || !pv.viewport) continue;
+      const pageIndex = pv.id - 1;
+      const pageFields = fields.filter((f) => f.page_index === pageIndex);
+      if (!pageFields.length) continue;
+
+      const vp = pv.viewport;
+      for (const f of pageFields) {
+        const [x0, y0] = vp.convertToViewportPoint(f.rect[0], f.rect[1]);
+        const [x1, y1] = vp.convertToViewportPoint(f.rect[2], f.rect[3]);
+        const el = document.createElement("div");
+        el.className = "quire-form-detect-overlay";
+        el.dataset.kind = f.kind || "text";
+        el.style.left = `${Math.min(x0, x1)}px`;
+        el.style.top = `${Math.min(y0, y1)}px`;
+        el.style.width = `${Math.abs(x1 - x0)}px`;
+        el.style.height = `${Math.abs(y1 - y0)}px`;
+        pv.div.appendChild(el);
+      }
+    }
+  },
+
+  /** Remove all detected-form-field overlays (T-125). */
+  _clearFormDetectionOverlay() {
+    this._formDetectFields = null;
+    if (!this._viewer) return;
+    const pages = this._viewer._pages;
+    if (!pages) return;
+    for (const pv of pages) {
+      if (!pv || !pv.div) continue;
+      pv.div.querySelectorAll(".quire-form-detect-overlay").forEach((el) => el.remove());
+    }
+  },
+
   // ── Signature placement (T-115) ────────────────────────────────────────
 
   /** Enter placement mode: click a page to drop a resizable/movable box. */
-  _enableSignaturePlacement(signature) {
-    this._sigPlacementSignature = signature || null;
+  _enableSignaturePlacement({ signature = null, text = null, kind = "signature" } = {}) {
+    this._sigPlacementSignature = signature;
+    this._sigPlacementText = text;
+    this._sigPlacementKind = kind;
     this._sigPlacementEnabled = true;
     this._bindSignaturePlaceClick();
     this._bindSignaturePlaceKeys();
@@ -793,6 +869,8 @@ const PdfViewerHook = {
     this._unbindSignaturePlaceKeys();
     this._removeSignatureOverlay();
     this._sigPlacementSignature = null;
+    this._sigPlacementText = null;
+    this._sigPlacementKind = null;
     const hint = this.el.querySelector("#signature-placement-hint");
     if (hint) hint.classList.add("hidden");
   },
@@ -866,6 +944,11 @@ const PdfViewerHook = {
 
   /** Best-guess aspect ratio (width/height) for the default box size. */
   _signatureAspectRatio() {
+    // Text stamps (signer name / date): width driven by text length
+    if (this._sigPlacementKind === "name" || this._sigPlacementKind === "date") {
+      const len = String(this._sigPlacementText || "").length;
+      return Math.max(1.5, Math.min(10, len * 0.5));
+    }
     const sig = this._sigPlacementSignature;
     if (!sig) return 3;
     let data = {};
@@ -1055,16 +1138,23 @@ const PdfViewerHook = {
       return;
     }
 
+    const kind = this._sigPlacementKind || "signature";
     this._disableSignaturePlacement();
     this.pushEvent("signature_placed", {
       page_index: state.page_index,
       rect: [x0, y0, x1, y1],
       png: png.split(",")[1] || png,
+      kind,
     });
   },
 
   /** Draw the saved signature onto a fresh canvas at the target size. */
   async _rasterizeSignature(widthPdf, heightPdf) {
+    // Text stamps (T-116): signer name / signing date drawn from text
+    if (this._sigPlacementKind === "name" || this._sigPlacementKind === "date") {
+      return this._rasterizeTextStamp(widthPdf, heightPdf, this._sigPlacementText || "");
+    }
+
     const sig = this._sigPlacementSignature;
     if (!sig) return null;
 
@@ -1093,6 +1183,44 @@ const PdfViewerHook = {
       const ok = await this._drawSignatureImage(ctx, data, w, h);
       if (!ok) return null;
     }
+
+    return canvas.toDataURL("image/png");
+  },
+
+  /**
+   * Rasterise a text stamp (signer name / signing date) onto a transparent
+   * canvas at the target size. Text is centered and shrink-fitted so it
+   * never overflows the box — same fit loop as `_drawSignatureText` but
+   * with a plain sans-serif face (stamps are not script signatures).
+   */
+  _rasterizeTextStamp(widthPdf, heightPdf, text) {
+    if (!text) return null;
+
+    const scale = 2;
+    const w = Math.max(1, Math.round(widthPdf * scale));
+    const h = Math.max(1, Math.round(heightPdf * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, w, h);
+
+    ctx.fillStyle = "#000";
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+
+    let size = Math.max(12, h * 0.5);
+    const draw = (s) => {
+      ctx.font = `${s}px Helvetica, Arial, sans-serif`;
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillText(text, w / 2, h / 2);
+      return ctx.measureText(text).width <= w * 0.96;
+    };
+
+    while (size > 6 && !draw(size)) {
+      size *= 0.9;
+    }
+    draw(size);
 
     return canvas.toDataURL("image/png");
   },

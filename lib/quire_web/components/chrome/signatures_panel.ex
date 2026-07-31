@@ -29,12 +29,37 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
 
   @doc """
   Renders the full signatures panel content.
+
+  `slot` selects which saved-slot the panel manages: `"signature"` (default)
+  or `"initials"` (T-116). Both share the same draw/type/upload capture UI;
+  only the storage key, event names and copy differ.
   """
+  attr :slot, :string, default: "signature"
   attr :signatures, :list, default: []
 
   def signatures_panel(assigns) do
+    slot = assigns.slot
+    save_event = if slot == "initials", do: "save_initials", else: "save_signature"
+    use_event = if slot == "initials", do: "initials_use", else: "signature_use"
+    delete_event = if slot == "initials", do: "delete_initials", else: "delete_signature"
+    saved_heading = if slot == "initials", do: "Saved initials", else: "Saved signatures"
+    saved_empty = if slot == "initials", do: "No saved initials yet", else: "No saved signatures yet"
+
+    assigns =
+      assign(assigns,
+        save_event: save_event,
+        use_event: use_event,
+        delete_event: delete_event,
+        saved_heading: saved_heading,
+        saved_empty: saved_empty
+      )
+
     ~H"""
-    <div id="signatures-panel" class="flex-1 flex flex-col min-h-0">
+    <div
+      id={"#{@slot}-panel"}
+      data-slot={@slot}
+      class="flex-1 flex flex-col min-h-0"
+    >
       <%!-- Capture toolbar — tabs for each mode --%>
       <div
         class="flex border-b border-chrome-border dark:border-gray-600"
@@ -123,6 +148,7 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
             type="button"
             id="sig-draw-save"
             phx-hook="SignatureDrawSave"
+            data-save-event={@save_event}
             class="px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors cursor-pointer"
           >
             Save
@@ -236,6 +262,7 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
             type="button"
             id="sig-type-save"
             phx-hook="SignatureTypeSave"
+            data-save-event={@save_event}
             class="px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors cursor-pointer"
           >
             Save
@@ -283,6 +310,7 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
             type="button"
             id="sig-upload-save"
             phx-hook="SignatureUploadSave"
+            data-save-event={@save_event}
             class="px-3 py-1.5 text-xs font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors cursor-pointer"
           >
             Save
@@ -376,10 +404,33 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
         </script>
       </div>
 
+      <%!-- Stamps (T-116): signer name + signing date, common to both slots --%>
+      <div class="border-t border-chrome-border dark:border-gray-600 px-4 py-3 space-y-2">
+        <div class="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+          Stamps
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            phx-click="name_stamp_use"
+            class="px-2 py-1.5 text-xs font-medium rounded-lg border border-chrome-border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          >
+            Signer's name
+          </button>
+          <button
+            type="button"
+            phx-click="date_stamp_use"
+            class="px-2 py-1.5 text-xs font-medium rounded-lg border border-chrome-border dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          >
+            Signing date
+          </button>
+        </div>
+      </div>
+
       <%!-- Saved signatures list --%>
       <div class="border-t border-chrome-border dark:border-gray-600">
         <div class="px-4 py-2 text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider flex items-center justify-between">
-          <span>Saved ({length(@signatures)})</span>
+          <span>{@saved_heading} ({length(@signatures)})</span>
         </div>
 
         <div class="overflow-y-auto max-h-48">
@@ -421,7 +472,7 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
             <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
                 type="button"
-                phx-click="signature_use"
+                phx-click={@use_event}
                 phx-value-id={sig["id"]}
                 class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
                 aria-label={"Use #{sig["label"]}"}
@@ -431,7 +482,7 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
               </button>
               <button
                 type="button"
-                phx-click="delete_signature"
+                phx-click={@delete_event}
                 phx-value-id={sig["id"]}
                 class="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors cursor-pointer"
                 aria-label={"Delete #{sig["label"]}"}
@@ -443,7 +494,7 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
           </div>
 
           <div :if={@signatures == []} class="px-4 py-6 text-center">
-            <p class="text-xs text-gray-400 dark:text-gray-500">No saved signatures yet</p>
+            <p class="text-xs text-gray-400 dark:text-gray-500">{@saved_empty}</p>
             <p class="text-xs text-gray-300 dark:text-gray-600 mt-1">
               Use Draw, Type, or Upload above to create one
             </p>

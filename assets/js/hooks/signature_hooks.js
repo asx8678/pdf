@@ -279,7 +279,7 @@ const SignatureDrawSave = {
       const data = container._signatureDraw.serialise();
       const label = labelInput ? labelInput.value.trim() || "Drawn Signature" : "Drawn Signature";
 
-      this.pushEvent("save_signature", {
+      this.pushEvent(this.el.dataset.saveEvent || "save_signature", {
         type: "draw",
         label,
         data: JSON.stringify(data)
@@ -305,7 +305,7 @@ const SignatureTypeSave = {
       const size = sizeInput ? parseInt(sizeInput.value, 10) : 48;
       const label = labelInput ? labelInput.value.trim() || text : text;
 
-      this.pushEvent("save_signature", {
+      this.pushEvent(this.el.dataset.saveEvent || "save_signature", {
         type: "type",
         label,
         data: JSON.stringify({ text, font, size })
@@ -344,7 +344,7 @@ const SignatureUploadSave = {
       const pngBase64 = preview.dataset.pngBase64;
       const label = labelInput ? labelInput.value.trim() || "Uploaded Signature" : "Uploaded Signature";
 
-      this.pushEvent("save_signature", {
+      this.pushEvent(this.el.dataset.saveEvent || "save_signature", {
         type: "upload",
         label,
         data: JSON.stringify({
