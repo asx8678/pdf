@@ -42,6 +42,46 @@ defmodule Quire.BatchTest do
   end
 
   describe "BatchWorker" do
+    test "perform/1 writes an operations row anchored to the batch scope document" do
+      user = user_fixture()
+      bytes = fixture("50mb_images.pdf")
+      step = %{"id" => "compress", "preset" => "high"}
+
+      job = %Oban.Job{
+        args: %{
+          "user_id" => user.id,
+          "filename" => "images.pdf",
+          "bytes" => Base.encode64(bytes),
+          "step" => step
+        }
+      }
+
+      assert :ok = Quire.Workers.BatchWorker.perform(job)
+
+      # operations.document_id is NOT NULL with a FK to documents; the row
+      # must anchor to the well-known all-zero scope document (T-087, Gate 4).
+      scope_bin = Ecto.UUID.dump!("00000000-0000-0000-0000-000000000000")
+      user_bin = Ecto.UUID.dump!(user.id)
+
+      {:ok, %{rows: rows}} =
+        Ecto.Adapters.SQL.query(
+          Quire.Repo,
+          "SELECT kind, status, document_id FROM operations WHERE user_id = $1 ORDER BY inserted_at DESC LIMIT 1",
+          [user_bin]
+        )
+
+      assert [[kind, "completed", ^scope_bin]] = rows
+      assert kind == "batch:compress"
+
+      # and the scope document row now exists so the FK holds
+      {:ok, %{rows: [[1]]}} =
+        Ecto.Adapters.SQL.query(
+          Quire.Repo,
+          "SELECT count(*) FROM documents WHERE id = $1",
+          [scope_bin]
+        )
+    end
+
     test "compress step produces a valid PDF" do
       bytes = fixture("50mb_images.pdf")
       step = %{"id" => "compress", "preset" => "high"}

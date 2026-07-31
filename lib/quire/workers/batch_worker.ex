@@ -17,6 +17,7 @@ defmodule Quire.Workers.BatchWorker do
     max_attempts: 2
 
   alias Quire.Operations
+  alias Quire.Repo
 
   @impl true
   def perform(%Oban.Job{args: args}) do
@@ -24,6 +25,8 @@ defmodule Quire.Workers.BatchWorker do
     filename = args["filename"]
     bytes = Base.decode64!(args["bytes"])
     step = args["step"]
+
+    :ok = ensure_scope_doc!(user_id)
 
     with {:ok, op_id} <-
            Operations.start(nil_scope_doc(), user_id, "batch:" <> step_name(step), %{
@@ -44,6 +47,34 @@ defmodule Quire.Workers.BatchWorker do
     else
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  # operations.document_id is NOT NULL and FK-references documents, but a
+  # batch run is not tied to a single document — each (file, step) job writes
+  # its own row anchored to a well-known scope document (the all-zero UUID).
+  # Create that row once; later jobs conflict on the primary key and no-op.
+  defp ensure_scope_doc!(user_id) do
+    doc_bin = uuid_bin!(nil_scope_doc())
+    user_bin = uuid_bin!(user_id)
+
+    Ecto.Adapters.SQL.query!(
+      Repo,
+      """
+      INSERT INTO documents (id, user_id, title, source_format, page_count, inserted_at, updated_at)
+      VALUES ($1, $2, 'Batch scope', 'batch', 0, now(), now())
+      ON CONFLICT (id) DO NOTHING
+      """,
+      [doc_bin, user_bin]
+    )
+
+    :ok
+  end
+
+  defp uuid_bin!(id) do
+    case Ecto.UUID.dump(id) do
+      {:ok, bin} -> bin
+      :error -> id
     end
   end
 

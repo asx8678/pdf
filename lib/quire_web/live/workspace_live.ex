@@ -182,6 +182,19 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:convert_running, false)
       |> assign(:convert_format, nil)
       |> assign(:convert_error, nil)
+      |> assign(:convert_done, nil)
+      |> assign(:show_advanced_menu, false)
+      |> assign(:show_url_wizard, false)
+      |> assign(:url_value, "")
+      |> assign(:url_running, false)
+      |> assign(:url_error, nil)
+      |> assign(:show_export_image_wizard, false)
+      |> assign(:export_image_format, "png")
+      |> assign(:export_image_dpi, "150")
+      |> assign(:export_image_range, "all")
+      |> assign(:export_image_multipage, false)
+      |> assign(:export_image_running, false)
+      |> assign(:export_image_error, nil)
       |> assign(:form_detect_running, false)
       |> assign(:form_detect_progress, nil)
       |> assign(:form_detect_operation_id, nil)
@@ -240,6 +253,12 @@ defmodule QuireWeb.WorkspaceLive do
       )
       |> allow_upload(:insert_pdf,
         accept: ~w(application/pdf),
+        max_entries: 1,
+        max_file_size: 100_000_000
+      )
+      |> allow_upload(:file_to_pdf,
+        accept:
+          ~w(.png .jpg .jpeg .tiff .tif .bmp .webp .gif .heic .txt .md .csv .html .docx .xlsx .pptx .odt .ods .odp .rtf),
         max_entries: 1,
         max_file_size: 100_000_000
       )
@@ -2274,11 +2293,13 @@ defmodule QuireWeb.WorkspaceLive do
   @view_toggle_tabs ~w(edit comment secure forms esign ocr)
 
   attr :show_new_menu, :boolean, default: false
+  attr :show_advanced_menu, :boolean, default: false
 
   defp ribbon_strip(assigns) do
     assigns =
       assigns
       |> assign(:view_toggle_tabs, @view_toggle_tabs)
+      |> assign_new(:show_advanced_menu, fn -> false end)
       |> assign_new(:show_ocr_options, fn -> false end)
       |> assign_new(:ocr_running, fn -> false end)
       |> assign_new(:image_ocr_uploading, fn -> false end)
@@ -2615,6 +2636,13 @@ defmodule QuireWeb.WorkspaceLive do
 
         <.ribbon_group label="Create from…">
           <.ribbon_button
+            icon="hero-document-arrow-up"
+            label="File to PDF"
+            id="file-to-pdf-btn"
+            phx-click="file_to_pdf_pick"
+            tooltip="Convert a file (image, text, Office document) to a new PDF — images via vix+PDFium, text/Office via HTML+Chromium"
+          />
+          <.ribbon_button
             icon="hero-clipboard-document-list"
             label="Clipboard"
             phx-hook="ClipboardPdf"
@@ -2724,7 +2752,86 @@ defmodule QuireWeb.WorkspaceLive do
             tooltip="Web page (.html) — text only, reflowed, no page images"
             disabled={@convert_running}
           />
+          <.ribbon_button
+            icon="hero-photo"
+            label="Image"
+            id="export-image-btn"
+            phx-click="open_export_image_wizard"
+            tooltip="PDF to Image — render pages to PNG/JPEG/TIFF/WebP at 72–600 DPI, ZIP or multipage TIFF"
+            disabled={@convert_running}
+          />
         </.ribbon_group>
+
+        <div :if={@active_tab == "create-convert"} class="relative">
+          <button
+            type="button"
+            id="advanced-menu-btn"
+            phx-click="toggle_advanced_menu"
+            aria-label="Advanced conversions — PDF to TXT, RTF or URL to PDF"
+            aria-haspopup="menu"
+            aria-expanded={@show_advanced_menu}
+            class={[
+              "flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors",
+              if(@show_advanced_menu,
+                do: "bg-accent/10 text-accent",
+                else: "text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              )
+            ]}
+          >
+            <.icon name="hero-ellipsis-horizontal" class="size-4" />
+            <span>Advanced</span>
+            <.icon name="hero-chevron-down" class="size-3" />
+          </button>
+
+          <div
+            :if={@show_advanced_menu}
+            id="advanced-menu"
+            role="menu"
+            aria-label="Advanced conversions"
+            class="absolute top-full left-0 mt-1 w-64 rounded-xl border border-chrome-border dark:border-gray-600 bg-chrome-white dark:bg-gray-800 shadow-xl z-50 py-1"
+          >
+            <button
+              type="button"
+              role="menuitem"
+              id="advanced-url-btn"
+              phx-click="open_url_wizard"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-globe-americas" class="size-4 text-gray-400" />
+              <span>URL to PDF</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              id="advanced-txt-btn"
+              phx-click="convert_to_txt"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-document-text" class="size-4 text-gray-400" />
+              <span>PDF to TXT</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              id="advanced-rtf-btn"
+              phx-click="convert_to_rtf"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-document-arrow-down" class="size-4 text-gray-400" />
+              <span>PDF to RTF (basic formatting)</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              id="advanced-pdfa-btn"
+              phx-click="open_pdfa_wizard"
+              class="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 text-left"
+            >
+              <.icon name="hero-document-check" class="size-4 text-gray-400" />
+              <span>PDF to PDF/A (best-effort)</span>
+            </button>
+          </div>
+        </div>
 
         <p class="text-[10px] text-gray-400 dark:text-gray-500 italic max-w-xs leading-tight">
           Best-effort conversion; formatting fidelity depends on the source PDF.
@@ -3323,6 +3430,303 @@ defmodule QuireWeb.WorkspaceLive do
         {:noreply, put_flash(socket, :error, "Insert failed: #{reason}")}
     end
   end
+
+  # ── File to PDF (§9.2) ─────────────────────────────────────────────────
+
+  # Ribbon button: asks the .FileToPdfTrigger colocated hook to click the
+  # hidden live_file_input so the native picker opens.
+  @impl true
+  def handle_event("file_to_pdf_pick", _params, socket) do
+    {:noreply, push_event(socket, "trigger_file_to_pdf_picker", %{})}
+  end
+
+  # Uploaded file lands here; it is routed to FileToPdfWorker by extension.
+  @impl true
+  def handle_event("file_to_pdf_submit", _params, socket) do
+    [file] =
+      consume_uploaded_entries(socket, :file_to_pdf, fn meta, entry ->
+        {:ok, %{name: entry.client_name, bytes: File.read!(meta.path)}}
+      end)
+
+    %{name: name, bytes: file_bytes} = file
+
+    ext = name |> Path.extname() |> String.downcase()
+    title = Path.rootname(name)
+
+    case Quire.Workers.FileToPdfWorker.classify_ext(ext) do
+      :unknown ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Unsupported file type #{ext || "(no extension)"} — convert an image, text, HTML or Office document instead"
+         )}
+
+      _category ->
+        args = %{
+          "bytes" => Base.encode64(file_bytes),
+          "filename" => name,
+          "title" => title,
+          "scope_id" => socket.assigns.current_scope.user.id
+        }
+
+        args
+        |> Quire.Workers.FileToPdfWorker.new([])
+        |> Oban.insert!()
+
+        {:noreply,
+         socket
+         |> assign(:convert_running, true)
+         |> assign(:convert_format, "file")
+         |> assign(:convert_error, nil)
+         |> put_flash(:info, "Converting #{name} to PDF — this runs in the background")}
+    end
+  end
+
+  # ── Advanced ▾ → PDF to TXT / RTF (§9.2) ───────────────────────────────
+
+  @impl true
+  def handle_event("toggle_advanced_menu", _params, socket) do
+    {:noreply, update(socket, :show_advanced_menu, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("convert_to_txt", _params, socket) do
+    enqueue_convert_worker(socket, "pdf_to_txt", Quire.Workers.PdfToTxtWorker, %{
+      "mode" => "layout"
+    })
+  end
+
+  @impl true
+  def handle_event("convert_to_rtf", _params, socket) do
+    enqueue_convert_worker(socket, "rtf", Quire.Workers.PdfToRtfWorker, %{})
+  end
+
+  # ── Advanced ▾ → URL to PDF (§9.2) ─────────────────────────────────────
+
+  @impl true
+  def handle_event("open_url_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_advanced_menu, false)
+     |> assign(:show_url_wizard, true)
+     |> assign(:url_value, "")
+     |> assign(:url_running, false)
+     |> assign(:url_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_url_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_url_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("url_set", %{"url" => url}, socket) do
+    {:noreply, assign(socket, :url_value, url)}
+  end
+
+  # URL to PDF: enqueues ConvertWorker (SSRF-guarded, chromic_pdf print).
+  @impl true
+  def handle_event("url_convert", _params, socket) do
+    url = String.trim(socket.assigns.url_value)
+
+    with true <- url != "",
+         :ok <- Quire.SsrfGuard.check(url) do
+      doc_id = socket.assigns.active_document_id
+
+      with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+           {:ok, rev} <- Quire.Documents.current_revision(doc) do
+        args = %{
+          "source_type" => "url",
+          "url" => url,
+          "doc_id" => doc_id,
+          "revision_id" => rev.id,
+          "operation_id" => Ecto.UUID.generate()
+        }
+
+        args
+        |> Quire.Workers.ConvertWorker.new([])
+        |> Oban.insert!()
+
+        {:noreply,
+         socket
+         |> assign(:show_url_wizard, false)
+         |> assign(:convert_running, true)
+         |> assign(:convert_format, "url")
+         |> assign(:convert_error, nil)
+         |> put_flash(:info, "URL to PDF started for #{url}")}
+      else
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to start URL conversion: #{inspect(reason)}")}
+      end
+    else
+      false ->
+        {:noreply, assign(socket, :url_error, "Enter a URL to convert")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :url_error, reason)}
+    end
+  end
+
+  # ── PDF to Image (§9.2) ────────────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_export_image_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_export_image_wizard, true)
+     |> assign(:export_image_format, "png")
+     |> assign(:export_image_dpi, "150")
+     |> assign(:export_image_range, "all")
+     |> assign(:export_image_multipage, false)
+     |> assign(:export_image_running, false)
+     |> assign(:export_image_error, nil)}
+  end
+
+  @impl true
+  def handle_event("close_export_image_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_export_image_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("export_image_set_format", %{"format" => format}, socket) do
+    {:noreply,
+     socket
+     |> assign(:export_image_format, format)
+     |> assign(:export_image_multipage, false)
+     |> assign(:export_image_error, nil)}
+  end
+
+  @impl true
+  def handle_event("export_image_set_dpi", %{"dpi" => dpi}, socket) do
+    {:noreply, assign(socket, :export_image_dpi, dpi)}
+  end
+
+  @impl true
+  def handle_event("export_image_set_range", %{"range" => range}, socket) do
+    {:noreply, assign(socket, :export_image_range, range)}
+  end
+
+  @impl true
+  def handle_event("export_image_toggle_multipage", _params, socket) do
+    {:noreply, update(socket, :export_image_multipage, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("export_image_submit", _params, socket) do
+    doc_id = socket.assigns.active_document_id
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      {dpi, _} = Integer.parse(socket.assigns.export_image_dpi)
+      dpi = dpi |> max(72) |> min(600)
+
+      multipage = socket.assigns.export_image_multipage
+      format = socket.assigns.export_image_format
+
+      if multipage and format != "tiff" do
+        {:noreply,
+         assign(socket, :export_image_error, "Multipage output is only available for TIFF")}
+      else
+        page_range =
+          case socket.assigns.export_image_range do
+            "all" -> nil
+            spec -> parse_page_range(spec)
+          end
+
+        args =
+          %{
+            "doc_id" => doc_id,
+            "revision_id" => rev.id,
+            "format" => format,
+            "dpi" => dpi,
+            "page_range" => page_range,
+            "multipage_tiff" => multipage,
+            "operation_id" => Ecto.UUID.generate()
+          }
+
+        args
+        |> Quire.Workers.PdfToImageWorker.new([])
+        |> Oban.insert!()
+
+        {:noreply,
+         socket
+         |> assign(:show_export_image_wizard, false)
+         |> assign(:convert_running, true)
+         |> assign(:convert_format, "image")
+         |> assign(:convert_error, nil)
+         |> put_flash(:info, "PDF to Image started — #{format |> String.upcase()} at #{dpi} DPI")}
+      end
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Failed to start image export: #{inspect(reason)}")}
+    end
+  end
+
+  defp parse_page_range("all"), do: :all
+
+  defp parse_page_range(spec) do
+    spec
+    |> String.split(",")
+    |> Enum.flat_map(fn part ->
+      case String.split(String.trim(part), "-") do
+        [single] ->
+          case Integer.parse(single) do
+            {n, ""} when n >= 1 -> [n - 1]
+            _ -> []
+          end
+
+        [from, to] ->
+          with {a, ""} <- Integer.parse(from),
+               {b, ""} <- Integer.parse(to),
+               true <- a >= 1 and b >= a do
+            Enum.to_list((a - 1)..(b - 1))
+          else
+            _ -> []
+          end
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  # Shared enqueue for the Advanced ▾ text/RTF conversions.
+  defp enqueue_convert_worker(socket, label, worker, extra_args) do
+    doc_id = socket.assigns.active_document_id
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, socket.assigns.current_scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc) do
+      args =
+        %{
+          "doc_id" => doc_id,
+          "revision_id" => rev.id,
+          "operation_id" => Ecto.UUID.generate()
+        }
+        |> Map.merge(extra_args)
+
+      args
+      |> worker.new([])
+      |> Oban.insert!()
+
+      {:noreply,
+       socket
+       |> assign(:show_advanced_menu, false)
+       |> assign(:convert_running, true)
+       |> assign(:convert_format, label)
+       |> assign(:convert_error, nil)
+       |> put_flash(:info, "#{label |> String.upcase()} conversion started for #{doc.title}")}
+    else
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:convert_error, inspect(reason))
+         |> put_flash(:error, "Failed to start conversion: #{inspect(reason)}")}
+    end
+  end
+
 
   defp check_form_fields(socket) do
     doc_id = socket.assigns.active_document_id

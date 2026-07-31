@@ -9,7 +9,13 @@ defmodule Quire.AccountsFixtures do
   alias Quire.Accounts
   alias Quire.Accounts.Scope
 
-  def unique_user_email, do: "user#{System.unique_integer()}@example.com"
+  # Wall-clock component: System.unique_integer's counter resets on VM
+  # restart, so a crashed run that left committed rows in the test DB would
+  # collide with the next run's identical email. Time never resets.
+  def unique_user_email,
+    do:
+      "user#{System.unique_integer([:positive])}-#{System.system_time(:microsecond)}@example.com"
+
   def valid_user_password, do: "hello world!"
 
   def valid_user_attributes(attrs \\ %{}) do

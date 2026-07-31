@@ -35,6 +35,7 @@
       clipboard_fallback={@clipboard_fallback}
       clipboard_fallback_msg={@clipboard_fallback_msg}
       show_new_menu={@show_new_menu}
+      show_advanced_menu={@show_advanced_menu}
     />
 
     <.ocr_options_panel
@@ -1032,6 +1033,150 @@
     </.modal>
 
     <.modal
+      :if={@show_url_wizard}
+      title="URL to PDF"
+      on_close="close_url_wizard"
+      open={@show_url_wizard}
+    >
+      <div id="url-wizard" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-300">
+          Print a web page to PDF via the system Chromium. Private, loopback
+          and cloud-metadata addresses are blocked for security.
+        </p>
+        <div>
+          <label class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5" for="url-input">
+            Page URL
+          </label>
+          <input
+            id="url-input"
+            type="text"
+            value={@url_value}
+            phx-change="url_set"
+            name="url"
+            placeholder="https://example.com"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          />
+        </div>
+        <div :if={@url_error} class="text-sm text-red-500" role="alert">
+          {@url_error}
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_url_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="url-convert-btn"
+            phx-click="url_convert"
+            disabled={@url_running}
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>Convert to PDF</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
+      :if={@show_export_image_wizard}
+      title="PDF to Image"
+      on_close="close_export_image_wizard"
+      open={@show_export_image_wizard}
+    >
+      <div id="export-image-wizard" class="space-y-4">
+        <div>
+          <label
+            class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5"
+            for="export-image-format"
+          >
+            Format
+          </label>
+          <select
+            id="export-image-format"
+            phx-change="export_image_set_format"
+            class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          >
+            <option value="png" selected={@export_image_format == "png"}>PNG</option>
+            <option value="jpeg" selected={@export_image_format == "jpeg"}>JPEG</option>
+            <option value="tiff" selected={@export_image_format == "tiff"}>TIFF</option>
+            <option value="webp" selected={@export_image_format == "webp"}>WebP</option>
+          </select>
+        </div>
+        <div>
+          <label
+            class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5"
+            for="export-image-dpi"
+          >
+            Resolution (72–600 DPI)
+          </label>
+          <input
+            id="export-image-dpi"
+            type="number"
+            min="72"
+            max="600"
+            value={@export_image_dpi}
+            phx-change="export_image_set_dpi"
+            name="dpi"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          />
+        </div>
+        <div>
+          <label
+            class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5"
+            for="export-image-range"
+          >
+            Pages (blank = all, e.g. 1-3,5)
+          </label>
+          <input
+            id="export-image-range"
+            type="text"
+            value={@export_image_range}
+            phx-change="export_image_set_range"
+            name="range"
+            placeholder="all"
+            class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          />
+        </div>
+        <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            id="export-image-multipage"
+            checked={@export_image_multipage}
+            phx-click="export_image_toggle_multipage"
+            class="size-4 rounded border-gray-300 text-accent focus:ring-accent/40"
+          />
+          <span class="text-gray-700 dark:text-gray-200">Multipage TIFF</span>
+          <span class="text-xs text-gray-400 dark:text-gray-500">(TIFF only)</span>
+        </label>
+        <div :if={@export_image_error} class="text-sm text-red-500" role="alert">
+          {@export_image_error}
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_export_image_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="export-image-submit-btn"
+            phx-click="export_image_submit"
+            disabled={@export_image_running}
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>Export</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
       :if={@show_camera_capture}
       title="Scan to PDF"
       on_close="close_camera_capture"
@@ -1068,6 +1213,20 @@
         upload={@uploads.insert_pdf}
         id="insert-pdf-upload-input"
         accept="application/pdf"
+      />
+    </form>
+
+    <%!-- Hidden upload form triggered by the File to PDF ribbon button (§9.2) --%>
+    <form
+      id="file-to-pdf-upload-form"
+      phx-submit="file_to_pdf_submit"
+      class="hidden"
+      phx-hook=".FileToPdfTrigger"
+    >
+      <.live_file_input
+        upload={@uploads.file_to_pdf}
+        id="file-to-pdf-upload-input"
+        accept=".png,.jpg,.jpeg,.tiff,.tif,.bmp,.webp,.gif,.heic,.txt,.md,.csv,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf,.html"
       />
     </form>
 
@@ -1138,7 +1297,8 @@
       export default {
         mounted() {
           this.handleEvent("trigger_image_picker", () => {
-            const input = document.getElementById("image-ocr-upload-input");
+            // live_file_input overrides its id with the upload ref.
+            const input = this.el.querySelector('input[type="file"]');
             if (input) input.click();
           });
         }
@@ -1148,7 +1308,17 @@
       export default {
         mounted() {
           this.handleEvent("trigger_insert_pdf_picker", () => {
-            const input = document.getElementById("insert-pdf-upload-input");
+            const input = this.el.querySelector('input[type="file"]');
+            if (input) input.click();
+          });
+        }
+      }
+    </script>
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".FileToPdfTrigger">
+      export default {
+        mounted() {
+          this.handleEvent("trigger_file_to_pdf_picker", () => {
+            const input = this.el.querySelector('input[type="file"]');
             if (input) input.click();
           });
         }

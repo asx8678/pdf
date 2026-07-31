@@ -28,6 +28,11 @@ defmodule Quire.PdfA do
   @level "2b"
   @profile_path "priv/profiles/srgb.icc"
 
+  @callback convert(bytes :: binary(), opts :: keyword()) ::
+              {:ok, binary(), map()} | {:error, term()}
+
+  @callback validate(bytes :: binary()) :: {:ok, map()} | {:error, term()}
+
   @doc """
   Converts a PDF to best-effort PDF/A-2b.
 

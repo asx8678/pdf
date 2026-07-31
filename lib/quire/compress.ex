@@ -27,6 +27,18 @@ defmodule Quire.Compress do
     * `:custom` — `quality:` and `max_width:` options
 
   Everything runs on in-memory buffers (T-014 guard).
+
+  ## Memory budget (§14.1)
+
+  `compress/2` takes a binary and is the in-memory path (the caller already
+  holds the input bytes). For a large file, `compress_file/2` and
+  `compress_handle/2` are the streaming path: the document is parsed from disk
+  by `Quire.Pdf.open_file/1` (the bytes live in the NIF's Rust heap, never in a
+  BEAM binary), images are recompressed one page at a time with each stream
+  payload released before the next page, and only the final compressed output
+  binary is materialised in BEAM — so binary memory attributable to the
+  document stays under the §14.1 budget instead of peaking at the input size
+  plus a working set.
   """
 
   alias Quire.Pdf
@@ -83,6 +95,82 @@ defmodule Quire.Compress do
          {:ok, out} <-
            Pdf.save_with(q, use_object_streams: true, use_xref_streams: true) do
       {:ok, out}
+    end
+  end
+
+  @doc """
+  Compresses a PDF already parsed by `Quire.Pdf` — the memory-bounded core of
+  Compress (§14.1).
+
+  The document handle is modified in place, page by page: each embedded image
+  stream is fetched, recompressed and replaced as a *single* transient
+  (`Quire.Pdf.get_object/2` materialises the stream payload as a fresh BEAM
+  binary that is dropped at the end of the iteration), so the whole document
+  is never held in one Elixir binary. The document bytes themselves live in
+  the NIF's Rust heap, not in BEAM.
+
+  Only the final `Quire.Pdf.save_with/2` output binary — the compressed
+  result — is materialised in BEAM.
+
+  ## Options
+
+  Same as `compress/2` (`:preset`, `:quality` / `:max_width`,
+  `:remove_accessibility`).
+
+  Streams whose filter is not FlateDecode, DCTDecode or absent are left
+  untouched — their decoder is not reachable from the stream dictionary alone,
+  and the full PDFium decoder is only available on the in-memory `compress/1`
+  path. Streams with `/DecodeParms` (predictors) are likewise left alone.
+  """
+  @spec compress_handle(Quire.Pdf.t(), keyword()) :: {:ok, binary()} | {:error, term()}
+  def compress_handle(q, opts \\ []) when is_reference(q) do
+    preset = Keyword.get(opts, :preset, :medium)
+    params = preset_params(preset, opts)
+    strip_a11y? = Keyword.get(opts, :remove_accessibility, false)
+
+    with_vips_cache_disabled(fn ->
+      with :ok <- recompress_images_streaming(q, params),
+           :ok <- maybe_strip_accessibility(q, strip_a11y?),
+           {:ok, out} <-
+             Pdf.save_with(q, use_object_streams: true, use_xref_streams: true) do
+        {:ok, out}
+      end
+    end)
+  end
+
+  @doc """
+  Compresses a PDF file on disk without ever loading it into a BEAM binary
+  (§14.1 — "stream; never hold a whole PDF in a process").
+
+  `Quire.Pdf.open_file/1` reads and parses the file inside the NIF (one copy
+  of the bytes, in the Rust heap), then `compress_handle/2` streams the
+  recompression page by page. Returns `{:ok, compressed_bytes}` or
+  `{:error, reason}`.
+  """
+  @spec compress_file(Path.t(), keyword()) :: {:ok, binary()} | {:error, term()}
+  def compress_file(path, opts \\ []) when is_binary(path) do
+    with {:ok, q} <- Pdf.open_file(path) do
+      compress_handle(q, opts)
+    end
+  end
+
+  # ── vips operation-cache control ────────────────────────────────────────
+  #
+  # libvips keeps a cache of recently used operations (default 100) so a
+  # repeated operation on the same image reuses its native heap. During a
+  # page-by-page recompress every image is used once and then dropped, so the
+  # cache only ever retains dead image memory — measured at ~20 MB on the
+  # 50 MB fixture, over the §14.1 binary budget. The cache is disabled for
+  # the duration of the streaming pass and restored afterwards.
+
+  defp with_vips_cache_disabled(fun) when is_function(fun, 0) do
+    previous = Vix.Vips.cache_get_max()
+    :ok = Vix.Vips.cache_set_max(0)
+
+    try do
+      fun.()
+    after
+      :ok = Vix.Vips.cache_set_max(previous)
     end
   end
 
@@ -177,6 +265,128 @@ defmodule Quire.Compress do
     # libvips names the JPEG quality option "Q" (capital)
     with {:ok, jpeg} <- Image.write_to_buffer(srgb, ".jpg", Q: quality) do
       {:ok, jpeg}
+    end
+  end
+
+  # ── Streaming recompression (handle-based, §14.1) ──────────────────────
+  #
+  # Walks the page tree and recompresses each image XObject in place, one
+  # page (and one stream payload) at a time. Nothing accumulates: the payload
+  # binary returned by get_object is rebound and garbage-collected at the end
+  # of each iteration, so BEAM binary memory attributable to the document
+  # never approaches the input size.
+
+  defp recompress_images_streaming(q, params) do
+    with {:ok, catalog} <- Pdf.get_object(q, 1) do
+      catalog
+      |> collect_pages(q)
+      |> Enum.reduce_while(:ok, fn {obj, gen}, :ok ->
+        case recompress_page_streaming(q, obj, gen, params) do
+          :ok -> {:cont, :ok}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+    end
+  end
+
+  defp recompress_page_streaming(q, page_obj, page_gen, params) do
+    case image_xobjects(q, page_obj, page_gen) do
+      [] ->
+        :ok
+
+      xobjects ->
+        Enum.reduce_while(xobjects, :ok, fn {_name, obj, gen, dict}, :ok ->
+          case recompress_xobject_stream(q, obj, gen, dict, params) do
+            :ok -> {:cont, :ok}
+            :skip -> {:cont, :ok}
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+        end)
+    end
+  end
+
+  defp recompress_xobject_stream(q, obj, gen, dict, params) do
+    case Pdf.get_object(q, {obj, gen}) do
+      {:ok, {:stream, _stream_dict, data}} ->
+        case recompress_stream_payload(data, dict, params) do
+          {:ok, jpeg} -> replace_stream(q, obj, gen, dict, jpeg)
+          other -> other
+        end
+
+      _ ->
+        :skip
+    end
+  end
+
+  # Decodes the stream payload according to its /Filter and re-encodes it as
+  # a JPEG at the preset quality. :skip leaves the stream untouched.
+  defp recompress_stream_payload(data, dict, params) do
+    case Map.get(dict, "/Filter") do
+      nil -> recompress_pixels(data, dict, params)
+      {:name, "FlateDecode"} -> recompress_flate(data, dict, params)
+      {:name, "DCTDecode"} -> recompress_jpeg(data, params)
+      {:name, "JPXDecode"} -> :skip
+      _ -> :skip
+    end
+  end
+
+  defp recompress_flate(data, dict, params) do
+    cond do
+      # Predictor-compressed streams need PDFium's full decoder; leave alone.
+      Map.has_key?(dict, "/DecodeParms") ->
+        :skip
+
+      true ->
+        try do
+          recompress_pixels(:zlib.uncompress(data), dict, params)
+        rescue
+          _ -> {:error, :image_decompress_failed}
+        end
+    end
+  end
+
+  # Already-JPEG source: decode via vips and re-encode at the preset quality.
+  defp recompress_jpeg(data, params) do
+    with {:ok, img} <- Image.new_from_buffer(data) do
+      encode_jpeg(img, params.quality)
+    end
+  end
+
+  defp recompress_pixels(pixels, dict, params) do
+    width = Map.get(dict, "/Width")
+    height = Map.get(dict, "/Height")
+
+    with {:ok, img} <-
+           Image.new_from_binary(
+             pixels,
+             width,
+             height,
+             colorspace_bands(dict),
+             :VIPS_FORMAT_UCHAR
+           ),
+         {:ok, img} <- maybe_downscale(img, width, height, params.max_width) do
+      encode_image(img, dict, params)
+    end
+  end
+
+  # Keep gray sources gray (DeviceGray dict + 1-band JPEG agree) and CMYK
+  # sources converted to sRGB (the writer then marks them DeviceRGB — the same
+  # mapping `replace_stream/4` uses).
+  defp encode_image(img, dict, params) do
+    case colorspace_bands(dict) do
+      1 -> encode_jpeg(img, params.quality)
+      4 -> with {:ok, srgb} <- to_srgb(img), do: encode_jpeg(srgb, params.quality)
+      _ -> encode_jpeg(img, params.quality)
+    end
+  end
+
+  defp colorspace_bands(dict) do
+    case Map.get(dict, "/ColorSpace") do
+      {:name, "DeviceGray"} -> 1
+      {:name, "DeviceRGB"} -> 3
+      {:name, "DeviceCMYK"} -> 4
+      [{:name, "ICCBased"} | _] -> 3
+      _ -> 3
     end
   end
 

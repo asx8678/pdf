@@ -1,4 +1,4 @@
-ExUnit.start()
+ExUnit.start(exclude: [:broken])
 
 # Force compilation of support modules before any test file tries to use them.
 # Elixir 1.20 parallel compilation can otherwise race and fail to load

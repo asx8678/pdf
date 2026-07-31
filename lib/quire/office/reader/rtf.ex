@@ -15,6 +15,8 @@ defmodule Quire.Office.Reader.Rtf do
     * Escaped special characters (`\\{`, `\\}`, `\\\\`)
     * Non-breaking space (`\\~`)
     * Soft hyphen (`\\_`)
+    * Unicode escape sequences (`\\uNNNN` — signed 16-bit code point
+      followed by a single fallback character, which is consumed)
 
   ## Unsupported (reported as notes)
 
@@ -24,7 +26,6 @@ defmodule Quire.Office.Reader.Rtf do
     * Footnotes, endnotes
     * Text formatting (bold, italic, font selection, colours)
     * Document metadata (author, date, etc.)
-    * Unicode escape sequences (`\\uNNNN`)
 
   All unsupported control words are silently skipped.
   """
@@ -130,7 +131,55 @@ defmodule Quire.Office.Reader.Rtf do
       <<c::8, rest2::binary>>
       when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) ->
         {word, param, rest3} = read_control(rest2, <<c>>)
-        do_tokenize(rest3, [{:ctrl, word, param} | emit_text(acc, tokens)], "")
+
+        if word == "u" and is_integer(param) do
+          # \uNNNN — Unicode escape. The value is a signed 16-bit code point
+          # (negative for code points above U+7FFF); it is always followed by
+          # a single fallback character for readers without Unicode support.
+          code_point = if param < 0, do: param + 65_536, else: param
+
+          cond do
+            # High surrogate — expect an immediately following \uNNNN low
+            # surrogate so the pair can be combined into a code point
+            # outside the BMP (e.g. emoji written as \u-10180?\u-9079?).
+            # The first escape's fallback character is consumed first, then
+            # we peek for the second \uN.
+            code_point in 0xD800..0xDBFF ->
+              rest4 = consume_fallback_char(rest3)
+
+              case rest4 do
+                <<?\\, c2::8, rest5::binary>> when c2 in ?a..?z or c2 in ?A..?Z ->
+                  {word2, param2, rest6} = read_control(rest5, <<c2>>)
+
+                  if word2 == "u" and is_integer(param2) do
+                    low = if param2 < 0, do: param2 + 65_536, else: param2
+                    rest7 = consume_fallback_char(rest6)
+
+                    if low in 0xDC00..0xDFFF do
+                      combined =
+                        0x10000 + (code_point - 0xD800) * 0x400 + (low - 0xDC00)
+
+                      do_tokenize(rest7, tokens, acc <> <<combined::utf8>>)
+                    else
+                      do_tokenize(rest7, tokens, acc <> <<0xFFFD::utf8>>)
+                    end
+                  else
+                    # Not a low surrogate — emit U+FFFD, reprocess this token
+                    do_tokenize(rest4, tokens, acc <> <<0xFFFD::utf8>>)
+                  end
+
+                _ ->
+                  do_tokenize(rest4, tokens, acc <> <<0xFFFD::utf8>>)
+              end
+
+            # Lone low surrogate or any other code point
+            true ->
+              rest4 = consume_fallback_char(rest3)
+              do_tokenize(rest4, tokens, acc <> <<code_point::utf8>>)
+          end
+        else
+          do_tokenize(rest3, [{:ctrl, word, param} | emit_text(acc, tokens)], "")
+        end
 
       # Any other \X — silently consume the X and continue
       <<_, r::binary>> ->
@@ -185,6 +234,14 @@ defmodule Quire.Office.Reader.Rtf do
 
   defp consume_space_delimiter(<<?\s, rest::binary>>), do: rest
   defp consume_space_delimiter(rest), do: rest
+
+  # After a \uN escape, skip the single fallback character (typically '?').
+  # Never consume a backslash, brace or newline — those begin new constructs.
+  defp consume_fallback_char(<<c::8, rest::binary>>)
+       when c not in [?\\, ?{, ?}, 13, 10] and c >= 0x20,
+       do: rest
+
+  defp consume_fallback_char(rest), do: rest
 
   # ═════════════════════════════════════════════════════════════════════════
   # Hex character decoder

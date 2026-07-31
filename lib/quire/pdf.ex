@@ -147,6 +147,11 @@ defmodule Quire.Pdf do
           {:ok, pdf_object()} | {:error, atom()}
   def get_object(doc, id)
 
+  def get_object(doc, {:ref, obj_num, gen_num})
+      when is_reference(doc) and is_integer(obj_num) and is_integer(gen_num) do
+    Native.get_object(doc, obj_num, gen_num)
+  end
+
   def get_object(doc, {obj_num, gen_num})
       when is_reference(doc) and is_integer(obj_num) and is_integer(gen_num) do
     Native.get_object(doc, obj_num, gen_num)

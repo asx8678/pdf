@@ -126,7 +126,50 @@ defmodule Quire.Workers.FileToPdfWorker do
       with {:ok, layout} <- reader.read(bytes),
            {:ok, html} <- Quire.Office.Writer.Html.write(layout, :html, []) do
         html_to_pdf(html, title)
+      else
+        {:error, reason} -> {:error, office_read_error(reason, format)}
       end
+    end
+  end
+
+  @doc false
+  # The office readers return raw atoms (`:invalid_docx`, `:no_slides`, …) on
+  # corrupt or unsupported input. Map them to a plain-language cause here so
+  # the operations row and UI never show a bare atom or engine tuple.
+  def office_read_error(reason, format) do
+    case reason do
+      :invalid_docx ->
+        "The Word document could not be read — the file may be corrupt or not a real .docx"
+
+      :invalid_xlsx ->
+        "The Excel workbook could not be read — the file may be corrupt or not a real .xlsx"
+
+      :invalid_pptx ->
+        "The PowerPoint file could not be read — the file may be corrupt or not a real .pptx"
+
+      :invalid_odt ->
+        "The document could not be read — the file may be corrupt or not a real .odt"
+
+      :invalid_ods ->
+        "The spreadsheet could not be read — the file may be corrupt or not a real .ods"
+
+      :invalid_odp ->
+        "The presentation could not be read — the file may be corrupt or not a real .odp"
+
+      :invalid_rtf ->
+        "The RTF document could not be read — the file may be corrupt or not a real .rtf"
+
+      :no_slides ->
+        "The presentation contains no slides to convert"
+
+      :unknown_format ->
+        "Unsupported file format: .#{format}"
+
+      msg when is_binary(msg) ->
+        msg
+
+      _ ->
+        "The #{format} file could not be converted to PDF"
     end
   end
 
@@ -159,7 +202,7 @@ defmodule Quire.Workers.FileToPdfWorker do
   defp html_to_pdf(html, _title) do
     opts = [discard_stderr: true, page_size: :A4, offline: true]
 
-    with {:ok, base64_pdf} <- ChromicPDF.print_to_pdf({:html, html}, opts) do
+    with {:ok, base64_pdf} <- Quire.Workers.ConvertWorker.print_to_pdf_safely({:html, html}, opts) do
       decode_pdf(base64_pdf)
     end
   end
@@ -167,14 +210,16 @@ defmodule Quire.Workers.FileToPdfWorker do
   # ── Persistence ──────────────────────────────────────────────────────
 
   defp persist(pdf_bytes, title, args) do
-    scope_id = args["scope_id"]
+    case args["scope_id"] do
+      nil ->
+        # No scope — caller will handle persistence
+        {:ok, pdf_bytes}
 
-    if scope_id do
-      scope = %{id: scope_id}
-      Quire.Documents.ingest(pdf_bytes, scope, title: title)
-    else
-      # No scope — caller will handle persistence
-      {:ok, pdf_bytes}
+      scope_id ->
+        # Documents.ingest/3 requires a full scope with `user.id` (Gate 4:
+        # the previous `%{id: scope_id}` map crashed with a KeyError).
+        scope = %Quire.Accounts.Scope{user: %{id: scope_id}}
+        Quire.Documents.ingest(pdf_bytes, scope, title: title)
     end
   end
 

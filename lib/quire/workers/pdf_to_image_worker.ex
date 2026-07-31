@@ -162,8 +162,8 @@ defmodule Quire.Workers.PdfToImageWorker do
   defp reencode_via_vix(png_bytes, format) do
     ext = "." <> format
 
-    with {:ok, image} <- Vix.Vips.Image.new_from_buffer(png_bytes, ""),
-         {:ok, encoded} <- Vix.Vips.Image.write_to_buffer(image, ext) do
+    with {:ok, image} <- Vix.Vips.Image.new_from_buffer(png_bytes, []),
+         {:ok, encoded} <- Vix.Vips.Image.write_to_buffer(image, ext, []) do
       {:ok, encoded}
     else
       {:error, reason} ->
@@ -202,8 +202,8 @@ defmodule Quire.Workers.PdfToImageWorker do
 
   defp assemble_multipage_tiff(page_binaries) do
     images_result =
-      Enum.reduce_while({:ok, []}, page_binaries, fn png_bytes, {:ok, acc} ->
-        case Vix.Vips.Image.new_from_buffer(png_bytes, "") do
+      Enum.reduce_while(page_binaries, {:ok, []}, fn png_bytes, {:ok, acc} ->
+        case Vix.Vips.Image.new_from_buffer(png_bytes, []) do
           {:ok, img} ->
             {:cont, {:ok, [img | acc]}}
 
@@ -218,7 +218,9 @@ defmodule Quire.Workers.PdfToImageWorker do
       case images do
         [single_image] ->
           # Single page — save as regular TIFF
-          case Vix.Vips.Operation.tiffsave_buffer(single_image, compression: :jpeg) do
+          case Vix.Vips.Operation.tiffsave_buffer(single_image,
+                 compression: :VIPS_FOREIGN_TIFF_COMPRESSION_JPEG
+               ) do
             {:ok, tiff_bytes} -> {:ok, tiff_bytes}
             {:error, reason} -> {:error, "TIFF save failed: #{inspect(reason)}"}
           end
@@ -231,7 +233,7 @@ defmodule Quire.Workers.PdfToImageWorker do
                {:ok, tiff_bytes} <-
                  Vix.Vips.Operation.tiffsave_buffer(joined,
                    page_height: first_height,
-                   compression: :jpeg
+                   compression: :VIPS_FOREIGN_TIFF_COMPRESSION_JPEG
                  ) do
             {:ok, tiff_bytes}
           else
@@ -362,7 +364,8 @@ defmodule Quire.Workers.PdfToImageWorker do
           }
 
           case Documents.create_revision(doc, label: label, source: source_map) do
-            {:ok, _rev} ->
+            {:ok, new_rev} ->
+              broadcast_revision(doc, new_rev)
               :ok
 
             {:error, changeset} ->
@@ -373,5 +376,15 @@ defmodule Quire.Workers.PdfToImageWorker do
           {:error, "Storage put failed: #{inspect(reason)}"}
       end
     end
+  end
+
+  defp broadcast_revision(doc, new_rev) do
+    # Update the document's current_revision pointer and notify the workspace
+    # so the UI clears its "converting" state and the viewer reloads (Gate 4).
+    doc
+    |> Ecto.Changeset.change(%{current_revision_id: new_rev.id})
+    |> Repo.update()
+
+    Phoenix.PubSub.broadcast(Quire.PubSub, "document:#{doc.id}", {:revision, new_rev})
   end
 end

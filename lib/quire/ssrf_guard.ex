@@ -26,8 +26,9 @@ defmodule Quire.SsrfGuard do
     case URI.parse(uri_string) do
       %URI{scheme: nil} -> {:error, "URL is missing a scheme"}
       %URI{} = uri -> check(uri)
-      _ -> {:error, "Could not parse URL"}
     end
+  rescue
+    _ -> {:error, "Could not parse URL"}
   end
 
   # ── Scheme checks ────────────────────────────────────────────────────────

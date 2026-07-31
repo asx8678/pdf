@@ -35,7 +35,9 @@ defmodule Quire.Esign do
 
   Returns `{:error, reason}` if the envelope is not in draft status.
   """
-  def send_envelope(%Envelope{status: :draft} = envelope, attrs \\ %{}) do
+  def send_envelope(envelope, attrs \\ %{})
+
+  def send_envelope(%Envelope{status: :draft} = envelope, attrs) do
     changeset =
       envelope
       |> Envelope.changeset(attrs)
@@ -231,10 +233,12 @@ defmodule Quire.Esign do
   @doc """
   Declines the envelope on behalf of a signer.
   """
+  def decline_envelope(envelope, signer, attrs \\ %{})
+
   def decline_envelope(
         %Envelope{status: :sent} = envelope,
         %Signer{status: :pending} = signer,
-        attrs \\ %{}
+        attrs
       ) do
     result =
       signer

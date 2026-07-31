@@ -215,13 +215,24 @@ defmodule Quire.Workers.PdfToTxtWorker do
             "filename" => filename
           }
 
-          {:ok, _rev} = Documents.create_revision(doc, label: label, source: source_map)
+          {:ok, new_rev} = Documents.create_revision(doc, label: label, source: source_map)
+          broadcast_revision(doc, new_rev)
           emit_telemetry(:persisted, %{doc_id: doc_id, revision_label: label})
 
         {:error, reason} ->
           emit_telemetry(:persist_failed, %{doc_id: doc_id, error: inspect(reason)})
       end
     end
+  end
+
+  defp broadcast_revision(doc, new_rev) do
+    # Update the document's current_revision pointer and notify the workspace
+    # so the UI clears its "converting" state and the viewer reloads (Gate 4).
+    doc
+    |> Ecto.Changeset.change(%{current_revision_id: new_rev.id})
+    |> Repo.update()
+
+    Phoenix.PubSub.broadcast(Quire.PubSub, "document:#{doc.id}", {:revision, new_rev})
   end
 
   # ── Progress reporting ──────────────────────────────────────────────────

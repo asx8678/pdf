@@ -117,7 +117,7 @@ defmodule Quire.Workers.ConvertWorker do
     html = args["html"]
     opts = build_chrome_opts(args)
 
-    with {:ok, base64_pdf} <- ChromicPDF.print_to_pdf({:html, html}, opts),
+    with {:ok, base64_pdf} <- print_to_pdf_safely({:html, html}, opts),
          {:ok, pdf_binary} <- decode_pdf(base64_pdf) do
       {:ok, pdf_binary}
     end
@@ -130,9 +130,43 @@ defmodule Quire.Workers.ConvertWorker do
     opts = build_chrome_opts(args)
 
     with :ok <- SsrfGuard.check(url),
-         {:ok, base64_pdf} <- ChromicPDF.print_to_pdf({:url, url}, opts),
+         {:ok, base64_pdf} <- print_to_pdf_safely({:url, url}, opts),
          {:ok, pdf_binary} <- decode_pdf(base64_pdf) do
       {:ok, pdf_binary}
+    end
+  end
+
+  @doc false
+  # ChromicPDF raises `ChromicPDF.ChromeError` (navigation failures, dead
+  # targets) and a plain `RuntimeError` when no Chromium executable can be
+  # found, instead of returning `{:error, _}`. Rescue and map to a
+  # plain-language cause so the operations row (`Operations.fail/3`) and the
+  # UI toast surface something a user can act on — never an engine dump.
+  def print_to_pdf_safely(source, opts) do
+    ChromicPDF.print_to_pdf(source, opts)
+  rescue
+    e in [ChromicPDF.ChromeError] -> {:error, chrome_error_message(e)}
+    e -> {:error, generic_chrome_message(e)}
+  end
+
+  defp chrome_error_message(%{error: "net::ERR_" <> code}) do
+    "The web page could not be reached (#{code}). Check the URL and your internet connection."
+  end
+
+  defp chrome_error_message(%{error: {kind, _}})
+       when kind in [:exception_thrown, :console_api_called] do
+    "The web page could not be printed because a script on it failed. Try again with scripts disabled."
+  end
+
+  defp chrome_error_message(_), do: "The web page could not be printed by the browser engine."
+
+  defp generic_chrome_message(e) do
+    message = Exception.message(e)
+
+    if String.contains?(message, "could not find executable") do
+      "The browser engine (Chromium) is not installed or could not be found. Install Google Chrome or Chromium to convert web pages to PDF."
+    else
+      "The web page could not be printed: #{message}"
     end
   end
 
@@ -193,8 +227,11 @@ defmodule Quire.Workers.ConvertWorker do
     header = args["header"]
     footer = args["footer"]
 
+    # Guard against nil (job args routinely omit header/footer): `if header or
+    # footer` raises BadBooleanError on nil, crashing the worker instead of
+    # returning a plain-language error.
     print_to_pdf =
-      if header or footer do
+      if is_binary(header) or is_binary(footer) do
         print_to_pdf
         |> Map.put("displayHeaderFooter", true)
         |> then(fn m -> if header, do: Map.put(m, "headerTemplate", header), else: m end)
@@ -276,13 +313,24 @@ defmodule Quire.Workers.ConvertWorker do
             "filename" => filename
           }
 
-          {:ok, _rev} = Documents.create_revision(doc, label: label, source: source_map)
+          {:ok, new_rev} = Documents.create_revision(doc, label: label, source: source_map)
+          broadcast_revision(doc, new_rev)
           emit_telemetry(:persisted, %{doc_id: doc_id, revision_label: label})
 
         {:error, reason} ->
           emit_telemetry(:persist_failed, %{doc_id: doc_id, error: inspect(reason)})
       end
     end
+  end
+
+  defp broadcast_revision(doc, new_rev) do
+    # Update the document's current_revision pointer and notify the workspace
+    # so the UI clears its "converting" state and the viewer reloads (Gate 4).
+    doc
+    |> Ecto.Changeset.change(%{current_revision_id: new_rev.id})
+    |> Repo.update()
+
+    Phoenix.PubSub.broadcast(Quire.PubSub, "document:#{doc.id}", {:revision, new_rev})
   end
 
   # ── Telemetry ─────────────────────────────────────────────────────────

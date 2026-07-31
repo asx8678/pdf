@@ -140,6 +140,10 @@ defmodule QuireWeb.HomeLive do
                   tile.id == "open" -> "open_pdf"
                   tile.id == "customize" -> "open_customize"
                   tile.id == "batch" -> "open_batch"
+                  # §9.2 conversion launchers: pick a PDF first — the
+                  # ingested document opens in the workspace where the
+                  # Create & Convert ribbon owns the actual conversion.
+                  tile.id in ~w(clipboard merge convert toword toexcel) -> "open_pdf"
                   true -> nil
                 end
               }
@@ -193,8 +197,9 @@ defmodule QuireWeb.HomeLive do
         export default {
           mounted() {
             this.handleEvent("trigger_file_picker", () => {
-              // Find the live_file_input inside the hidden upload form
-              const input = document.getElementById("pdf-upload-input");
+              // live_file_input overrides its id with the upload ref, so
+              // resolve the input by type within this hook's own form.
+              const input = this.el.querySelector('input[type="file"]');
               if (input) input.click();
             });
           }

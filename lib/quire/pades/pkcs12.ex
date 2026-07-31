@@ -22,7 +22,7 @@ defmodule Quire.Pades.Pkcs12 do
   """
   @spec parse(binary(), String.t()) :: {:ok, [private_key()], [certificate()]} | {:error, term()}
   def parse(pfx_binary, password) when is_binary(pfx_binary) and is_binary(password) do
-    with {:ok, {keys, certs}} <- decode_pfx(pfx_binary, password) do
+    with {:ok, keys, certs} <- decode_pfx(pfx_binary, password) do
       {:ok, keys, certs}
     end
   end

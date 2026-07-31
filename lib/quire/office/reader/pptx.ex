@@ -9,7 +9,8 @@ defmodule Quire.Office.Reader.Pptx do
   ## Supported constructs
 
     * Slide titles and text body shapes
-    * Bulleted and numbered lists (auto-detected by indent level)
+    * Bulleted and numbered lists (detected via indent level on `<a:p>` or
+      `<a:pPr>`, and via `<a:buChar>` / `<a:buAutoNum>` bullet markers)
     * Multi-slide presentations
     * Slide titles from the title shape
 
@@ -118,12 +119,14 @@ defmodule Quire.Office.Reader.Pptx do
             text_parts: [],
             in_tx_body: 0,
             in_a_p: 0,
+            in_a_p_pr: 0,
             in_a_r: 0,
             in_a_t: 0,
             in_nv_sp_pr: false,
             in_c_nv_pr: false,
             is_title: false,
             level: 0,
+            bu: nil,
             name: ""
           })
 
@@ -243,6 +246,27 @@ defmodule Quire.Office.Reader.Pptx do
         String.ends_with?(name, "txBody") ->
           {:ok, %{state | in_tx_body: state.in_tx_body + 1}}
 
+        # Paragraph properties — in real PowerPoint files the indent level
+        # lives on <a:pPr lvl="1"> (not on <a:p>), and bullets are marked
+        # with <a:buChar> / <a:buAutoNum> / <a:buNone> inside it.
+        String.ends_with?(name, "pPr") and state.in_a_p > 0 ->
+          m = Map.new(attrs)
+          lvl = m |> Map.get("lvl", "0") |> String.to_integer()
+          level = max(lvl, state.level)
+          {:ok, %{state | in_a_p_pr: state.in_a_p_pr + 1, level: level}}
+
+        # Bullet character marker → unordered list item
+        String.ends_with?(name, "buChar") ->
+          {:ok, %{state | bu: :bullet}}
+
+        # Auto-number marker → list item (rendered as bullet in HTML)
+        String.ends_with?(name, "buAutoNum") ->
+          {:ok, %{state | bu: :auto_num}}
+
+        # Explicit no-bullet marker
+        String.ends_with?(name, "buNone") ->
+          {:ok, %{state | bu: :none}}
+
         # Paragraph inside text body
         String.ends_with?(name, "p") and state.in_tx_body > 0 ->
           lvl = Map.new(attrs) |> Map.get("lvl", "0") |> String.to_integer()
@@ -257,7 +281,15 @@ defmodule Quire.Office.Reader.Pptx do
             end
 
           state = flush_block(state)
-          {:ok, %{state | in_a_p: state.in_a_p + 1, current_block: block_type, level: lvl}}
+
+          {:ok,
+           %{
+             state
+             | in_a_p: state.in_a_p + 1,
+               current_block: block_type,
+               level: lvl,
+               bu: nil
+           }}
 
         # Run (rich text span)
         String.ends_with?(name, "r") ->
@@ -303,6 +335,16 @@ defmodule Quire.Office.Reader.Pptx do
         String.ends_with?(name, "p") and state.in_tx_body > 0 ->
           state = flush_block(%{state | in_a_p: max(0, state.in_a_p - 1)})
           {:ok, state}
+
+        # </a:pPr> — bullet markers or an indent level make this a list item.
+        # Must be matched before the generic </...r> clause ("pPr" ends in r).
+        String.ends_with?(name, "pPr") and state.in_a_p_pr > 0 ->
+          current_block =
+            if state.bu in [:bullet, :auto_num] or state.level > 0,
+              do: :list,
+              else: state.current_block
+
+          {:ok, %{state | in_a_p_pr: state.in_a_p_pr - 1, current_block: current_block}}
 
         String.ends_with?(name, "r") ->
           {:ok, %{state | in_a_r: max(0, state.in_a_r - 1)}}

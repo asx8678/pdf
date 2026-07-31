@@ -452,6 +452,79 @@ defmodule Quire.Office.ReaderTest do
              ]
     end
 
+    test "parses bullets from a:pPr buChar markers (real PowerPoint style)" do
+      # PowerPoint and LibreOffice put the indent level on <a:pPr lvl="1">
+      # (not <a:p>) and mark bullets with <a:buChar>/<a:buAutoNum> inside
+      # the paragraph properties.
+      bytes =
+        zip_files([
+          {"[Content_Types].xml",
+           ~S"""
+           <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+             <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+             <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+           </Types>
+           """},
+          {"_rels/.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+           </Relationships>
+           """},
+          {"ppt/presentation.xml",
+           ~S"""
+           <p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                           xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+             <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+           </p:presentation>
+           """},
+          {"ppt/_rels/presentation.xml.rels",
+           ~S"""
+           <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+             <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+           </Relationships>
+           """},
+          {"ppt/slides/slide1.xml",
+           ~S"""
+           <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+                  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                  xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+             <p:spTree>
+               <p:nvGrpSpPr><p:cNvPr id="1" name=""/></p:nvGrpSpPr>
+               <p:grpSpPr/>
+               <p:sp>
+                 <p:nvSpPr><p:cNvPr id="2" name="Title 1"/><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+                 <p:spPr/>
+                 <p:txBody><a:bodyPr/><a:lstStyle/>
+                   <a:p><a:r><a:t>Roadmap</a:t></a:r></a:p>
+                 </p:txBody>
+               </p:sp>
+               <p:sp>
+                 <p:nvSpPr><p:cNvPr id="3" name="Content Placeholder 3"/><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>
+                 <p:spPr/>
+                 <p:txBody><a:bodyPr/><a:lstStyle/>
+                   <a:p><a:pPr marL="285750" indent="-285750"><a:buChar char="&#8226;"/></a:pPr><a:r><a:t>First point</a:t></a:r></a:p>
+                   <a:p><a:pPr marL="285750" indent="-285750"><a:buChar char="&#8226;"/></a:pPr><a:r><a:t>Second point</a:t></a:r></a:p>
+                   <a:p><a:pPr marL="285750" indent="-285750"><a:buAutoNum type="arabicPeriod"/></a:pPr><a:r><a:t>Numbered one</a:t></a:r></a:p>
+                   <a:p><a:pPr marL="285750" indent="-285750"><a:buNone/></a:pPr><a:r><a:t>Plain line</a:t></a:r></a:p>
+                 </p:txBody>
+               </p:sp>
+             </p:spTree>
+           </p:sld>
+           """}
+        ])
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(bytes, "test.pptx")
+
+      assert blocks == [
+               {:heading, "Roadmap", 1},
+               {:list, ["First point", "Second point", "Numbered one"], false},
+               {:paragraph, "Plain line"}
+             ]
+    end
+
     test "multiple slides produce multiple sections" do
       bytes =
         zip_files([
@@ -710,6 +783,38 @@ defmodule Quire.Office.ReaderTest do
                Reader.read(rtf, "test.rtf")
 
       assert blocks == [{:paragraph, "Braces: {escaped} and \\backslash"}]
+    end
+
+    test "decodes unicode escapes (\\uNNNN) with fallback character consumed" do
+      # Word-style non-ASCII: é (233) and — (8212), each followed by a '?'
+      # fallback character that must be consumed, not emitted.
+      rtf = "{\\rtf1\\ansi Caf\\u233? r\\u233?sum\\u233? \\u8212? na\\u239?ve\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "Café résumé — naïve"}]
+    end
+
+    test "decodes high unicode escapes as surrogate pairs" do
+      # U+1F389 (🎉) is written in RTF as the surrogate pair
+      # \u-10180?\u-8311? (high 0xD83C, low 0xDF89, each followed by a
+      # fallback character).
+      rtf = "{\\rtf1\\ansi party \\u-10180?\\u-8311?\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "party 🎉"}]
+    end
+
+    test "unicode escape fallback does not swallow a following \\par" do
+      rtf = "{\\rtf1\\ansi A\\u233?\\par}"
+
+      assert {:ok, %Layout{sections: [%Section{blocks: blocks}]}} =
+               Reader.read(rtf, "test.rtf")
+
+      assert blocks == [{:paragraph, "Aé"}]
     end
   end
 
