@@ -194,6 +194,14 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:translate_provider_label, provider_label())
       |> assign(:translate_results, [])
       |> assign(:show_merge_wizard, false)
+      |> assign(:show_compress_wizard, false)
+      |> assign(:compress_preset, "medium")
+      |> assign(:compress_custom_quality, "60")
+      |> assign(:compress_custom_max_width, "2048")
+      |> assign(:compress_remove_a11y, false)
+      |> assign(:compress_running, false)
+      |> assign(:compress_error, nil)
+      |> assign(:compress_preview, nil)
       |> assign(:show_split_wizard, false)
       |> assign(:split_mode, "every_n")
       |> assign(:split_n, "5")
@@ -2541,6 +2549,12 @@ defmodule QuireWeb.WorkspaceLive do
             phx-click="open_split_wizard"
             tooltip="Split the document into a ZIP — every N pages, at bookmarks, by ranges, by file size, or extract selected pages"
           />
+          <.ribbon_button
+            icon="hero-arrow-down-tray"
+            label="Compress"
+            phx-click="open_compress_wizard"
+            tooltip="Recompress embedded images (Low/Medium/High/Custom) with a before/after size comparison and page preview"
+          />
         </.ribbon_group>
 
         <.ribbon_group :if={@clipboard_fallback} label="Paste target">
@@ -4184,6 +4198,261 @@ defmodule QuireWeb.WorkspaceLive do
       Quire.Editing.apply_for_server(session, op)
     end
   end
+
+  # ── Compress wizard (T-083) ───────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_compress_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_compress_wizard, true)
+     |> assign(:compress_preset, "medium")
+     |> assign(:compress_custom_quality, "60")
+     |> assign(:compress_custom_max_width, "2048")
+     |> assign(:compress_remove_a11y, false)
+     |> assign(:compress_running, false)
+     |> assign(:compress_error, nil)
+     |> assign(:compress_preview, nil)}
+  end
+
+  @impl true
+  def handle_event("close_compress_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_compress_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("compress_set_preset", %{"preset" => preset}, socket) do
+    {:noreply,
+     socket
+     |> assign(:compress_preset, preset)
+     |> assign(:compress_error, nil)
+     |> assign(:compress_preview, nil)}
+  end
+
+  @impl true
+  def handle_event("compress_set_param", params, socket) do
+    socket =
+      Enum.reduce(params, socket, fn
+        {"quality", value}, acc -> assign(acc, :compress_custom_quality, value)
+        {"max_width", value}, acc -> assign(acc, :compress_custom_max_width, value)
+        _, acc -> acc
+      end)
+
+    {:noreply, socket |> assign(:compress_error, nil) |> assign(:compress_preview, nil)}
+  end
+
+  @impl true
+  def handle_event("compress_toggle_a11y", _params, socket) do
+    {:noreply, update(socket, :compress_remove_a11y, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("compress_preview", _params, socket) do
+    {:noreply, run_compress_preview(socket)}
+  end
+
+  @impl true
+  def handle_event("compress_commit", _params, socket) do
+    {:noreply, run_compress_commit(socket)}
+  end
+
+  defp run_compress_preview(socket) do
+    socket = socket |> assign(:compress_running, true) |> assign(:compress_error, nil)
+
+    with {:ok, doc} <-
+           Quire.Documents.get_document(
+             socket.assigns.active_document_id,
+             socket.assigns.current_scope
+           ),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         ref when not is_nil(ref) <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, opts} <- compress_opts(socket.assigns),
+         {:ok, out} <- Quire.Compress.compress(bytes, opts) do
+      preview = %{
+        before_size: byte_size(bytes),
+        after_size: byte_size(out),
+        pct: percent_smaller(byte_size(bytes), byte_size(out)),
+        before_png: preview_png(bytes),
+        after_png: preview_png(out)
+      }
+
+      socket
+      |> assign(:compress_running, false)
+      |> assign(:compress_preview, preview)
+    else
+      {:error, reason} ->
+        socket
+        |> assign(:compress_running, false)
+        |> assign(:compress_error, compress_error_message(reason))
+
+      nil ->
+        socket
+        |> assign(:compress_running, false)
+        |> assign(:compress_error, "No current document to compress")
+    end
+  end
+
+  defp run_compress_commit(socket) do
+    socket = socket |> assign(:compress_running, true) |> assign(:compress_error, nil)
+
+    with {:ok, doc} <-
+           Quire.Documents.get_document(
+             socket.assigns.active_document_id,
+             socket.assigns.current_scope
+           ),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         ref when not is_nil(ref) <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, opts} <- compress_opts(socket.assigns),
+         {:ok, out} <- Quire.Compress.compress(bytes, opts) do
+      case save_compressed_revision(doc, out) do
+        {:ok, %{rev: new_rev}} ->
+          journal_doc_compress(doc, opts, byte_size(bytes), byte_size(out))
+
+          socket
+          |> assign(:compress_running, false)
+          |> assign(:show_compress_wizard, false)
+          |> assign(:compress_preview, nil)
+          |> assign(:document_url, "/documents/#{doc.id}/pdf?rev=#{new_rev.id}")
+          |> put_flash(
+            :info,
+            "Compressed #{format_bytes(byte_size(bytes))} → #{format_bytes(byte_size(out))} (#{percent_smaller(byte_size(bytes), byte_size(out))}% smaller)"
+          )
+
+        {:error, reason} ->
+          socket
+          |> assign(:compress_running, false)
+          |> assign(:compress_error, compress_error_message(reason))
+      end
+    else
+      {:error, reason} ->
+        socket
+        |> assign(:compress_running, false)
+        |> assign(:compress_error, compress_error_message(reason))
+
+      nil ->
+        socket
+        |> assign(:compress_running, false)
+        |> assign(:compress_error, "No current document to compress")
+    end
+  end
+
+  defp compress_opts(assigns) do
+    preset =
+      case assigns.compress_preset do
+        "low" -> :low
+        "high" -> :high
+        "custom" -> :custom
+        _ -> :medium
+      end
+
+    opts = [preset: preset, remove_accessibility: assigns.compress_remove_a11y]
+
+    if preset == :custom do
+      with {:ok, q} <- parse_pos_int(assigns.compress_custom_quality),
+           {:ok, w} <- parse_pos_int(assigns.compress_custom_max_width) do
+        {:ok, Keyword.merge(opts, quality: q, max_width: w)}
+      else
+        _ -> {:error, :custom_params}
+      end
+    else
+      {:ok, opts}
+    end
+  end
+
+  defp parse_pos_int(str) do
+    case Integer.parse(str) do
+      {n, ""} when n > 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  defp preview_png(bytes) do
+    with {:ok, doc} <- ExPdfium.open(bytes),
+         {:ok, bitmap} <- ExPdfium.render_page(doc, 0, dpi: 96) do
+      base64_png(bitmap)
+    else
+      _ -> nil
+    end
+  end
+
+  defp base64_png(%ExPdfium.Bitmap{} = bitmap) do
+    {bands, format} = bitmap_format(bitmap.format)
+
+    with {:ok, img} <-
+           Vix.Vips.Image.new_from_binary(bitmap.data, bitmap.width, bitmap.height, bands, format),
+         {:ok, png} <- Vix.Vips.Image.write_to_buffer(img, ".png") do
+      "data:image/png;base64," <> Base.encode64(png)
+    else
+      _ -> nil
+    end
+  end
+
+  defp bitmap_format(:gray), do: {1, :VIPS_FORMAT_UCHAR}
+  defp bitmap_format(:rgb), do: {3, :VIPS_FORMAT_UCHAR}
+  defp bitmap_format(:bgr), do: {3, :VIPS_FORMAT_UCHAR}
+  defp bitmap_format(:rgba), do: {4, :VIPS_FORMAT_UCHAR}
+  defp bitmap_format(:bgrx), do: {4, :VIPS_FORMAT_UCHAR}
+  defp bitmap_format(:cmyk), do: {4, :VIPS_FORMAT_UCHAR}
+  defp bitmap_format(_), do: {3, :VIPS_FORMAT_UCHAR}
+
+  defp percent_smaller(before, after_size) when before > 0 do
+    round((before - after_size) * 100 / before)
+  end
+
+  defp percent_smaller(_, _), do: 0
+
+  defp format_bytes(n) when n >= 1_000_000, do: "#{Float.round(n / 1_000_000, 1)} MB"
+  defp format_bytes(n) when n >= 1_000, do: "#{round(n / 1_000)} KB"
+  defp format_bytes(n), do: "#{n} B"
+
+  defp save_compressed_revision(doc, out_bytes) do
+    with {:ok, new_ref} <-
+           Quire.Storage.put(out_bytes,
+             name: doc.title,
+             content_type: "application/pdf"
+           ) do
+      source_map = %{
+        "storage_ref" => %{
+          "adapter" => to_string(new_ref.adapter),
+          "key" => new_ref.key,
+          "name" => new_ref.name,
+          "content_type" => new_ref.content_type,
+          "byte_size" => new_ref.byte_size
+        },
+        "source_revision" => doc.current_revision_id,
+        "note" => "Compressed"
+      }
+
+      with {:ok, new_rev} <-
+             Quire.Documents.create_revision(doc, label: "Compressed", source: source_map) do
+        {:ok, linked} =
+          doc
+          |> Ecto.Changeset.change(%{current_revision_id: new_rev.id})
+          |> Quire.Repo.update()
+
+        {:ok, %{rev: new_rev, doc: linked}}
+      end
+    end
+  end
+
+  defp journal_doc_compress(doc, opts, before, after_size) do
+    with {:ok, session} <- Quire.Editing.open_session(doc.id, doc.user_id) do
+      op = %{
+        kind: "doc.compress",
+        data: %{opts: opts, before_bytes: before, after_bytes: after_size},
+        inverse: {:restore_revision, nil}
+      }
+
+      Quire.Editing.apply_for_server(session, op)
+    end
+  end
+
+  defp compress_error_message(:custom_params),
+    do: "Custom quality and max width must be positive numbers"
+
+  defp compress_error_message(reason), do: "Compress failed: #{inspect(reason)}"
 
   @impl true
   def handle_info({:close_camera_modal}, socket) do

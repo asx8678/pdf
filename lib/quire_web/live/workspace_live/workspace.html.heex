@@ -660,6 +660,173 @@
     </.modal>
 
     <.modal
+      :if={@show_compress_wizard}
+      title="Compress PDF"
+      on_close="close_compress_wizard"
+      open={@show_compress_wizard}
+      size="large"
+    >
+      <div id="compress-wizard" class="space-y-4">
+        <div>
+          <label
+            class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5"
+            for="compress-preset"
+          >
+            Preset
+          </label>
+          <select
+            id="compress-preset"
+            phx-change="compress_set_preset"
+            class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+          >
+            <option value="low" selected={@compress_preset == "low"}>
+              Low — best quality (85, up to 4096 px)
+            </option>
+            <option value="medium" selected={@compress_preset == "medium"}>
+              Medium — balanced (70, up to 2048 px)
+            </option>
+            <option value="high" selected={@compress_preset == "high"}>
+              High — smaller file (50, up to 1024 px)
+            </option>
+            <option value="custom" selected={@compress_preset == "custom"}>Custom…</option>
+          </select>
+        </div>
+
+        <div
+          :if={@compress_preset == "custom"}
+          id="compress-custom-params"
+          class="grid grid-cols-2 gap-3"
+        >
+          <div>
+            <label
+              class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5"
+              for="compress-quality"
+            >
+              JPEG quality (1–100)
+            </label>
+            <input
+              id="compress-quality"
+              type="number"
+              min="1"
+              max="100"
+              value={@compress_custom_quality}
+              phx-change="compress_set_param"
+              name="quality"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+            />
+          </div>
+          <div>
+            <label
+              class="block text-sm text-gray-700 dark:text-gray-200 mb-1.5"
+              for="compress-max-width"
+            >
+              Max image width (px)
+            </label>
+            <input
+              id="compress-max-width"
+              type="number"
+              min="1"
+              value={@compress_custom_max_width}
+              phx-change="compress_set_param"
+              name="max_width"
+              class="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+            />
+          </div>
+        </div>
+
+        <label class="inline-flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            id="compress-remove-a11y"
+            checked={@compress_remove_a11y}
+            phx-click="compress_toggle_a11y"
+            class="size-4 rounded border-gray-300 text-accent focus:ring-accent/40"
+          />
+          <span class="text-gray-700 dark:text-gray-200">Remove accessibility tags</span>
+          <span class="text-xs text-gray-400 dark:text-gray-500">
+            (strips /StructTreeRoot and /MarkInfo — off by default to keep tagged PDFs accessible)
+          </span>
+        </label>
+
+        <div :if={@compress_error} class="text-sm text-red-500" role="alert">
+          {@compress_error}
+        </div>
+
+        <div
+          :if={@compress_preview}
+          id="compress-preview"
+          class="rounded-xl border border-chrome-border dark:border-gray-700 p-4 space-y-3"
+        >
+          <div class="flex items-baseline gap-3 text-sm">
+            <span class="text-gray-500 dark:text-gray-400">Before:</span>
+            <span class="font-medium text-gray-800 dark:text-gray-100">{format_bytes(
+              @compress_preview.before_size
+            )}</span>
+            <span class="text-gray-400">→</span>
+            <span class="text-gray-500 dark:text-gray-400">After:</span>
+            <span class="font-medium text-emerald-600 dark:text-emerald-400">{format_bytes(
+              @compress_preview.after_size
+            )}</span>
+            <span class="text-xs text-gray-400 dark:text-gray-500">
+              ({@compress_preview.pct}% smaller)
+            </span>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Page 1 — before</p>
+              <img
+                :if={@compress_preview.before_png}
+                id="compress-preview-before"
+                src={@compress_preview.before_png}
+                alt="Page 1 before compression"
+                class="rounded-lg border border-chrome-border dark:border-gray-700 max-h-64"
+              />
+            </div>
+            <div>
+              <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">Page 1 — after</p>
+              <img
+                :if={@compress_preview.after_png}
+                id="compress-preview-after"
+                src={@compress_preview.after_png}
+                alt="Page 1 after compression"
+                class="rounded-lg border border-chrome-border dark:border-gray-700 max-h-64"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_compress_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            id="compress-preview-btn"
+            phx-click="compress_preview"
+            disabled={@compress_running}
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50"
+          >
+            <.icon :if={@compress_running} name="hero-arrow-path" class="size-4 animate-spin" />
+            <span>Preview</span>
+          </button>
+          <button
+            type="button"
+            id="compress-commit-btn"
+            phx-click="compress_commit"
+            disabled={@compress_running}
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span>Compress</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
       :if={@show_camera_capture}
       title="Scan to PDF"
       on_close="close_camera_capture"
