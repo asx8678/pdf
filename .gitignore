@@ -58,3 +58,4 @@ npm-debug.log
 # rewrites document ids on every run; e2e specs read it and fail with a
 # "seed first" hint when absent).
 /test/visual/fixture_urls.json
+.pi/
