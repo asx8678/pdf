@@ -793,7 +793,6 @@ defmodule Quire.PdfTest do
       assert String.contains?(data, "Tj")
     end
 
-    @tag :broken
     test "generate_appearances/1 saves, flattens and renders the value" do
       qdoc = form_pdf()
 

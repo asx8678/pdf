@@ -533,7 +533,7 @@ defmodule Quire.Pdf.AcroForm do
     {font_name, font_size, color_prefix, color_op} = parse_da(da)
 
     # Resolve font reference from AcroForm /DR /Font
-    font_resources = resolve_font_resources(font_name, acroform_fonts)
+    font_resources = resolve_font_resources(doc, font_name, acroform_fonts)
 
     effective_size = if font_size > 0, do: font_size, else: 12.0
 
@@ -644,19 +644,35 @@ defmodule Quire.Pdf.AcroForm do
 
   # ── Font resource resolution ────────────────────────────────────────────────
 
-  defp resolve_font_resources(font_name, acroform_fonts) do
+  @doc false
+  # Resolve the /DR font entry for an appearance. When a /DR font is advertised
+  # by reference, verify the referenced object actually exists in the document
+  # before emitting a resource entry: a dangling reference (a font object that
+  # was never written) makes the appearance silently render no glyphs. A /DR
+  # that names a standard font (no readable ref) falls back to emitting no
+  # /Resources, so viewers resolve the base-14 font by name and the text still
+  # renders — same as the /DR-less path.
+  defp resolve_font_resources(doc, font_name, acroform_fonts) do
     key = "/#{font_name}"
 
     case Map.get(acroform_fonts, key) do
-      {:ref, _num, _gen} = ref ->
-        %{key => ref}
+      {:ref, num, gen} = ref ->
+        if object_exists?(doc, {num, gen}) do
+          %{key => ref}
+        else
+          %{}
+        end
 
       _ ->
-        # Font not in /DR — pass through as a standard font name.
-        # Common /DR-less forms use /Helv -> Helvetica, /TiRo -> Times-Roman,
-        # /CoBo -> Courier. Any standard PDF font renders even without an
-        # explicit resource entry.
         %{}
+    end
+  end
+
+  # A font/annotation object exists iff it can be read back from the document.
+  defp object_exists?(doc, {num, gen}) do
+    case Pdf.get_object(doc, {num, gen}) do
+      {:ok, _} -> true
+      _ -> false
     end
   end
 

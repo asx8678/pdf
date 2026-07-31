@@ -244,7 +244,14 @@ fn mark_reals_in_object(
         Object::Real(f) => {
             let s = format!("{}", f);
             if !s.contains('.') {
-                let needs_space = matches!(path.last(), Some(MarkerStep::DictKey(_)));
+                // A marker replaces a Name (self-delimiting: lopdf writes no
+                // separator around it) with a number. Numbers are NOT
+                // self-delimiting — "0.0" immediately followed by "350.0"
+                // parses as [0.0, 0.035, 0.0] — so every replacement needs a
+                // leading space, whether the marker sits at a dict value or
+                // inside an array (the array-writer's need_separator is
+                // consulted for the Name marker, which is always false).
+                let needs_space = true;
                 let (pattern, replacement) = make_marker(&s, fixes.len(), needs_space);
                 let name_bytes = pattern[1..].to_vec(); // strip leading '/'
                 fixes.push(RealFix {
