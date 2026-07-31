@@ -354,7 +354,7 @@
 
     <.modal
       :if={@show_camera_capture}
-      title="Scan Document with Camera"
+      title="Scan to PDF"
       on_close="close_camera_capture"
       open={@show_camera_capture}
     >
@@ -469,6 +469,11 @@
           this._video = null;
           this._canvas = document.createElement("canvas");
           this._ctx = this._canvas.getContext("2d");
+          this._edgeCanvas = null;
+          this._edgeCtx = null;
+          this._frameCanvas = document.createElement("canvas");
+          this._frameCtx = this._frameCanvas.getContext("2d");
+          this._raf = null;
           this._clickHandler = null;
         },
 
@@ -477,6 +482,8 @@
           this._removeClickHandler();
           this._canvas = null;
           this._ctx = null;
+          this._frameCanvas = null;
+          this._frameCtx = null;
         },
 
         updated() {
@@ -484,6 +491,11 @@
           const video = this.el.querySelector("video[id^=camera-preview-");
           if (video && !this._stream) {
             this._video = video;
+            const overlay = this.el.querySelector("canvas[id^=edge-overlay-");
+            if (overlay) {
+              this._edgeCanvas = overlay;
+              this._edgeCtx = overlay.getContext("2d");
+            }
             this.startCamera();
           }
 
@@ -526,6 +538,7 @@
             }
 
             this.pushEvent("camera_ready_event", {});
+            this._startEdgeLoop();
           } catch (err) {
             this.pushEvent("camera_error_event", {
               message: err.name || err.message || "Unknown error"
@@ -534,6 +547,13 @@
         },
 
         stopCamera() {
+          if (this._raf) {
+            cancelAnimationFrame(this._raf);
+            this._raf = null;
+          }
+          if (this._edgeCtx && this._edgeCanvas) {
+            this._edgeCtx.clearRect(0, 0, this._edgeCanvas.width, this._edgeCanvas.height);
+          }
           if (this._stream) {
             this._stream.getTracks().forEach(track => track.stop());
             this._stream = null;
@@ -543,6 +563,52 @@
             this._video = null;
           }
           this._removeClickHandler();
+        },
+
+        // Live Sobel edge-detection overlay — paints strong edges in green so
+        // the user can line the document up with the detected borders (§9.2).
+        _startEdgeLoop() {
+          if (this._raf) return;
+          const tick = () => {
+            if (!this._stream || !this._video || !this._edgeCtx) return;
+            const vw = this._video.videoWidth || 0;
+            const vh = this._video.videoHeight || 0;
+            if (vw < 8 || vh < 8) {
+              this._raf = requestAnimationFrame(tick);
+              return;
+            }
+            // Process at half resolution, then let CSS scale the overlay.
+            const w = Math.floor(vw / 2);
+            const h = Math.floor(vh / 2);
+            if (this._edgeCanvas.width !== w) this._edgeCanvas.width = w;
+            if (this._edgeCanvas.height !== h) this._edgeCanvas.height = h;
+            if (this._frameCanvas.width !== w) this._frameCanvas.width = w;
+            if (this._frameCanvas.height !== h) this._frameCanvas.height = h;
+
+            this._frameCtx.drawImage(this._video, 0, 0, w, h);
+            const src = this._frameCtx.getImageData(0, 0, w, h).data;
+            const out = this._edgeCtx.createImageData(w, h);
+            const o = out.data;
+
+            // Sobel magnitude; green highlight where the gradient is strong.
+            for (let y = 1; y < h - 1; y++) {
+              for (let x = 1; x < w - 1; x++) {
+                const i = (y * w + x) * 4;
+                const l00 = lum(src, i - w * 4 - 4), l10 = lum(src, i - w * 4), l20 = lum(src, i - w * 4 + 4);
+                const l01 = lum(src, i - 4),                       l21 = lum(src, i + 4);
+                const l02 = lum(src, i + w * 4 - 4), l12 = lum(src, i + w * 4), l22 = lum(src, i + w * 4 + 4);
+                const gx = (l20 + 2 * l21 + l22) - (l00 + 2 * l01 + l02);
+                const gy = (l02 + 2 * l12 + l22) - (l00 + 2 * l10 + l20);
+                const mag = Math.sqrt(gx * gx + gy * gy);
+                if (mag > 90) {
+                  o[i] = 74; o[i + 1] = 222; o[i + 2] = 128; o[i + 3] = 150;
+                }
+              }
+            }
+            this._edgeCtx.putImageData(out, 0, 0);
+            this._raf = requestAnimationFrame(tick);
+          };
+          this._raf = requestAnimationFrame(tick);
         },
 
         capture() {
@@ -566,6 +632,33 @@
             if (btn) btn.removeEventListener("click", this._clickHandler);
             this._clickHandler = null;
           }
+        }
+      }
+
+      function lum(d, i) {
+        return 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      }
+    </script>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".ScanFileInput">
+      export default {
+        mounted() {
+          this.el.addEventListener("change", (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+              this.pushEvent("scan_file_ready", {
+                dataUrl: reader.result,
+                deskew: this.el.dataset.deskew,
+                contrast: this.el.dataset.contrast,
+                ocr: this.el.dataset.ocr,
+                title: file.name.replace(/\.[^.]+$/, "")
+              });
+            };
+            reader.readAsDataURL(file);
+            this.el.value = "";
+          });
         }
       }
     </script>

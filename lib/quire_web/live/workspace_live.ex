@@ -2317,7 +2317,7 @@ defmodule QuireWeb.WorkspaceLive do
             icon="hero-camera"
             label="Scan"
             phx-click="open_camera_capture"
-            tooltip="Scan a document with your device camera and OCR it to a searchable PDF"
+            tooltip="Scan a document with your device camera or a photo — deskewed and contrast-corrected PDF"
             disabled={@show_camera_capture || @scan_progress != nil}
           />
         </.ribbon_group>
@@ -3581,49 +3581,119 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
-  # ── Async scan processing (handles the {:scan_image, ...} message from
-  # CameraCaptureComponent) ──────────────────────────────────────────────
+  # ── Scan processing (T-080): camera capture + file input both land here
+  # with the same image bytes and options, and both feed the same image→PDF
+  # path (Quire.Scan). The "make searchable" option additionally OCRs (T-144).
+  # ─────────────────────────────────────────────────────────────────────
 
   @impl true
-  def handle_info({:scan_image, data_url, title}, socket) do
-    # Decode the data URL: "data:image/jpeg;base64,/9j..."
+  def handle_info({:scan_image, data_url, title, opts}, socket) do
     image_bytes = decode_data_url(data_url)
+    {:noreply, process_scan(socket, image_bytes, title || "Scan", opts)}
+  end
 
+  # Camera capture with a plain 3-tuple (legacy callers) — defaults to a
+  # plain scan-to-PDF, no OCR.
+  @impl true
+  def handle_info({:scan_image, data_url, title}, socket) do
+    image_bytes = decode_data_url(data_url)
+    {:noreply, process_scan(socket, image_bytes, title || "Scan", %{})}
+  end
+
+  # File input with camera capture (the .ScanFileInput colocated hook).
+  @impl true
+  def handle_event("scan_file_ready", params, socket) do
+    image_bytes = decode_data_url(params["dataUrl"])
+
+    opts = %{
+      deskew: params["deskew"] != "false",
+      contrast: params["contrast"] || "auto",
+      ocr: params["ocr"] == "true"
+    }
+
+    {:noreply, process_scan(socket, image_bytes, params["title"] || "Scan", opts)}
+  end
+
+  defp process_scan(socket, image_bytes, title, opts) do
     socket =
       socket
       |> assign(:show_camera_capture, false)
       |> assign(:scan_job_id, nil)
       |> assign(:scan_error, nil)
-      |> assign(:scan_progress, %{pct: 0, message: "Starting OCR…"})
+      |> assign(:scan_progress, %{pct: 0, message: "Building PDF…"})
 
-    # Run ImageOcrWorker directly (single image, synchronous-style) so
-    # progress and cancellation are straightforward.
-    socket =
-      case Quire.Workers.ImageOcrWorker.process(
-             image_bytes,
-             title || "Scan",
-             socket.assigns.current_scope
-           ) do
-        {:ok, %{document: doc}} ->
-          socket
-          |> assign(:scan_progress, %{pct: 100, message: "Complete!"})
-          |> push_navigate(to: ~p"/workspace/#{doc.id}")
-
-        {:error, {:invalid_image, msg}} ->
-          socket
-          |> assign(:scan_progress, nil)
-          |> assign(:scan_error, {:invalid_image, msg})
-          |> put_flash(:error, msg)
-
-        {:error, reason} ->
-          socket
-          |> assign(:scan_progress, nil)
-          |> assign(:scan_error, {:pipeline_error, inspect(reason)})
-          |> put_flash(:error, "Scan OCR failed: #{inspect(reason)}")
-      end
-
-    {:noreply, socket}
+    if Map.get(opts, :ocr, false) do
+      process_ocr_scan(socket, image_bytes, title)
+    else
+      process_pdf_scan(socket, image_bytes, title, opts)
+    end
   end
+
+  defp process_pdf_scan(socket, image_bytes, title, opts) do
+    deskew? = Map.get(opts, :deskew, true)
+    contrast = scan_contrast(Map.get(opts, :contrast, "auto"))
+
+    case Quire.Scan.image_to_pdf(image_bytes, deskew: deskew?, contrast: contrast) do
+      {:ok, pdf_bytes} ->
+        case Quire.Documents.ingest(pdf_bytes, socket.assigns.current_scope, title: title) do
+          {:ok, %{document: doc}} ->
+            socket
+            |> assign(:scan_progress, %{pct: 100, message: "Complete!"})
+            |> push_navigate(to: ~p"/workspace/#{doc.id}")
+
+          {:error, reason} ->
+            socket
+            |> assign(:scan_progress, nil)
+            |> assign(:scan_error, {:pipeline_error, inspect(reason)})
+            |> put_flash(:error, "Scan failed: #{inspect(reason)}")
+        end
+
+      {:error, {:invalid_image, msg}} ->
+        socket
+        |> assign(:scan_progress, nil)
+        |> assign(:scan_error, {:invalid_image, msg})
+        |> put_flash(:error, msg)
+
+      {:error, reason} ->
+        socket
+        |> assign(:scan_progress, nil)
+        |> assign(:scan_error, {:pipeline_error, inspect(reason)})
+        |> put_flash(:error, "Scan failed: #{inspect(reason)}")
+    end
+  end
+
+  # T-144: optional "make searchable" step keeps the OCR pipeline behind the
+  # same scan entry point.
+  defp process_ocr_scan(socket, image_bytes, title) do
+    socket = assign(socket, :scan_progress, %{pct: 0, message: "Running OCR…"})
+
+    case Quire.Workers.ImageOcrWorker.process(image_bytes, title, socket.assigns.current_scope) do
+      {:ok, %{document: doc}} ->
+        socket
+        |> assign(:scan_progress, %{pct: 100, message: "Complete!"})
+        |> push_navigate(to: ~p"/workspace/#{doc.id}")
+
+      {:error, {:invalid_image, msg}} ->
+        socket
+        |> assign(:scan_progress, nil)
+        |> assign(:scan_error, {:invalid_image, msg})
+        |> put_flash(:error, msg)
+
+      {:error, reason} ->
+        socket
+        |> assign(:scan_progress, nil)
+        |> assign(:scan_error, {:pipeline_error, inspect(reason)})
+        |> put_flash(:error, "Scan OCR failed: #{inspect(reason)}")
+    end
+  end
+
+  # Contrast arrives as a string from the UI; map it onto the fixed preset
+  # atoms only (never String.to_atom on user input).
+  defp scan_contrast("none"), do: :none
+  defp scan_contrast("high"), do: :high
+  defp scan_contrast("low"), do: :low
+  defp scan_contrast("bw"), do: :bw
+  defp scan_contrast(_), do: :auto
 
   @impl true
   def handle_info({:close_camera_modal}, socket) do
