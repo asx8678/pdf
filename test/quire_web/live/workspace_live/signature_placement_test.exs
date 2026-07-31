@@ -10,7 +10,7 @@ defmodule QuireWeb.WorkspaceLive.SignaturePlacementTest do
   setup do
     user = user_fixture()
     doc = document_fixture(user)
-    revision_fixture(doc)
+    doc = revision_fixture(doc)
     %{user: user, doc: doc, conn: build_conn()}
   end
 
@@ -37,7 +37,7 @@ defmodule QuireWeb.WorkspaceLive.SignaturePlacementTest do
       |> element(~s{button[phx-click="signature_use"][phx-value-id="#{sig["id"]}"]})
       |> render_click()
 
-      assert_push_event(lv, "enable_signature_placement", %{"signature" => sent})
+      assert_push_event(lv, "enable_signature_placement", %{signature: sent})
       assert sent["id"] == sig["id"]
       assert sent["type"] == "draw"
     end
@@ -46,8 +46,8 @@ defmodule QuireWeb.WorkspaceLive.SignaturePlacementTest do
       {:ok, lv, _html} = live_workspace(doc, conn)
 
       lv
-      |> element("button[phx-value-id=\"missing\"]")
-      |> render_click()
+      |> element("#document-canvas")
+      |> render_hook("signature_use", %{"id" => "missing"})
 
       assert has_element?(lv, ~s{[role="alert"]}, "Signature not found")
     end
@@ -66,7 +66,7 @@ defmodule QuireWeb.WorkspaceLive.SignaturePlacementTest do
         "png" => Base.encode64(png)
       })
 
-      assert_push_event(lv, "open_document", %{"url" => url, "password" => nil})
+      assert_push_event(lv, "open_document", %{url: url, password: nil})
       assert url == "/documents/#{doc.id}/pdf"
 
       # A new revision exists and its bytes render the placed signature
@@ -94,7 +94,7 @@ defmodule QuireWeb.WorkspaceLive.SignaturePlacementTest do
         "png" => Base.encode64(png)
       })
 
-      assert_push_event(lv, "signature_placement_failed", %{"reason" => reason})
+      assert_push_event(lv, "signature_placement_failed", %{reason: reason})
       assert reason =~ "bad_rect"
 
       # No new revision was created

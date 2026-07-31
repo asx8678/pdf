@@ -33,15 +33,30 @@ defmodule Quire.Documents.Revision do
   Extract the `Storage.Ref` from a revision's source map.
 
   Returns `nil` when the revision has no storage ref or the ref is malformed.
+
+  Source maps are stored as JSON (`Ecto` `:map` column), so the ref keys
+  arrive back as strings — `struct/2` only accepts atom keys, so the map is
+  translated explicitly.
   """
   @spec storage_ref(t()) :: Quire.Storage.Ref.t() | nil
   def storage_ref(%__MODULE__{} = revision) do
     case revision.source do
-      %{"storage_ref" => ref_map} when is_map(ref_map) ->
-        struct(Quire.Storage.Ref, ref_map)
-
-      _ ->
-        nil
+      %{"storage_ref" => ref_map} when is_map(ref_map) -> ref_from_map(ref_map)
+      %{storage_ref: ref_map} when is_map(ref_map) -> ref_from_map(ref_map)
+      _ -> nil
     end
+  end
+
+  # Rebuild a Ref from a JSON-decoded (string-keyed) or native (atom-keyed)
+  # map. Only the struct fields are read; unknown keys are ignored.
+  defp ref_from_map(ref_map) do
+    Enum.reduce(
+      [:adapter, :key, :name, :content_type, :byte_size, :meta],
+      %Quire.Storage.Ref{},
+      fn field, acc ->
+        value = Map.get(ref_map, Atom.to_string(field)) || Map.get(ref_map, field)
+        Map.put(acc, field, value)
+      end
+    )
   end
 end

@@ -335,7 +335,8 @@ defmodule Quire.Editing.EditSession do
       # Query page metrics
       {page_count, page_geometries} = query_page_metrics(ref)
 
-      now = DateTime.utc_now()
+      # `:utc_datetime` columns reject microsecond precision
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
 
       # Build revision source map pointing to the stored bytes
       ref_map = %{
@@ -404,7 +405,9 @@ defmodule Quire.Editing.EditSession do
   end
 
   defp insert_page_rows(revision_id, geometries) do
-    now = DateTime.utc_now()
+    # `:utc_datetime` columns reject microsecond precision; Page.width/height
+    # are `:float` while page_geometry reports truncated integers.
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
 
     rows =
       geometries
@@ -413,8 +416,8 @@ defmodule Quire.Editing.EditSession do
         %{
           revision_id: revision_id,
           page_index: idx,
-          width: geom.width,
-          height: geom.height,
+          width: geom.width * 1.0,
+          height: geom.height * 1.0,
           inserted_at: now,
           updated_at: now
         }
