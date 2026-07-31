@@ -43,7 +43,9 @@ defmodule QuireWeb.Chrome.SignaturesPanel do
     use_event = if slot == "initials", do: "initials_use", else: "signature_use"
     delete_event = if slot == "initials", do: "delete_initials", else: "delete_signature"
     saved_heading = if slot == "initials", do: "Saved initials", else: "Saved signatures"
-    saved_empty = if slot == "initials", do: "No saved initials yet", else: "No saved signatures yet"
+
+    saved_empty =
+      if slot == "initials", do: "No saved initials yet", else: "No saved signatures yet"
 
     assigns =
       assign(assigns,
