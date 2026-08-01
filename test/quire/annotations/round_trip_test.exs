@@ -28,9 +28,8 @@ defmodule Quire.Annotations.RoundTripTest do
   for m <- @manifest do
     kind = m["kind"]
     file = m["file"]
-    exp_type = m["expected_type"]
     subtype = m["subtype"]
-    native_reports = m["native_reports"] || exp_type
+    native_reports = m["native_reports"] || m["expected_type"]
     exp_nm = m["expected_nm"]
     exp_contents = m["expected_contents"]
     author = m["author"]
@@ -39,7 +38,6 @@ defmodule Quire.Annotations.RoundTripTest do
     test "kind #{kind} (#{file}) round-trips losslessly" do
       kind = unquote(kind)
       file = unquote(file)
-      exp_type = unquote(exp_type)
       subtype = unquote(subtype)
       native_reports = unquote(native_reports)
       exp_nm = unquote(exp_nm)
