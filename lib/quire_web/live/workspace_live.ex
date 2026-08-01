@@ -1347,6 +1347,149 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
+  # ── Field properties dialog (T-120 §9.8) ────────────────────────────────
+
+  def handle_event("open_field_props", params, socket) do
+    name = params["name"] || "Field"
+    kind = params["kind"] || "text"
+    ref = params["ref"]
+
+    props = %{
+      ref: ref,
+      name: name,
+      kind: kind,
+      tooltip: params["tooltip"] || "",
+      default: params["default"] || "",
+      required: params["required"] == "true",
+      read_only: params["read_only"] == "true",
+      multiline: params["multiline"] == "true",
+      max_length: params["max_length"] || "",
+      options: field_options(params),
+      export_value: params["export_value"] || "",
+      label: params["label"] || "Button",
+      group: params["group"] || ""
+    }
+
+    {:noreply,
+     socket
+     |> assign(:field_props, props)
+     |> assign(:show_field_props, true)}
+  end
+
+  def handle_event("save_field_props", params, socket) do
+    props = socket.assigns.field_props
+
+    with true <- props != nil,
+         {:ok, doc} <- current_pdf_doc(socket),
+         {:ok, field_id} <- parse_field_ref(props.ref),
+         :ok <- apply_field_props(doc, field_id, props, params) do
+      case save_new_revision(socket, doc, "Edit field properties") do
+        {:ok, _rev} ->
+          {:noreply,
+           socket
+           |> assign(:show_field_props, false)
+           |> put_flash(:info, "Updated field \"#{props.name}\"")}
+
+        {:error, reason} ->
+          {:noreply,
+           put_flash(socket, :error, "Could not save field properties: #{inspect(reason)}")}
+      end
+    else
+      _ ->
+        {:noreply,
+         socket
+         |> assign(:show_field_props, false)
+         |> put_flash(:error, "Could not update field")}
+    end
+  end
+
+  def handle_event("cancel_field_props", _params, socket) do
+    {:noreply, assign(socket, :show_field_props, false)}
+  end
+
+  # Live-edits the dialog draft (phx-change from each input).
+  def handle_event("update_field_props_draft", params, socket) do
+    props = socket.assigns.field_props
+
+    if props == nil do
+      {:noreply, socket}
+    else
+      key = params["key"]
+      value = params["value"]
+
+      updated =
+        case key do
+          "required" -> Map.put(props, :required, value == "true")
+          "read_only" -> Map.put(props, :read_only, value == "true")
+          "options" -> Map.put(props, :options, field_options(params))
+          _ when is_binary(key) -> Map.put(props, String.to_atom(key), value || "")
+          _ -> props
+        end
+
+      {:noreply, assign(socket, :field_props, updated)}
+    end
+  end
+
+  defp parse_field_ref(nil), do: {:error, :no_ref}
+
+  defp parse_field_ref(ref) when is_binary(ref) do
+    case Integer.parse(ref) do
+      {n, _} -> {:ok, n}
+      :error -> {:error, :bad_ref}
+    end
+  end
+
+  defp parse_field_ref({num, _gen}), do: {:ok, num}
+  defp parse_field_ref(n) when is_integer(n), do: {:ok, n}
+
+  defp apply_field_props(doc, field_id, props, params) do
+    name = props.name || params["name"]
+    tooltip = props.tooltip || params["tooltip"]
+    default = props.default || params["default"]
+    required = props.required || params["required"] == "true"
+    read_only = props.read_only || params["read_only"] == "true"
+    max_length = props.max_length || params["max_length"]
+
+    flags = 0
+    flags = if required, do: flags + 2, else: flags
+    flags = if read_only, do: flags + 1, else: flags
+
+    updates =
+      %{}
+      |> Map.put("/T", name || "Field")
+      |> maybe_put("/TU", tooltip)
+      |> maybe_put("/V", default)
+      |> maybe_put("/MaxLen", parse_int(max_length))
+      |> maybe_put("/Ff", if(flags > 0, do: flags, else: nil))
+      |> maybe_put("/Opt", build_opt(props.options))
+      |> maybe_put("/A", build_button_action(params["action"]))
+
+    Quire.Pdf.AcroForm.update_field(doc, field_id, updates)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp parse_int(""), do: nil
+  defp parse_int(nil), do: nil
+
+  defp parse_int(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, _} -> n
+      :error -> nil
+    end
+  end
+
+  defp build_opt([]), do: nil
+  defp build_opt(options), do: Enum.map(options, &to_string/1)
+
+  defp build_button_action(nil), do: nil
+  defp build_button_action(""), do: nil
+  defp build_button_action("submit"), do: %{"/S" => {:name, "SubmitForm"}}
+  defp build_button_action("reset"), do: %{"/S" => {:name, "ResetForm"}}
+  defp build_button_action(_), do: nil
+
   # ── Fill & Sign auto-fill (T-118 §9.4) ────────────────────────────────────
   #
   # Detection runs off the LiveView process (see maybe_run_fill_sign_detection/1,
@@ -6660,6 +6803,165 @@ defmodule QuireWeb.WorkspaceLive do
             ]}
           >
             Apply
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <!-- Field properties dialog (T-120 §9.8) -->
+    <.modal
+      title="Field properties"
+      open={@show_field_props}
+      on_close="cancel_field_props"
+      size="large"
+    >
+      <div :if={@field_props} class="space-y-5">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+            <input
+              type="text"
+              name="name"
+              value={@field_props.name}
+              phx-change="update_field_props_draft"
+              phx-value-key="name"
+              class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tooltip</label>
+            <input
+              type="text"
+              name="tooltip"
+              value={@field_props.tooltip}
+              phx-change="update_field_props_draft"
+              phx-value-key="tooltip"
+              class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Default value</label>
+            <input
+              type="text"
+              name="default"
+              value={@field_props.default}
+              phx-change="update_field_props_draft"
+              phx-value-key="default"
+              class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Max length</label>
+            <input
+              type="number"
+              min="0"
+              name="max_length"
+              value={@field_props.max_length}
+              phx-change="update_field_props_draft"
+              phx-value-key="max_length"
+              class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+            />
+          </div>
+        </div>
+
+        <div class="flex items-center gap-6">
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              name="required"
+              checked={@field_props.required}
+              phx-change="update_field_props_draft"
+              phx-value-key="required"
+              phx-value-value={if @field_props.required, do: "false", else: "true"}
+            /> Required
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <input
+              type="checkbox"
+              name="read_only"
+              checked={@field_props.read_only}
+              phx-change="update_field_props_draft"
+              phx-value-key="read_only"
+              phx-value-value={if @field_props.read_only, do: "false", else: "true"}
+            /> Read-only
+          </label>
+        </div>
+
+        <div
+          :if={@field_props.kind in ["combo", "list"]}
+          class="border-t border-chrome-border dark:border-gray-600 pt-4"
+        >
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Options (one per line)
+          </label>
+          <textarea
+            name="options"
+            rows="4"
+            value={Enum.join(@field_props.options, "\n")}
+            phx-change="update_field_props_draft"
+            phx-value-key="options"
+            class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-mono"
+          ></textarea>
+        </div>
+
+        <div
+          :if={@field_props.kind == "button"}
+          class="border-t border-chrome-border dark:border-gray-600 pt-4"
+        >
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Label</label>
+          <input
+            type="text"
+            name="label"
+            value={@field_props.label}
+            phx-change="update_field_props_draft"
+            phx-value-key="label"
+            class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+          />
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mt-3 mb-1">Action</label>
+          <select
+            name="action"
+            phx-change="update_field_props_draft"
+            phx-value-key="action"
+            class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+          >
+            <option value="">None</option>
+            <option value="submit">Submit form</option>
+            <option value="reset">Reset form</option>
+          </select>
+        </div>
+
+        <div
+          :if={@field_props.kind == "radio"}
+          class="border-t border-chrome-border dark:border-gray-600 pt-4"
+        >
+          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Group name</label>
+          <input
+            type="text"
+            name="group"
+            value={@field_props.group}
+            phx-change="update_field_props_draft"
+            phx-value-key="group"
+            class="w-full px-3 py-1.5 text-sm border border-chrome-border dark:border-gray-600 rounded-lg bg-chrome-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+          />
+        </div>
+
+        <div class="flex items-center justify-end gap-3 pt-4 border-t border-chrome-border dark:border-gray-600">
+          <button
+            type="button"
+            phx-click="cancel_field_props"
+            class="px-4 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            phx-click="save_field_props"
+            class="px-4 py-1.5 text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent/90 transition-colors cursor-pointer"
+          >
+            Save
           </button>
         </div>
       </div>
