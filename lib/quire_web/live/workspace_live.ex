@@ -72,6 +72,20 @@ defmodule QuireWeb.WorkspaceLive do
     :translate
   ]
 
+  # Fill & Sign tab tools (T-117). Stored as strings — never converted to
+  # atoms from user input.
+  @fill_sign_tools ~w(text crossmark checkmark dot line)
+  @fill_sign_fonts ~w(Helvetica Times Courier)
+  @fill_sign_palette_tools [
+    %{id: "text", icon: "hero-pencil", label: "Text"},
+    %{id: "crossmark", icon: "hero-x-mark", label: "Crossmark"},
+    %{id: "checkmark", icon: "hero-check", label: "Checkmark"},
+    %{id: "dot", icon: "hero-circle", label: "Filled dot"},
+    %{id: "line", icon: "hero-minus", label: "Line"}
+  ]
+  @fill_sign_font_sizes ~w(8 10 12 14 18 24 32)
+  @fill_sign_line_weights ~w(1 2 3 4 6)
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     scope = socket.assigns.current_scope
@@ -248,6 +262,13 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:merge_forms, "keep")
       |> assign(:merge_running, false)
       |> assign(:merge_error, nil)
+      |> assign(:fill_sign_tool, nil)
+      |> assign(:fill_sign_font, "Helvetica")
+      |> assign(:fill_sign_font_size, "12")
+      |> assign(:fill_sign_text_color, "#1f2937")
+      |> assign(:fill_sign_glyph_color, "#1f2937")
+      |> assign(:fill_sign_line_weight, "2")
+      |> assign(:fill_sign_line_color, "#1f2937")
       |> load_user_settings()
       |> load_saved_signatures()
       |> load_saved_initials()
@@ -460,6 +481,17 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:backstage_open, false)
       |> assign(:backstage_view, nil)
       |> assign(:fullscreen, false)
+
+    # Esc deactivates the active Fill & Sign tool (T-117).
+    socket =
+      if socket.assigns.fill_sign_tool do
+        push_event(assign(socket, :fill_sign_tool, nil), "toggle_fill_sign_tool", %{
+          tool: "",
+          active: false
+        })
+      else
+        socket
+      end
 
     {:noreply, socket}
   end
@@ -1038,6 +1070,141 @@ defmodule QuireWeb.WorkspaceLive do
   # single-shot format painter in the ribbon.
   def handle_event("format_painter_applied", _params, socket) do
     {:noreply, assign(socket, :format_painter_active, false)}
+  end
+
+  # Fill & Sign tab palette (T-117). The five lightweight self-signing tools
+  # are stored as strings (never converted to atoms from user input) and are
+  # exclusive: selecting one clears the previous one. The chosen tool and its
+  # option settings are pushed to the client's PdfViewerHook, which owns the
+  # draw layer (FreeText editor for text, vector SVG overlays for the glyphs
+  # and line).
+  def handle_event("toggle_fill_sign_tool", %{"tool" => tool}, socket)
+      when tool in @fill_sign_tools do
+    active = socket.assigns.fill_sign_tool != tool
+
+    socket =
+      socket
+      |> assign(:fill_sign_tool, if(active, do: tool, else: nil))
+      |> push_event("toggle_fill_sign_tool", %{
+        tool: tool,
+        active: active,
+        font: socket.assigns.fill_sign_font,
+        font_size: socket.assigns.fill_sign_font_size,
+        text_color: socket.assigns.fill_sign_text_color,
+        glyph_color: socket.assigns.fill_sign_glyph_color,
+        line_weight: socket.assigns.fill_sign_line_weight,
+        line_color: socket.assigns.fill_sign_line_color
+      })
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_fill_sign_tool", _params, socket) do
+    {:noreply, socket}
+  end
+
+  # Deactivate the active Fill & Sign tool (palette "Done" button or the Esc
+  # key — the Escape keydown handler also clears it).
+  def handle_event("deactivate_fill_sign_tool", _params, socket) do
+    socket =
+      socket
+      |> assign(:fill_sign_tool, nil)
+      |> push_event("toggle_fill_sign_tool", %{tool: "", active: false})
+
+    {:noreply, socket}
+  end
+
+  # ── Fill & Sign option controls (font / size / colour / weight) ─────────
+
+  def handle_event("set_fill_sign_font", %{"value" => font}, socket)
+      when font in @fill_sign_fonts do
+    socket =
+      socket
+      |> assign(:fill_sign_font, font)
+      |> push_event("fill_sign_options", %{font: font})
+
+    {:noreply, socket}
+  end
+
+  # The <select> sends its current value under "value"; we also accept the
+  # literal key for robustness / direct event tests.
+  def handle_event("set_fill_sign_font", %{"font" => font}, socket)
+      when font in @fill_sign_fonts do
+    socket =
+      socket
+      |> assign(:fill_sign_font, font)
+      |> push_event("fill_sign_options", %{font: font})
+
+    {:noreply, socket}
+  end
+
+  # Unknown sign guard fallback: no-op rather than crash.
+  def handle_event("set_fill_sign_font", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("set_fill_sign_text_size", %{"value" => size}, socket) do
+    socket =
+      socket
+      |> assign(:fill_sign_font_size, size)
+      |> push_event("fill_sign_options", %{font_size: size})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("set_fill_sign_text_size", %{"size" => size}, socket) do
+    socket =
+      socket
+      |> assign(:fill_sign_font_size, size)
+      |> push_event("fill_sign_options", %{font_size: size})
+
+    {:noreply, socket}
+  end
+
+  # Colour controls send the native colour input's value under "value".
+  def handle_event("set_fill_sign_text_color", %{"value" => color}, socket)
+      when is_binary(color) do
+    {:noreply, handle_fill_sign_color(socket, :fill_sign_text_color, :text_color, color)}
+  end
+
+  def handle_event("set_fill_sign_text_color", %{"color" => color}, socket) do
+    {:noreply, handle_fill_sign_color(socket, :fill_sign_text_color, :text_color, color)}
+  end
+
+  def handle_event("set_fill_sign_glyph_color", %{"value" => color}, socket)
+      when is_binary(color) do
+    {:noreply, handle_fill_sign_color(socket, :fill_sign_glyph_color, :glyph_color, color)}
+  end
+
+  def handle_event("set_fill_sign_glyph_color", %{"color" => color}, socket) do
+    {:noreply, handle_fill_sign_color(socket, :fill_sign_glyph_color, :glyph_color, color)}
+  end
+
+  def handle_event("set_fill_sign_line_weight", %{"value" => weight}, socket) do
+    socket =
+      socket
+      |> assign(:fill_sign_line_weight, weight)
+      |> push_event("fill_sign_options", %{line_weight: weight})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("set_fill_sign_line_weight", %{"weight" => weight}, socket) do
+    socket =
+      socket
+      |> assign(:fill_sign_line_weight, weight)
+      |> push_event("fill_sign_options", %{line_weight: weight})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("set_fill_sign_line_color", %{"value" => color}, socket)
+      when is_binary(color) do
+    {:noreply, handle_fill_sign_color(socket, :fill_sign_line_color, :line_color, color)}
+  end
+
+  def handle_event("set_fill_sign_line_color", %{"color" => color}, socket) do
+    {:noreply, handle_fill_sign_color(socket, :fill_sign_line_color, :line_color, color)}
   end
 
   @doc """
@@ -3421,6 +3588,13 @@ defmodule QuireWeb.WorkspaceLive do
   defp coerce_id(id) when is_binary(id), do: id
   defp coerce_id(id) when is_integer(id), do: Integer.to_string(id)
 
+  # Shared update/push for a Fill & Sign colour control.
+  defp handle_fill_sign_color(socket, assign_key, event_key, color) when is_binary(color) do
+    socket
+    |> assign(assign_key, color)
+    |> push_event("fill_sign_options", %{event_key => color})
+  end
+
   attr :ocr_running, :boolean, default: false
   attr :ocr_progress, :map, default: nil
 
@@ -3548,10 +3722,17 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:translate_mode, fn -> "overlay" end)
       |> assign_new(:translate_provider_label, fn -> nil end)
       |> assign_new(:translate_results, fn -> [] end)
+      |> assign_new(:fill_sign_tool, fn -> nil end)
+      |> assign_new(:fill_sign_font, fn -> "Helvetica" end)
+      |> assign_new(:fill_sign_font_size, fn -> "12" end)
+      |> assign_new(:fill_sign_text_color, fn -> "#1f2937" end)
+      |> assign_new(:fill_sign_glyph_color, fn -> "#1f2937" end)
+      |> assign_new(:fill_sign_line_weight, fn -> "2" end)
+      |> assign_new(:fill_sign_line_color, fn -> "#1f2937" end)
 
     ~H"""
     <div
-      class="chrome-ribbon flex items-center px-4 bg-chrome-white dark:bg-gray-800 border-b border-chrome-border dark:border-gray-600"
+      class="chrome-ribbon relative flex items-center px-4 bg-chrome-white dark:bg-gray-800 border-b border-chrome-border dark:border-gray-600"
       role="toolbar"
       aria-label="Ribbon"
       aria-orientation="horizontal"
@@ -4300,14 +4481,239 @@ defmodule QuireWeb.WorkspaceLive do
         </.ribbon_group>
       </div>
 
+      <!-- Fill & Sign tab ribbon (T-117): the five lightweight self-signing
+           tools. Each ribbon button carries an aria-label (its tooltip). The
+           palette below floats beneath the ribbon and highlights the tool. -->
+      <div :if={@active_tab == "fill-sign"} class="flex items-center gap-1 flex-1">
+        <.ribbon_group label="Palette">
+          <.ribbon_button
+            icon="hero-pencil"
+            label="Text"
+            active={@fill_sign_tool == "text"}
+            phx-click="toggle_fill_sign_tool"
+            phx-value-tool="text"
+            tooltip="Add text — free-text box with font, size and colour, auto-sized to content"
+          />
+          <.ribbon_button
+            icon="hero-x-mark"
+            label="Crossmark"
+            active={@fill_sign_tool == "crossmark"}
+            phx-click="toggle_fill_sign_tool"
+            phx-value-tool="crossmark"
+            tooltip="Crossmark — resizable vector glyph that snaps to nearby form-field-sized boxes"
+          />
+          <.ribbon_button
+            icon="hero-check"
+            label="Checkmark"
+            active={@fill_sign_tool == "checkmark"}
+            phx-click="toggle_fill_sign_tool"
+            phx-value-tool="checkmark"
+            tooltip="Checkmark — resizable vector glyph that snaps to nearby form-field-sized boxes"
+          />
+          <.ribbon_button
+            icon="hero-circle"
+            label="Filled dot"
+            active={@fill_sign_tool == "dot"}
+            phx-click="toggle_fill_sign_tool"
+            phx-value-tool="dot"
+            tooltip="Filled dot — resizable vector glyph for radio-button-style fields"
+          />
+          <.ribbon_button
+            icon="hero-minus"
+            label="Line"
+            active={@fill_sign_tool == "line"}
+            phx-click="toggle_fill_sign_tool"
+            phx-value-tool="line"
+            tooltip="Line — straight line with adjustable weight and colour; shift-constrains to horizontal/vertical"
+          />
+        </.ribbon_group>
+      </div>
+
+      <.fill_sign_palette
+        active_tab={@active_tab}
+        tool={@fill_sign_tool}
+        font={@fill_sign_font}
+        font_size={@fill_sign_font_size}
+        text_color={@fill_sign_text_color}
+        glyph_color={@fill_sign_glyph_color}
+        line_weight={@fill_sign_line_weight}
+        line_color={@fill_sign_line_color}
+      />
+
       <div :if={
         @active_tab not in @view_toggle_tabs and @active_tab != "create-convert" and
-          @active_tab != "page" and @active_tab != "esign" and @active_tab != "translate"
+          @active_tab != "page" and @active_tab != "esign" and @active_tab != "translate" and
+          @active_tab != "fill-sign"
       }>
         <p class="text-sm text-gray-400 dark:text-gray-500 italic px-4">
           Select a tool
         </p>
       </div>
+    </div>
+    """
+  end
+
+  # ── Fill & Sign palette (T-117) ─────────────────────────────────────────
+  #
+  # A floating option panel that appears directly below the ribbon while the
+  # Fill & Sign tab is active. It re-lists the five tool glyphs (so the
+  # active tool is highlighted here, mirroring the ribbon), and shows the
+  # option controls for the active tool: Text gets font/size/colour, the
+  # vector glyphs get colour, Line gets weight/colour. A Done button (or
+  # the Esc key) deactivates the active tool.
+  attr :active_tab, :string, required: true
+  attr :tool, :string, default: nil
+  attr :font, :string, default: "Helvetica"
+  attr :font_size, :string, default: "12"
+  attr :text_color, :string, default: "#1f2937"
+  attr :glyph_color, :string, default: "#1f2937"
+  attr :line_weight, :string, default: "2"
+  attr :line_color, :string, default: "#1f2937"
+  attr :fonts, :list, default: @fill_sign_fonts
+
+  def fill_sign_palette(assigns) do
+    assigns =
+      assigns
+      |> assign(:tools, @fill_sign_palette_tools)
+      |> assign(:fill_sizes, @fill_sign_font_sizes)
+      |> assign(:fill_weights, @fill_sign_line_weights)
+
+    ~H"""
+    <div
+      :if={@active_tab == "fill-sign"}
+      id="fill-sign-palette"
+      role="toolbar"
+      aria-label="Fill & Sign palette"
+      class="absolute top-full left-0 right-0 z-40 border-b border-chrome-border dark:border-gray-600 bg-chrome-white dark:bg-gray-800 shadow-lg px-4 py-2 flex items-center gap-3"
+    >
+      <span class="text-[11px] uppercase tracking-wide text-gray-400 dark:text-gray-500 whitespace-nowrap">
+        Fill &amp; Sign
+      </span>
+
+      <div class="flex items-center gap-1">
+        <button
+          :for={t <- @tools}
+          type="button"
+          phx-click="toggle_fill_sign_tool"
+          phx-value-tool={t.id}
+          aria-label={"Use #{t.label} tool"}
+          title={t.label}
+          aria-pressed={@tool == t.id}
+          class={[
+            "p-2 rounded-md transition-colors cursor-pointer",
+            if(@tool == t.id,
+              do: "bg-accent/10 text-accent ring-1 ring-accent",
+              else: "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+            )
+          ]}
+        >
+          <.icon name={t.icon} class="size-4" />
+        </button>
+      </div>
+
+      <div class="w-px h-6 bg-chrome-border mx-1" aria-hidden="true" />
+
+      <%= if @tool do %>
+        <div class="flex items-center gap-3">
+          <%= cond do %>
+            <% @tool == "text" -> %>
+              <span class="text-xs text-gray-500 dark:text-gray-400">Text</span>
+              <label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                <.icon name="hero-language" class="size-3.5" />
+                <select
+                  phx-change="set_fill_sign_font"
+                  aria-label="Text font"
+                  name="value"
+                  value={@font}
+                  class="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                >
+                  <option :for={f <- @fonts} value={f}>{f}</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                Size
+                <select
+                  phx-change="set_fill_sign_text_size"
+                  aria-label="Text size"
+                  name="value"
+                  value={@font_size}
+                  class="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                >
+                  <option :for={sz <- @fill_sizes} value={sz}>{sz}</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                Colour
+                <input
+                  type="color"
+                  aria-label="Text colour"
+                  name="value"
+                  phx-change="set_fill_sign_text_color"
+                  value={@text_color}
+                  class="size-7 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 cursor-pointer"
+                />
+              </label>
+            <% @tool in ~w(crossmark checkmark dot) -> %>
+              <span class="text-xs text-gray-500 dark:text-gray-400">
+                {String.capitalize(@tool)}
+              </span>
+              <label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                Colour
+                <input
+                  type="color"
+                  aria-label="Glyph colour"
+                  name="value"
+                  phx-change="set_fill_sign_glyph_color"
+                  value={@glyph_color}
+                  class="size-6 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 cursor-pointer"
+                />
+              </label>
+            <% @tool == "line" -> %>
+              <span class="text-xs text-gray-500 dark:text-gray-400">Line</span>
+              <label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                Weight
+                <select
+                  phx-change="set_fill_sign_line_weight"
+                  aria-label="Line weight"
+                  name="value"
+                  value={@line_weight}
+                  class="text-xs border border-gray-300 dark:border-gray-600 rounded px-1.5 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100"
+                >
+                  <option :for={w <- @fill_weights} value={w}>{w}</option>
+                </select>
+              </label>
+              <label class="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                Colour
+                <input
+                  type="color"
+                  aria-label="Line colour"
+                  name="value"
+                  phx-change="set_fill_sign_line_color"
+                  value={@line_color}
+                  class="size-6 rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 cursor-pointer"
+                />
+              </label>
+          <% end %>
+        </div>
+        <span class="flex-1" />
+        <button
+          type="button"
+          phx-click="deactivate_fill_sign_tool"
+          aria-label="Deactivate Fill &amp; Sign tool (Esc)"
+          class="px-2.5 py-1 rounded-md text-xs font-medium border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+        >
+          <.icon name="hero-check" class="size-3.5" />
+          <span>Done</span>
+        </button>
+      <% else %>
+        <span class="text-xs text-gray-400 dark:text-gray-500 px-1">
+          Select a tool to start signing.
+        </span>
+        <span class="flex-1" />
+        <span class="text-[11px] whitespace-nowrap text-gray-400 dark:text-gray-500">
+          Esc to deactivate
+        </span>
+      <% end %>
     </div>
     """
   end

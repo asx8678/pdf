@@ -27,6 +27,20 @@ const PdfViewerHook = {
     this._formatPainterStyle = null;
     this._formatPainterClickHandler = null;
     this._selectTextActive = false;
+    // Fill & Sign palette state (T-117): the client draw layer for the five
+    // lightweight self-signing tools. `_fillSign` holds the active tool and
+    // its option settings; placed items are tracked so Esc/Done can clear
+    // the layer.
+    this._fillSignTool = null;
+    this._fillSignOptions = {
+      font: "Helvetica",
+      font_size: "12",
+      text_color: "#1f2937",
+      glyph_color: "#1f2937",
+      line_weight: "2",
+      line_color: "#1f2937"
+    };
+    this._fillSignItems = [];
     // Expose mode-switch helpers to sibling hooks (AnnotEditHook) so the
     // select-text mode stays exclusive with object-selection tools.
     this.el._deactivateSelectText = () => this._deactivateSelectText();
@@ -155,6 +169,25 @@ const PdfViewerHook = {
 
     this.handleEvent("form_detection_clear", () => {
       this._clearFormDetectionOverlay();
+    });
+
+    // Fill & Sign palette (T-117): the server pushed the active tool and its
+    // option settings. The client owns the draw layer — FreeText editor for
+    // text, vector SVG overlays for the crossmark/checkmark/dot/line. Uses
+    // the detected form-field boxes (`_formDetectFields`) for snapping.
+    this.handleEvent("toggle_fill_sign_tool", ({ tool, active, ...styles }) => {
+      this._syncFillSignOptions(styles);
+      if (!active || !tool) {
+        this._disableFillSignTool();
+        return;
+      }
+      this._enableFillSignTool(tool);
+    });
+
+    // Palette option controls changed (font / size / colour / weight).
+    this.handleEvent("fill_sign_options", (opts) => {
+      this._syncFillSignOptions(opts);
+      if (this._fillSignTool === "text") this._applyFillTextOptions();
     });
 
     // Toggle annotation editor mode (FreeText, etc.)
@@ -1034,6 +1067,423 @@ const PdfViewerHook = {
       }
     } catch (e) {
       // Editors will be captured on save via saveDocument()
+    }
+  },
+
+// ── Fill & Sign palette draw layer (T-117) ────────────────────────────
+  //
+  // Lightweight self-signing tools, distinct from E-Sign. Text is a
+  // contenteditable box that auto-sizes to its content with font/size/
+  // colour; crossmark / checkmark / filled dot are vector SVG glyphs placed
+  // into resizable, movable boxes that snap to nearby detected form-field-
+  // sizes; line is a straight vector line with adjustable weight/colour and
+  // Shift-constrain to horizontal/vertical.
+  //
+  // Items are drawn into layers inside the page div (the same coordinate
+  // space pdf.js uses for annotation layers).
+
+  // Merge pushed option overrides into the palette option set.
+  _syncFillSignOptions(opts) {
+    if (!opts) return;
+    const o = this._fillSignOptions;
+    if (opts.font) o.font = opts.font;
+    if (opts.font_size) o.font_size = String(opts.font_size);
+    if (opts.text_color) o.text_color = opts.text_color;
+    if (opts.glyph_color) o.glyph_color = opts.glyph_color;
+    if (opts.line_weight) o.line_weight = String(opts.line_weight);
+    if (opts.line_color) o.line_color = opts.line_color;
+  },
+
+  // Activate a Fill & Sign tool (exclusive with other editing modes).
+  _enableFillSignTool(tool) {
+    if (this._editModeEnabled) {
+      this._editModeEnabled = false;
+      this._unbindEditTextClick();
+    }
+    this._deactivateSelectTextMode();
+    this._deactivateFormatPainter();
+    if (this._viewer) {
+      try {
+        this._viewer.annotationEditorMode = { mode: pdfjsLib.AnnotationEditorType.NONE };
+      } catch (_) {}
+    }
+    this._fillSignTool = tool;
+    this._bindFillSignPlace();
+    const c = this.el.querySelector("#pdf-viewer-container");
+    if (c) c.classList.add("fill-sign-tool-active");
+  },
+
+  // Deactivate the active tool and clear the draw layer.
+  _disableFillSignTool() {
+    this._unbindFillSignPlace();
+    this._finishFillDrag();
+    this._clearFillSignLayer();
+    this._fillSignItems = [];
+    this._fillSignTool = null;
+    const c = this.el.querySelector("#pdf-viewer-container");
+    if (c) c.classList.remove("fill-sign-tool-active");
+  },
+
+  _bindFillSignPlace() {
+    this._unbindFillSignPlace();
+    const c = this.el.querySelector("#pdf-viewer-container");
+    if (!c) return;
+    this._fillSignClickHandler = (e) => this._onFillSignPlace(e);
+    c.addEventListener("click", this._fillSignClickHandler);
+  },
+
+  _unbindFillSignPlace() {
+    if (this._fillSignClickHandler) {
+      const c = this.el.querySelector("#pdf-viewer-container");
+      if (c) c.removeEventListener("click", this._fillSignClickHandler);
+      this._fillSignClickHandler = null;
+    }
+  },
+
+  // Find the page under the cursor and the matching PDF-space point.
+  _fillHit(clientX, clientY) {
+    if (!this._viewer || !this._viewer._pages) return null;
+    for (const pv of this._viewer._pages) {
+      if (!pv || !pv.div) continue;
+      const pr = pv.div.getBoundingClientRect();
+      if (clientX >= pr.left && clientX <= pr.right && clientY >= pr.top && clientY <= pr.bottom) {
+        const [pdfX, pdfY] = pv.viewport.convertToPdfPoint(
+          clientX - pr.left,
+          clientY - pr.top
+        );
+        return { pv, pdfX, pdfY };
+      }
+    }
+    return null;
+  },
+
+  _onFillSignPlace(e) {
+    const tool = this._fillSignTool;
+    if (!tool) return;
+    const hit = this._fillHit(e.clientX, e.clientY);
+    if (!hit) return;
+    if (tool === "line") this._fillStartLine(hit, e);
+    else if (tool === "text") this._fillPlaceText(hit);
+    else this._fillPlaceGlyph(tool, hit);
+  },
+
+  _fillId() {
+    return "fs-" + Math.random().toString(36).slice(2, 10);
+  },
+
+  // ---- glyphs (crossmark / checkmark / filled dot) ----------------------
+
+  // Snap a newly-placed glyph box to a nearby detected form-field box.
+  _snapGlyphRect(pv, pdfX, pdfY, size) {
+    const fields = this._formDetectFields || [];
+    const pageFields = fields.filter((f) => f.page_index === pv.id - 1);
+    let best = null;
+    let bestD = Infinity;
+    for (const f of pageFields) {
+      const r = f.rect;
+      const cxp = (r[0] + r[2]) / 2;
+      const cyp = (r[1] + r[3]) / 2;
+      const d = Math.hypot(cxp - pdfX, cyp - pdfY);
+      if (d < 120 && d < bestD) {
+        best = r;
+        bestD = d;
+      }
+    }
+    if (best) return best.slice();
+    return [pdfX - size / 2, pdfY - size / 2, pdfX + size / 2, pdfY + size / 2];
+  },
+
+  _fillPlaceGlyph(kind, hit) {
+    const rect = this._snapGlyphRect(hit.pv, hit.pdfX, hit.pdfY, 26);
+    const item = {
+      id: this._fillId(),
+      kind,
+      pageIndex: hit.pv.id - 1,
+      rect,
+      color: this._fillSignOptions.glyph_color
+    };
+    this._fillSignItems.push(item);
+    this._fillRenderGlyph(item);
+  },
+
+  _fillGlyphLabel(kind) {
+    if (kind === "crossmark") return "Crossmark";
+    if (kind === "checkmark") return "Checkmark";
+    return "Filled dot";
+  },
+
+  // A positioned, draggable + resizable wrapper box around a glyph.
+  _fillBox(item, pv) {
+    const id = "fbox-" + item.id;
+    let box = pv.div.querySelector(`#${id}`);
+    if (box) return box;
+    box = document.createElement("div");
+    box.id = id;
+    box.className = "fill-sign-box";
+    box.dataset.fillKind = item.kind;
+    box.setAttribute(
+      "aria-label",
+      `${this._fillGlyphLabel(item.kind)} — drag to move, corner to resize`
+    );
+    const handle = document.createElement("div");
+    handle.className = "fill-sign-handle";
+    handle.setAttribute("aria-hidden", "true");
+    box.appendChild(handle);
+    pv.div.appendChild(box);
+
+    box.addEventListener("pointerdown", (ev) => {
+      const resizing = ev.target.classList.contains("fill-sign-handle");
+      this._fillBoxDrag(pv, item, ev, resizing);
+    });
+    this._positionFillBox(pv, item, box);
+    return box;
+  },
+
+  _positionFillBox(pv, item, box) {
+    const [x0, y0, x1, y1] = item.rect;
+    const [p0x, p0y] = pv.viewport.convertToViewportPoint(x0, y0);
+    const [p1x, p1y] = pv.viewport.convertToViewportPoint(x1, y1);
+    box.style.left = `${Math.min(p0x, p1x)}px`;
+    box.style.top = `${Math.min(p0y, p1y)}px`;
+    box.style.width = `${Math.abs(p1x - p0x)}px`;
+    box.style.height = `${Math.abs(p1y - p0y)}px`;
+  },
+
+  _fillRenderGlyph(item) {
+    const pv = this._viewer?._pages?.[item.pageIndex];
+    if (!pv) return;
+    const box = this._fillBox(item, pv);
+    let svg = box.querySelector("svg.fill-sign-glyph");
+    if (!svg) {
+      svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "fill-sign-glyph");
+      svg.setAttribute("preserveAspectRatio", "none");
+      box.appendChild(svg);
+    }
+    const vw = Math.max(item.rect[2] - item.rect[0], 1);
+    const vh = Math.max(item.rect[3] - item.rect[1], 1);
+    const stroke = Math.max(1, Math.min(vw, vh) * 0.09);
+    let body = "";
+    if (item.kind === "crossmark") {
+      body =
+        `<line x1="2" y1="2" x2="${vw - 2}" y2="${vh - 2}" stroke="${item.color}" stroke-width="${stroke}" stroke-linecap="round"/>` +
+        `<line x1="${vw - 2}" y1="2" x2="2" y2="${vh - 2}" stroke="${item.color}" stroke-width="${stroke}" stroke-linecap="round"/>`;
+    } else if (item.kind === "checkmark") {
+      body =
+        `<polyline points="${(vw * 0.15).toFixed(1)},${(vh * 0.5).toFixed(1)} ${(vw * 0.42).toFixed(1)},${(vh * 0.78).toFixed(1)} ${(vw * 0.85).toFixed(1)},${(vh * 0.22).toFixed(1)}"` +
+        ` fill="none" stroke="${item.color}" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round"/>`;
+    } else {
+      body =
+        `<circle cx="${(vw / 2).toFixed(1)}" cy="${(vh / 2).toFixed(1)}" r="${(Math.min(vw, vh) * 0.3).toFixed(1)}" fill="${item.color}"/>`;
+    }
+    svg.setAttribute("viewBox", `0 0 ${vw} ${vh}`);
+    svg.innerHTML = body;
+    this._positionFillBox(pv, item, box);
+  },
+
+  // Generic box drag: moving the body, or resizing from the corner handle.
+  _fillBoxDrag(pv, item, startEvent, resizing) {
+    this._finishFillDrag();
+    const vp = pv.viewport;
+    const pr = pv.div.getBoundingClientRect();
+    const toPdf = (ev) => vp.convertToPdfPoint(ev.clientX - pr.left, ev.clientY - pr.top);
+    const [sx, sy] = toPdf(startEvent);
+    const [ox0, oy0, ox1, oy1] = item.rect;
+    this._fillDrag = {
+      onMove: (ev) => {
+        const [px, py] = toPdf(ev);
+        const dx = px - sx;
+        const dy = py - sy;
+        let x0 = ox0, y0 = oy0, x1 = ox1, y1 = oy1;
+        if (resizing) {
+          x1 = ox0 + Math.max(dx, 6);
+          y1 = oy0 + Math.max(dy, 6);
+        } else {
+          x0 = ox0 + dx; x1 = ox1 + dx;
+          y0 = oy0 + dy; y1 = oy1 + dy;
+        }
+        item.rect = [x0, y0, x1, y1];
+        this._fillRenderGlyph(item);
+      },
+      onUp: () => this._finishFillDrag()
+    };
+    document.addEventListener("pointermove", this._fillDrag.onMove);
+    document.addEventListener("pointerup", this._fillDrag.onUp);
+  },
+
+  _finishFillDrag() {
+    if (this._fillDrag) {
+      document.removeEventListener("pointermove", this._fillDrag.onMove);
+      document.removeEventListener("pointerup", this._fillDrag.onUp);
+    }
+    this._fillDrag = null;
+  },
+
+  // ---- line tool -------------------------------------------------------
+
+  _fillStartLine(hit, startEvent) {
+    this._finishFillDrag();
+    const o = this._fillSignOptions;
+    const pv = hit.pv;
+    const vp = pv.viewport;
+    const pr = pv.div.getBoundingClientRect();
+    const toPdf = (ev) => vp.convertToPdfPoint(ev.clientX - pr.left, ev.clientY - pr.top);
+    const [ax, ay] = toPdf(startEvent);
+    const weight = Number(o.line_weight || 2);
+    let other = [ax, ay];
+
+    const draw = (bx, by) => {
+      this._fillLineSvg(pv).replaceChildren();
+      this._drawVectorLine(this._fillLineSvg(pv), pv, ax, ay, bx, by, o.line_color, weight);
+    };
+    draw(ax, ay);
+
+    this._fillDrag = {
+      onMove: (ev) => {
+        let [px, py] = toPdf(ev);
+        // Shift-constrain horizontal / vertical from the start endpoint.
+        if (ev.shiftKey) {
+          if (Math.abs(px - ax) > Math.abs(py - ay)) py = ay;
+          else px = ax;
+        }
+        other = [px, py];
+        draw(px, py);
+      },
+      onUp: () => {
+        this._finishFillDrag();
+        const item = {
+          id: "line-" + this._fillId(),
+          kind: "line",
+          pageIndex: pv.id - 1,
+          start: [ax, ay],
+          end: other,
+          color: o.line_color,
+          weight
+        };
+        this._fillSignItems.push(item);
+      }
+    };
+    document.addEventListener("pointermove", this._fillDrag.onMove);
+    document.addEventListener("pointerup", this._fillDrag.onUp);
+  },
+
+  _fillRenderLine(item) {
+    const pv = this._viewer?._pages?.[item.pageIndex];
+    if (!pv) return;
+    this._drawVectorLine(this._fillLineSvg(pv), pv, item.start[0], item.start[1], item.end[0], item.end[1], item.color, item.weight);
+  },
+
+  // A dedicated full-page SVG layer per page collecting its lines.
+  _fillLineSvg(pv) {
+    let svg = pv.div.querySelector("svg.fill-sign-line-layer");
+    if (svg) return svg;
+    svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "fill-sign-line-layer");
+    svg.setAttribute("aria-hidden", "true");
+    pv.div.appendChild(svg);
+    return svg;
+  },
+
+  _drawVectorLine(svg, pv, ax, ay, bx, by, color, weight) {
+    const [vax, vay] = pv.viewport.convertToViewportPoint(ax, ay);
+    const [vbx, vby] = pv.viewport.convertToViewportPoint(bx, by);
+    const el = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    el.setAttribute("x1", vax);
+    el.setAttribute("y1", vay);
+    el.setAttribute("x2", vbx);
+    el.setAttribute("y2", vby);
+    el.setAttribute("stroke", color);
+    el.setAttribute("stroke-width", String(weight));
+    el.setAttribute("stroke-linecap", "round");
+    svg.appendChild(el);
+  },
+
+  // ---- text tool -----------------------------------------------------
+
+  _fillPlaceText(hit) {
+    const o = this._fillSignOptions;
+    const pts = Math.max(8, parseFloat(o.font_size) || 11);
+    const item = {
+      id: "text-" + this._fillId(),
+      kind: "text",
+      pageIndex: hit.pv.id - 1,
+      pt: [hit.pdfX, hit.pdfY],
+      font: o.font,
+      size: pts,
+      color: o.text_color,
+      text: ""
+    };
+    this._fillSignItems.push(item);
+    this._renderFillText(item);
+    const layer = hit.pv.div.querySelector(`[data-fill-text="${item.id}"]`);
+    const input = layer?.querySelector(".fill-sign-text");
+    setTimeout(() => input?.focus(), 0);
+  },
+
+  _renderFillText(item) {
+    const pv = this._viewer?._pages?.[item.pageIndex];
+    if (!pv) return;
+    let layer = pv.div.querySelector(`[data-fill-text="${item.id}"]`);
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.className = "fill-sign-text-wrap";
+      layer.dataset.fillText = item.id;
+      pv.div.appendChild(layer);
+    }
+    // Anchor layer to the click point in CSS px.
+    const [vx, vy] = pv.viewport.convertToViewportPoint(item.pt[0], item.pt[1]);
+    layer.style.left = `${vx}px`;
+    layer.style.top = `${vy}px`;
+
+    const input = document.createElement("div");
+    input.className = "fill-sign-text";
+    input.setAttribute("contenteditable", "true");
+    input.style.fontFamily = item.font;
+    input.style.fontSize = `${item.size}px`;
+    input.style.color = item.color;
+    input.textContent = item.text;
+    input.setAttribute("minWidth", "120px");
+    input.addEventListener("input", () => {
+      item.text = input.innerText || "";
+      // Auto-size: let the CSS width grow; keep the box as wide as content.
+      layer.style.width = "auto";
+    });
+    input.addEventListener("blur", () => {
+      if (!item.text) {
+        // Remove empty boxes so stray clicks don't leave debris.
+        this._fillSignItems = this._fillSignItems.filter((it) => it.id !== item.id);
+        layer.remove();
+      }
+    });
+    layer.replaceChildren(input);
+  },
+
+  // Apply palette option changes straight to live text boxes.
+  _applyFillTextOptions() {
+    const o = this._fillSignOptions;
+    for (const item of this._fillSignItems) {
+      if (item.kind !== "text") continue;
+      item.font = o.font;
+      item.size = Math.max(8, parseFloat(o.font_size) || item.size);
+      item.color = o.text_color;
+      this._renderFillText(item);
+    }
+  },
+
+  // ---- render / clear helpers --------------------------------------------
+
+  _renderFillItem(item) {
+    if (item.kind === "line") this._fillRenderLine(item);
+    else if (item.kind === "text") this._renderFillText(item);
+    else this._fillRenderGlyph(item);
+  },
+
+  _clearFillSignLayer() {
+    if (!this._viewer || !this._viewer._pages) return;
+    for (const pv of this._viewer._pages) {
+      if (!pv?.div) continue;
+      pv.div.querySelectorAll(".fill-sign-box, .fill-sign-text-wrap, svg.fill-sign-line-layer")
+        .forEach((el) => el.remove());
     }
   },
 
