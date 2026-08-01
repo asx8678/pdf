@@ -38,7 +38,8 @@ defmodule QuireWeb.WorkspaceLive.EditToolsTest do
   # canonical source of truth for the server-side toggle logic; the rendered
   # aria-disabled/active class is a thin projection of those assigns.
   defp assert_painter_disabled?(lv) do
-    assert lv.assigns.format_painter_active == false or lv.assigns.format_painter_available == false
+    assert lv.assigns.format_painter_active == false or
+             lv.assigns.format_painter_available == false
   end
 
   defp assert_painter_enabled?(lv) do
