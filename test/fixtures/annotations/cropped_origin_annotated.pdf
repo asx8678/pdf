@@ -1,5 +1,4 @@
 %PDF-1.4
-%‚„œ”
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
@@ -20,27 +19,19 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
 endobj
 6 0 obj
-<< /Type /Annot /Subtype Highlight /Rect [100 100 400 120] /QuadPoints [100 100 400 100 100 120 400 120] /Contents (Variant highlight) /NM (v-hl) /T (Ada) /C [1 1 0] >>
+<< /Type /Annot /Subtype /Highlight /Rect [100 100 400 120] /QuadPoints [100 100 400 100 100 120 400 120] /Contents (Variant highlight) /NM (v-hl) /T (Ada) /C [1 1 0] >>
 endobj
 7 0 obj
-<< /Type /Annot /Subtype Ink /Rect [100 100 400 120] /InkList [[100 100 200 120 300 160]] /Contents (Variant ink) /NM (v-ink) /T (Ada) /C [0 0 0] >>
+<< /Type /Annot /Subtype /Ink /Rect [100 100 400 120] /InkList [[100 100 200 120 300 160]] /Contents (Variant ink) /NM (v-ink) /T (Ada) /C [0 0 0] >>
 endobj
 8 0 obj
-<< /Type /Annot /Subtype Square /Rect [100 100 400 120] /Contents (Variant rectangle) /NM (v-rect) /T (Ada) /C [0 0.5 0] >>
+<< /Type /Annot /Subtype /Square /Rect [100 100 400 120] /Contents (Variant rectangle) /NM (v-rect) /T (Ada) /C [0 0.5 0] >>
 endobj
 xref
 0 9
 0000000000 65535 f 
-0000000015 00000 n 
-0000000064 00000 n 
-0000000121 00000 n 
-0000000301 00000 n 
-0000000412 00000 n 
-0000000482 00000 n 
-0000000666 00000 n 
-0000000830 00000 n 
 trailer
 << /Size 9 /Root 1 0 R >>
 startxref
-969
+0
 %%EOF

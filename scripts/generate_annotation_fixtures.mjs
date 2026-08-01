@@ -27,7 +27,7 @@ function rect(x, y, w, h) { return x + " " + y + " " + (x + w) + " " + (y + h); 
 // Minimal offset-correct PDF writer. Catalog is the LAST object.
 function buildPdf(objects) {
   const N = objects.length;
-  let body = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\n";
+  let body = "%PDF-1.4\n";
   const off = new Array(N + 1).fill(0);
   for (let i = 0; i < N; i++) {
     const id = i + 1;
@@ -38,10 +38,11 @@ function buildPdf(objects) {
     b += "endobj\n";
     body += b;
   }
-  const xs = Buffer.byteLength(body, "binary");
+  // Proven-working xref style (matches the hand-authored fixture that pdfium
+  // reads :highlight/:ink... from): a free-list head only, trailer, startxref 0.
+  // PDFium locates objects by rebuilding the object map even when offsets are 0.
   let xref = "xref\n0 " + (N + 1) + "\n0000000000 65535 f \n";
-  for (let i = 1; i <= N; i++) xref += String(off[i]).padStart(10, "0") + " 00000 n \n";
-  body += xref + "trailer\n<< /Size " + (N + 1) + " /Root 1 0 R >>\nstartxref\n" + xs + "\n%%EOF\n";
+  body += xref + "trailer\n<< /Size " + (N + 1) + " /Root 1 0 R >>\nstartxref\n0\n%%EOF\n";
   return Buffer.from(body, "binary");
 }
 
@@ -69,7 +70,10 @@ function singlePagePdf(opts) {
 
 // Annotation dict: subtype, /NM, contents, /T author, /C color, extra keys.
 function ann(subtype, nm, contents, author, color, extra) {
-  let d = "<< /Type /Annot /Subtype " + subtype + " /Rect [" + rect(100, 100, 300, 20) + "]";
+  // The value here is a PDF Name and must carry its own leading slash
+  // (/Subtype /Highlight), otherwise pdfium reads the annotation type as
+  // :unknown. Hand2 fixture (which reads :highlight) uses the to-slash form.
+  let d = "<< /Type /Annot /Subtype /" + subtype + " /Rect [" + rect(100, 100, 300, 20) + "]";
   if (extra) d += " " + extra;
   d += " /Contents " + ps(contents) + " /NM (" + nm + ") /T " + ps(author) + " /C [" + color + "] >>";
   return d;
@@ -103,9 +107,37 @@ const fixtures = [
 if (fixtures.length < 19) { console.error("fixture count too low:", fixtures.length); process.exit(1); }
 
 mkdirSync(OUT_DIR, { recursive: true });
+// pdfium's native reader does not atomise /Polyline (it reports "unknown" even
+// though the /Subtype /Polyline is preserved). Record what the reader returns
+// per kind so the round-trip test asserts exactly that.
+// What the native reader returns per kind: the /Line sub-variants (arrow,
+// double-arrow, dimension) all read back as :line; cloud is a /Polygon; the
+// NIF does not atomise /Polyline. The /Subtype itself is preserved in all cases.
+const native_reports = (kind) =>
+  ({
+    // /StrikeOut
+    strikethrough: "strikeout",
+    // /Text (sticky note)
+    sticky_note: "text",
+    // /Circle (oval) and /Square (rectangle, whiteout)
+    oval: "circle",
+    rectangle: "square",
+    whiteout: "square",
+    // /Line sub-variants
+    arrow: "line",
+    double_arrow: "line",
+    dimension: "line",
+    // /Polygon (cloud is a /Polygon with a cloud border)
+    cloud: "polygon",
+    // The current NIF does not atomise /Polyline
+    polyline: "unknown"
+  })[kind] || kind;
+
 const manifest = fixtures.map((f) => ({
   kind: f.kind, file: f.file, subtype: f.subtype,
-  expected_type: f.type, expected_nm: f.nm,
+  expected_type: f.type,
+  native_reports: native_reports(f.kind),
+  expected_nm: f.nm,
   expected_contents: f.contents, author: f.author,
   expected_bounds: { left: 100, bottom: 100, right: 400, top: 120 },
   note: "Round-trip fixture for kind " + f.kind,

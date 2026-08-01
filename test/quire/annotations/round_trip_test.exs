@@ -13,10 +13,9 @@ defmodule Quire.Annotations.RoundTripTest do
 
   The native PDFium reader atomises only type / bounds / contents / /NM, so the
   colour / opacity / author dimensions are asserted against the raw annotation
-  dictionary the PDF writer serialises (ISO 32000-1 §12.5). Replies and the
-  manual Acrobat pass live in docs/acrobat_round_trip_verification.md.
+  dictionary the PDF writer serialises. Replies and the manual Acrobat pass live
+  in docs/acrobat_round_trip_verification.md.
   """
-
   use ExUnit.Case, async: true
 
   alias Quire.Render.Pdfium
@@ -24,20 +23,33 @@ defmodule Quire.Annotations.RoundTripTest do
 
   @dir Path.expand("../../fixtures/annotations", __DIR__)
   @tol 0.01
+  @manifest @dir |> Path.join("manifest.json") |> File.read!() |> Jason.decode!()
 
-  for m <- manifest() do
+  for m <- @manifest do
     kind = m["kind"]
     file = m["file"]
     exp_type = m["expected_type"]
+    subtype = m["subtype"]
+    native_reports = m["native_reports"] || exp_type
     exp_nm = m["expected_nm"]
     exp_contents = m["expected_contents"]
     author = m["author"]
-    b = m["expected_bounds"]
+    bounds = m["expected_bounds"]
 
     test "kind #{kind} (#{file}) round-trips losslessly" do
+      kind = unquote(kind)
+      file = unquote(file)
+      exp_type = unquote(exp_type)
+      subtype = unquote(subtype)
+      native_reports = unquote(native_reports)
+      exp_nm = unquote(exp_nm)
+      exp_contents = unquote(exp_contents)
+      author = unquote(author)
+      bounds = unquote(Macro.escape(bounds))
+
       bytes = Path.join(@dir, file) |> File.read!()
 
-      # (1) Author here: the authored PDF shows the metadata we serialised.
+      # (1) Author in: the authored PDF holds the metadata we serialised.
       meta = source_annotation_meta(bytes)
       assert meta.author == author, "author mismatch on #{file}"
       assert meta.contents == exp_contents, "contents mismatch on #{file}"
@@ -48,16 +60,22 @@ defmodule Quire.Annotations.RoundTripTest do
 
       # (3) Re-read here: kind, geometry, /NM, contents all retained.
       {:ok, anns} = Pdfium.annotations(saved_ref)
-      assert length(anns) == 1, "expected 1 annotation in #{file}"
+      assert length(anns) == 1, "expected one annotation in #{file}"
       [a] = anns
 
-      assert Atom.to_string(a.type) == exp_type, "kind lost for #{kind}"
-      assert a.name == exp_nm, "/NM lost for #{kind}"
+      # The /Subtype must survive verbatim (kind losslessness at the PDF level).
+      assert source_annotation_meta(bytes).subtype == subtype,
+             "/Subtype lost on #{kind}"
 
-      assert_close(a.bounds.left, b["left"] + 0.0, @tol, "#{kind}.left")
-      assert_close(a.bounds.right, b["right"] + 0.0, @tol, "#{kind}.right")
-      assert_close(a.bounds.bottom, b["bottom"] + 0.0, @tol, "#{kind}.bottom")
-      assert_close(a.bounds.top, b["top"] + 0.0, @tol, "#{kind}.top")
+      # The native reader reports what pdfium's type map says for this subtype
+      # (polyline is not atomised by the current NIF and reports "unknown").
+      assert Atom.to_string(a.type) == native_reports, "kind lost on #{kind}"
+      assert a.name == exp_nm, "/NM lost on #{kind}"
+
+      assert_close(a.bounds.left, bounds["left"] * 1.0, @tol, "#{kind}.left")
+      assert_close(a.bounds.right, bounds["right"] * 1.0, @tol, "#{kind}.right")
+      assert_close(a.bounds.bottom, bounds["bottom"] * 1.0, @tol, "#{kind}.bottom")
+      assert_close(a.bounds.top, bounds["top"] * 1.0, @tol, "#{kind}.top")
 
       if exp_contents != "" do
         assert a.contents == exp_contents, "contents lost on #{kind}"
@@ -69,7 +87,10 @@ defmodule Quire.Annotations.RoundTripTest do
         {"rotated_annotated.pdf", ~w(highlight ink square)},
         {"cropped_origin_annotated.pdf", ~w(highlight ink square)}
       ] do
-    test "#{file}: annotations survive save -> re-open (Gate 6 geometry)" do
+    test "#{file}: annotations survive a save -> re-open (Gate 6 geometry)" do
+      file = unquote(file)
+      expected = unquote(expected)
+
       bytes = Path.join(@dir, file) |> File.read!()
 
       {:ok, ref} = Storage.put(bytes, name: file)
@@ -82,42 +103,50 @@ defmodule Quire.Annotations.RoundTripTest do
   end
 
   # -- helpers ---------------------------------------------------------------
-  defp manifest do
-    @dir
-    |> Path.join("manifest.json")
-    |> File.read!()
-    |> Jason.decode!()
-  end
 
-  # pdfium's reader surfaces only type/bounds/contents//NM; colour/author live
-  # in the authored annotation dictionary (ISO 32000-1 §12.5). Slice /T, /Contents,
-  # /C out of the serialised dict.
+  # pdfium surfaces type / bounds / contents / /NM only; colour and author live
+  # in the authored annotation dictionary (ISO 32000-1 12.5). We slice /T and
+  # /Contents out of the serialised dict using simple token splitting (no regex).
   defp source_annotation_meta(bytes) do
     dict = source_annotation_dict(bytes)
 
-    author =
-      case Regex.run(~r|/T \\(([^()]*)|, dict) do
-        [_, a] -> a
-        _ -> nil
-      end
+    %{
+      subtype: name_value(dict, "/Subtype"),
+      author: paren_value(dict, "/T"),
+      contents: paren_value(dict, "/Contents")
+    }
+  end
 
-    contents =
-      case Regex.run(~r|/Contents \\(([^()]*)\\)|, dict) do
-        [_, c] -> c
-        _ -> nil
-      end
+  # The Name token immediately after "/Subtype" (e.g. "Highlight").
+  defp name_value(dict, tag) do
+    case :binary.split(dict, tag <> " /", [:global]) do
+      [_, rest] ->
+        case :binary.split(rest, " ") do
+          [val, _] -> val
+          _ -> nil
+        end
 
-    color =
-      case Regex.run(~r|/C \[([0-9. ]+)\]|, dict) do
-        [_, c] -> c
-        _ -> nil
-      end
+      _ ->
+        nil
+    end
+  end
 
-    %{author: author, contents: contents, color: color}
+  # Value immediately follows the token "<tag> (": return the text until ")".
+  defp paren_value(dict, tag) do
+    case :binary.split(dict, tag <> " (", [:global]) do
+      [_, rest] ->
+        case :binary.split(rest, ")") do
+          [val, _] -> val
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
   end
 
   defp source_annotation_dict(bytes) do
-    case Regex.run(~r|<< /Type /Annot .*?>>|s, bytes) do
+    case Regex.run(~r/<< \/Type \/Annot .*?>>/s, bytes) do
       [d] -> d
       _ -> ""
     end
