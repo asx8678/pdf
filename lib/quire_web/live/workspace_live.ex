@@ -1325,7 +1325,8 @@ defmodule QuireWeb.WorkspaceLive do
          true <- kind in @form_field_kinds,
          name <- form_field_name(socket, kind),
          opts <- form_field_opts(kind, params),
-         {:ok, _ref} <- Quire.Pdf.AcroForm.add_field(doc, page_index, rect, name, String.to_atom(kind), opts) do
+         {:ok, _ref} <-
+           Quire.Pdf.AcroForm.add_field(doc, page_index, rect, name, String.to_atom(kind), opts) do
       case save_new_revision(socket, doc, "Add #{kind} field") do
         {:ok, _rev} ->
           {:noreply,
@@ -2865,95 +2866,6 @@ defmodule QuireWeb.WorkspaceLive do
      socket
      |> clear_form_detection()
      |> put_flash(:info, "Detection discarded")}
-  end
-
-  # ── Forms authoring helpers (T-119) ─────────────────────────────────────
-
-  # Open the current revision's PDF as a mutable Quire.Pdf doc.
-  defp current_pdf_doc(socket) do
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-         {:ok, rev} <- Quire.Documents.current_revision(doc),
-         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
-         {:ok, bytes} <- Quire.Storage.get(ref),
-         {:ok, qdoc} <- Quire.Pdf.open(bytes) do
-      {:ok, qdoc}
-    else
-      {:error, _} = err -> err
-      nil -> {:error, :no_revision}
-      _ -> {:error, :no_revision}
-    end
-  end
-
-  # Save the mutated doc as a new revision and switch the current pointer.
-  defp save_new_revision(socket, qdoc, label) do
-    doc_id = socket.assigns.active_document_id
-    scope = socket.assigns.current_scope
-
-    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
-         {:ok, bytes} <- Quire.Pdf.save(qdoc),
-         {:ok, ref} <-
-           Quire.Storage.put(bytes,
-             name: doc.title || "form.pdf",
-             content_type: "application/pdf"
-           ) do
-      source = %{
-        "storage_ref" => %{
-          "adapter" => to_string(ref.adapter),
-          "key" => ref.key,
-          "name" => ref.name,
-          "content_type" => ref.content_type,
-          "byte_size" => ref.byte_size
-        },
-        "filename" => doc.title || "form.pdf"
-      }
-
-      Quire.Documents.create_revision(doc, label: label, source: source)
-    end
-  end
-
-  # Monotonic field name: kind + 1-based sequence so radios share a name per
-  # group (the group name is a "radioN" family) and everything else is unique.
-  defp form_field_name(socket, kind) do
-    count = socket.assigns.form_field_count || 0
-    n = count + 1
-    "#{kind}#{n}"
-  end
-
-  defp to_f_param(nil), do: 0.0
-  defp to_f_param(s) when is_binary(s) do
-    case Float.parse(s) do
-      {f, _} -> f
-      :error -> 0.0
-    end
-  end
-  defp to_f_param(n) when is_number(n), do: n * 1.0
-
-  # Per-kind creation options passed to AcroForm.add_field/6.
-  defp form_field_opts(kind, params) do
-    case kind do
-      "combo" -> [options: field_options(params)]
-      "list" -> [options: field_options(params)]
-      "button" -> [label: params["label"] || "Button"]
-      "radio" -> [export_value: params["export_value"] || "1"]
-      _ -> []
-    end
-  end
-
-  defp field_options(params) do
-    case params["options"] do
-      nil ->
-        []
-
-      opts when is_list(opts) ->
-        opts
-
-      s when is_binary(s) ->
-        s |> String.split("
-") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-    end
   end
 
   @impl true
@@ -6753,5 +6665,96 @@ defmodule QuireWeb.WorkspaceLive do
       </div>
     </.modal>
     """
+  end
+
+  # ── Forms authoring helpers (T-119) ─────────────────────────────────────
+
+  # Open the current revision's PDF as a mutable Quire.Pdf doc.
+  defp current_pdf_doc(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, qdoc} <- Quire.Pdf.open(bytes) do
+      {:ok, qdoc}
+    else
+      {:error, _} = err -> err
+      nil -> {:error, :no_revision}
+      _ -> {:error, :no_revision}
+    end
+  end
+
+  # Save the mutated doc as a new revision and switch the current pointer.
+  defp save_new_revision(socket, qdoc, label) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, bytes} <- Quire.Pdf.save(qdoc),
+         {:ok, ref} <-
+           Quire.Storage.put(bytes,
+             name: doc.title || "form.pdf",
+             content_type: "application/pdf"
+           ) do
+      source = %{
+        "storage_ref" => %{
+          "adapter" => to_string(ref.adapter),
+          "key" => ref.key,
+          "name" => ref.name,
+          "content_type" => ref.content_type,
+          "byte_size" => ref.byte_size
+        },
+        "filename" => doc.title || "form.pdf"
+      }
+
+      Quire.Documents.create_revision(doc, label: label, source: source)
+    end
+  end
+
+  # Monotonic field name: kind + 1-based sequence so radios share a name per
+  # group (the group name is a "radioN" family) and everything else is unique.
+  defp form_field_name(socket, kind) do
+    count = socket.assigns.form_field_count || 0
+    n = count + 1
+    "#{kind}#{n}"
+  end
+
+  defp to_f_param(nil), do: 0.0
+
+  defp to_f_param(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, _} -> f
+      :error -> 0.0
+    end
+  end
+
+  defp to_f_param(n) when is_number(n), do: n * 1.0
+
+  # Per-kind creation options passed to AcroForm.add_field/6.
+  defp form_field_opts(kind, params) do
+    case kind do
+      "combo" -> [options: field_options(params)]
+      "list" -> [options: field_options(params)]
+      "button" -> [label: params["label"] || "Button"]
+      "radio" -> [export_value: params["export_value"] || "1"]
+      _ -> []
+    end
+  end
+
+  defp field_options(params) do
+    case params["options"] do
+      nil ->
+        []
+
+      opts when is_list(opts) ->
+        opts
+
+      s when is_binary(s) ->
+        s |> String.split("
+") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    end
   end
 end
