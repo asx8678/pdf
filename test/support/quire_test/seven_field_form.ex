@@ -127,6 +127,7 @@ defmodule Quire.Test.SevenFieldForm do
     {:ok, page_obj} = first_page_ref(qdoc)
 
     {:ok, page} = Pdf.get_object(qdoc, page_obj)
+
     patched =
       page
       |> Map.put("/MediaBox", [0.0, 0.0, @page_height, @page_width])
@@ -230,7 +231,7 @@ defmodule Quire.Test.SevenFieldForm do
         base
         |> Map.merge(%{
           "/FT" => {:name, "Ch"},
-          "/Ff" => 131073,
+          "/Ff" => 131_073,
           "/V" => "US",
           "/DA" => "/Helv 12 Tf 0 g",
           "/Opt" => ["US", "CA", "GB"],
