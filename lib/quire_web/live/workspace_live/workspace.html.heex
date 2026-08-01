@@ -1588,4 +1588,349 @@
       }
     </script>
   </div>
+<.modal
+  :if={@show_add_action}
+  title="Add Action"
+  on_close="cancel_add_action"
+  open={@show_add_action}
+  size="large"
+>
+  <div id="add-action-modal" class="space-y-4">
+    <%!-- Action type card grid (3 cards + ⋮ overflow) --%>
+    <div
+      id="action-type-grid"
+      class="grid grid-cols-3 gap-3"
+      role="group"
+      aria-label="Action types"
+    >
+      <%= for {type, label, icon} <- @action_cards do %>
+        <button
+          type="button"
+          id={"action-card-" <> type}
+          phx-click="select_action_type"
+          phx-value-type={type}
+          aria-pressed={@action_type == type}
+          class={[
+            "flex flex-col items-center gap-2 px-3 py-4 rounded-xl border text-sm transition-all cursor-pointer",
+            if(@action_type == type,
+              do: "border-accent bg-accent/10 text-accent",
+              else: "border-chrome-border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700")
+          ]}
+        >
+          <.icon name={icon} class="size-5" />
+          <span class="text-center text-xs font-medium leading-tight">{label}</span>
+        </button>
+      <% end %>
+    </div>
+
+    <div class="flex items-center justify-end">
+      <button
+        type="button"
+        id="action-overflow-toggle"
+        phx-click="toggle_action_overflow"
+        aria-expanded={@action_overflow_open}
+        class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm border border-chrome-border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+      >
+        <span>More</span> ⋮
+      </button>
+    </div>
+
+    <div :if={@action_overflow_open} id="action-overflow" class="space-y-1">
+      <%= for type <- @action_overflow_types do %>
+        <button
+          type="button"
+          id={"action-overflow-" <> type}
+          phx-click="select_action_type"
+          phx-value-type={type}
+          role="menuitem"
+          class={[
+            "w-full text-left px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer",
+            if(@action_type == type,
+              do: "bg-accent/10 text-accent",
+              else: "hover:bg-gray-100 dark:hover:bg-gray-700")
+          ]}
+        >
+          {action_type_label(type)}
+        </button>
+      <% end %>
+    </div>
+
+    <%!-- Type-specific form --%>
+    <.form for={@action_form} id="add-action-form" phx-submit="apply_action">
+      <div id="add-action-fields" class="mt-4 space-y-3">
+        <%= if @action_type == "open" do %>
+          <div>
+            <label for="action-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              URL
+            </label>
+            <.input
+              type="text"
+              id="action-url"
+              name="action[url]"
+              value={action_field(@action, "url")}
+              phx-change="set_action_field"
+              placeholder="https://example.com"
+              class="mt-1 w-full"
+            />
+            <div class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              Allowed schemes: {@allowed_schemes_text}
+            </div>
+          </div>
+          <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+            <.input
+              type="checkbox"
+              id="action-new-window"
+              name="action[open_in_new_window]"
+              value="true"
+              checked={action_field(@action, "open_in_new_window") == "true"}
+              phx-change="set_action_field"
+            />
+            Open in new window
+          </label>
+        <% end %>
+
+        <%= if @action_type == "open_file" do %>
+          <div>
+            <label for="action-file" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              File
+            </label>
+            <.input
+              type="text"
+              id="action-file"
+              name="action[file]"
+              value={action_field(@action, "file")}
+              phx-change="set_action_field"
+              placeholder="Choose an attached or embedded file"
+              class="mt-1 w-full"
+            />
+            <div class="mt-2">
+              <button
+                type="button"
+                id="action-file-picker"
+                phx-click="pick_action_file"
+                class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm bg-gray-900 text-white hover:bg-gray-800 transition-colors cursor-pointer"
+              >
+                Browse…
+              </button>
+            </div>
+          </div>
+        <% end %>
+
+        <%= if @action_type == "page" do %>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="action-page-number" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Page number
+              </label>
+              <.input
+                type="number"
+                id="action-page-number"
+                name="action[page_number]"
+                min="1"
+                value={action_field(@action, "page_number")}
+                phx-change="set_action_field"
+                class="mt-1 w-full"
+              />
+            </div>
+            <div>
+              <label for="action-zoom" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Zoom / fit
+              </label>
+              <.input
+                type="select"
+                id="action-zoom"
+                name="action[zoom]"
+                value={action_field(@action, "zoom")}
+                options={@zoom_options}
+                phx-change="set_action_field"
+                class="mt-1 w-full"
+              />
+            </div>
+          </div>
+          <div>
+            <label for="action-named-destination" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Named destination (optional)
+            </label>
+            <.input
+              type="text"
+              id="action-named-destination"
+              name="action[named_destination]"
+              value={action_field(@action, "named_destination")}
+              phx-change="set_action_field"
+              class="mt-1 w-full"
+            />
+          </div>
+        <% end %>
+
+        <%= if @action_type == "goto_destination" do %>
+          <div>
+            <label for="action-destination" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Named destination
+            </label>
+            <.input
+              type="text"
+              id="action-destination"
+              name="action[name]"
+              value={action_field(@action, "name")}
+              phx-change="set_action_field"
+              class="mt-1 w-full"
+            />
+          </div>
+        <% end %>
+
+        <%= if @action_type == "menu_item" do %>
+          <div>
+            <label for="action-menu-item" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+              Menu command
+            </label>
+            <.input
+              type="text"
+              id="action-menu-item"
+              name="action[name]"
+              value={action_field(@action, "name")}
+              phx-change="set_action_field"
+              placeholder="e.g. HideMenubar, SaveAs, Quit"
+              class="mt-1 w-full"
+            />
+          </div>
+        <% end %>
+
+        <%= if @action_type == "submit_form" do %>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="action-submit-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Submit URL
+              </label>
+              <.input
+                type="text"
+                id="action-submit-url"
+                name="action[url]"
+                value={action_field(@action, "url")}
+                phx-change="set_action_field"
+                class="mt-1 w-full"
+              />
+            </div>
+            <div>
+              <label for="action-submit-method" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Method
+              </label>
+              <.input
+                type="select"
+                id="action-submit-method"
+                name="action[method]"
+                value={action_field(@action, "method")}
+                options={@method_options}
+                phx-change="set_action_field"
+                class="mt-1 w-full"
+              />
+            </div>
+          </div>
+        <% end %>
+
+        <%= if @action_type == "reset_form" do %>
+          <div class="text-sm text-gray-500 dark:text-gray-400" id="action-reset-note">
+            Reset form values when the link is activated.
+          </div>
+        <% end %>
+
+        <%= if @action_type == "show_hide_field" do %>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label for="action-field-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Field name
+              </label>
+              <.input
+                type="text"
+                id="action-field-name"
+                name="action[field]"
+                value={action_field(@action, "field")}
+                phx-change="set_action_field"
+                class="mt-1 w-full"
+              />
+            </div>
+            <div>
+              <label for="action-field-visibility" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                Visibility
+              </label>
+              <.input
+                type="select"
+                id="action-field-visibility"
+                name="action[visibility]"
+                value={action_field(@action, "visibility")}
+                options={@visibility_options}
+                phx-change="set_action_field"
+                class="mt-1 w-full"
+              />
+            </div>
+          </div>
+        <% end %>
+
+        <%= if @action_type == "javascript" do %>
+          <div class="rounded-xl border border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 p-3">
+            <label class="flex items-start gap-2 text-sm text-amber-900 dark:text-amber-200">
+              <.input
+                type="checkbox"
+                id="action-js-enable"
+                name="js_enabled"
+                value="true"
+                checked={@link_js_enabled}
+                phx-change="set_action_js"
+              />
+              <span>
+                <span class="font-medium">Enable Run JavaScript</span>
+                <span class="block mt-1 text-xs text-amber-700 dark:text-amber-300">
+                  ⚠️ Off by default. If enabled, the script runs only in the
+                  viewer via pdf.js PDFScriptingManager + pdf.sandbox.mjs —
+                  never on the server.
+                </span>
+              </span>
+            </label>
+          </div>
+          <.input
+            :if={@link_js_enabled}
+            type="textarea"
+            id="action-js-code"
+            name="action[code]"
+            value={action_field(@action, "code")}
+            phx-change="set_action_field"
+            rows="4"
+            placeholder="JavaScript to run in the viewer sandbox"
+            class="mt-3 w-full font-mono text-sm"
+          />
+        <% end %>
+
+        <%= if @action_err do %>
+          <div id="add-action-error" class="text-sm text-red-500" role="alert">
+            {@action_err}
+          </div>
+        <% end %>
+      </div>
+
+      <div class="mt-6 flex items-center justify-end gap-2">
+        <button
+          type="button"
+          id="add-action-cancel"
+          phx-click="cancel_add_action"
+          class="px-4 py-2 rounded-lg text-sm border border-chrome-border dark:border-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          id="add-action-apply"
+          disabled={not @action_valid}
+          class={[
+            "px-4 py-2 rounded-lg text-sm font-medium transition-colors cursor-pointer",
+            if(@action_valid,
+              do: "bg-accent text-white hover:opacity-90",
+              else: "bg-gray-200 text-gray-400 dark:bg-gray-700 cursor-not-allowed")
+          ]}
+        >
+          Apply
+        </button>
+      </div>
+    </.form>
+  </div>
+</.modal>
+
 </Layouts.workspace>
