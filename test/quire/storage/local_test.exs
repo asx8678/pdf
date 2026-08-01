@@ -43,9 +43,17 @@ defmodule Quire.Storage.LocalTest do
       callbacks = Storage.behaviour_info(:callbacks)
       assert length(callbacks) == 12
 
+      adapter_mod = adapter()
+
+      # `function_exported?/3` returns false for a module that is not yet
+      # loaded. The adapter under test may be the non-configured one, so it
+      # can still be unloaded when this test runs early under full-suite
+      # load. Ensure it is loaded first.
+      assert {:module, ^adapter_mod} = Code.ensure_loaded(adapter_mod)
+
       for {name, arity} <- callbacks do
-        assert function_exported?(adapter(), name, arity),
-               "expected #{inspect(adapter())} to export #{name}/#{arity}"
+        assert function_exported?(adapter_mod, name, arity),
+               "expected #{inspect(adapter_mod)} to export #{name}/#{arity}"
       end
     end
 

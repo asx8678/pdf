@@ -135,7 +135,13 @@ defmodule Quire.Editing.Mark do
     with {:ok, doc} <- ExPdfium.open(pdf_bytes),
          {:ok, doc} <- do_draw(doc, page_index, x, y, text, font, size, opts),
          {:ok, bytes} <- ExPdfium.save_to_bytes(doc) do
-      {:ok, bytes}
+      # PDFium's full save (`FPDF_SaveAsCopy`) regenerates the trailer `/ID`
+      # second element on every call from a non-thread-safe global, so two
+      # byte-identical stampings of the same document differ in the trailer.
+      # Restore the source document's own `/ID` (first element, kept by
+      # PDFium) so repeated applies are byte-deterministic — important for
+      # undo/re-apply and the OperationPropertyTest determinism contract.
+      {:ok, restore_source_id(bytes, pdf_bytes)}
     end
   end
 
@@ -148,6 +154,25 @@ defmodule Quire.Editing.Mark do
       size: size,
       color: color
     )
+  end
+
+  # PDFium keeps the source trailer's `/ID` first element and mints a fresh
+  # second element on every full save (FPDF_SaveAsCopy derives it from a
+  # non-thread-safe global). Copy the source `/ID[0]` over the output's so the
+  # same input always saves to the same bytes. Absent or malformed `/ID` in
+  # the source, leave the output as-is.
+  defp restore_source_id(output, source) do
+    case Regex.run(~r{/ID\s*\[<([0-9A-Fa-f]+)>}, source) do
+      [_, first_id] ->
+        Regex.replace(
+          ~r{/ID\s*\[<[0-9A-Fa-f]+><[0-9A-Fa-f]+>\]},
+          output,
+          "/ID[<#{first_id}><#{first_id}>]"
+        )
+
+      _ ->
+        output
+    end
   end
 
   @doc """

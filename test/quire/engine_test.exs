@@ -137,15 +137,17 @@ defmodule Quire.EngineTest do
 
       # Events are forwarded for ALL engines/operations; filter by metadata
       # so a concurrent render_page trace or a :save/:sign event can never
-      # satisfy these assertions.
-      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], measurements, metadata}
-      assert metadata.engine == Quire.Render
-      assert metadata.operation == :page_count
+      # satisfy these assertions. Strict patterns below match ONLY the
+      # engine+operation under test — stray global telemetry events from
+      # concurrent async tests stay in the mailbox.
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :start], measurements,
+                      %{engine: Quire.Render, operation: :page_count}}
+
       assert is_integer(measurements.system_time)
 
-      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :stop], measurements, metadata}
-      assert metadata.engine == Quire.Render
-      assert metadata.operation == :page_count
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :stop], measurements,
+                      %{engine: Quire.Render, operation: :page_count}}
+
       assert is_integer(measurements.duration)
     end
 
@@ -159,10 +161,8 @@ defmodule Quire.EngineTest do
       assert metadata.operation == :page_count
 
       assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], measurements,
-                      metadata}
+                      %{engine: Quire.Render, operation: :page_count}}
 
-      assert metadata.engine == Quire.Render
-      assert metadata.operation == :page_count
       assert is_integer(measurements.duration)
     end
 
@@ -175,9 +175,8 @@ defmodule Quire.EngineTest do
       assert error.engine == Quire.Pdf
       assert error.operation == :save
 
-      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], _, metadata}
-      assert metadata.engine == Quire.Pdf
-      assert metadata.operation == :save
+      assert_receive {:telemetry, ^handler_id, [:quire, :engine, :exception], _,
+                      %{engine: Quire.Pdf, operation: :save}}
     end
   end
 
