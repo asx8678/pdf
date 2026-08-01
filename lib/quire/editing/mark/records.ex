@@ -32,7 +32,13 @@ defmodule Quire.Editing.Mark.Records do
 
   Returns `{:ok, count}` or `{:error, reason}`.
   """
-  @spec record(binary() | nil, binary() | nil, String.t(), [{non_neg_integer(), String.t()}], keyword()) ::
+  @spec record(
+          binary() | nil,
+          binary() | nil,
+          String.t(),
+          [{non_neg_integer(), String.t()}],
+          keyword()
+        ) ::
           {:ok, non_neg_integer()} | {:error, term()}
   def record(document_id, revision_id, kind, pages, opts \\ []) do
     rows = Enum.map(pages, &row(document_id, revision_id, kind, &1, opts))

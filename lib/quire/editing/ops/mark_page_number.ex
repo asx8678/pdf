@@ -156,8 +156,11 @@ defmodule Quire.Editing.Ops.MarkPageNumber do
         ref = op_data["ref"] || op_data[:ref]
 
         case Quire.Storage.get(ref) do
-          {:ok, bytes} -> {:ok, bytes}
-          {:error, reason} -> {:error, "mark.page_number could not read document: #{inspect(reason)}"}
+          {:ok, bytes} ->
+            {:ok, bytes}
+
+          {:error, reason} ->
+            {:error, "mark.page_number could not read document: #{inspect(reason)}"}
         end
 
       true ->
@@ -171,7 +174,8 @@ defmodule Quire.Editing.Ops.MarkPageNumber do
     if format in PageNumber.formats() do
       {:ok, format}
     else
-      {:error, "Unknown page-number format: #{format} (expected one of #{Enum.join(PageNumber.formats(), ", ")})"}
+      {:error,
+       "Unknown page-number format: #{format} (expected one of #{Enum.join(PageNumber.formats(), ", ")})"}
     end
   end
 
@@ -180,7 +184,8 @@ defmodule Quire.Editing.Ops.MarkPageNumber do
          {:ok, geometries} <- Quire.Render.page_geometry(ref) do
       {:ok, geometries}
     else
-      {:error, reason} -> {:error, "mark.page_number could not read page geometry: #{inspect(reason)}"}
+      {:error, reason} ->
+        {:error, "mark.page_number could not read page geometry: #{inspect(reason)}"}
     end
   end
 

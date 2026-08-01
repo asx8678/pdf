@@ -94,6 +94,7 @@ defmodule Quire.Editing.Mark.PageNumber do
   def roman(number) when is_integer(number), do: Integer.to_string(number)
 
   defp do_roman(0, _pairs, acc), do: acc
+
   defp do_roman(number, [{value, glyph} | rest], acc) do
     if number >= value do
       do_roman(number - value, @roman_pairs, acc <> glyph)
@@ -114,6 +115,7 @@ defmodule Quire.Editing.Mark.PageNumber do
   defp alpha(number, _base), do: Integer.to_string(number)
 
   defp letters(0, _base), do: []
+
   defp letters(number, base) do
     letters(div(number - 1, 26), base) ++ [<<rem(number - 1, 26) + base>>]
   end

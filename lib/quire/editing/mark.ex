@@ -50,7 +50,9 @@ defmodule Quire.Editing.Mark do
 
   @doc "Font names accepted by the PDFium `draw_text` NIF."
   @spec fonts() :: [String.t()]
-  def fonts, do: ~w(helvetica helvetica_bold helvetica_oblique helvetica_bold_oblique times_roman times_bold times_italic times_bold_italic courier courier_bold courier_oblique courier_bold_oblique symbol zapf_dingbats)
+  def fonts,
+    do:
+      ~w(helvetica helvetica_bold helvetica_oblique helvetica_bold_oblique times_roman times_bold times_italic times_bold_italic courier courier_bold courier_oblique courier_bold_oblique symbol zapf_dingbats)
 
   @default_margin 36.0
   @default_font_size 12.0
@@ -268,7 +270,9 @@ defmodule Quire.Editing.Mark do
       end
 
     case value do
-      value when is_number(value) -> value
+      value when is_number(value) ->
+        value
+
       value when is_binary(value) ->
         case Float.parse(value) do
           {f, _} -> f
@@ -299,7 +303,9 @@ defmodule Quire.Editing.Mark do
       end
 
     case value do
-      value when is_integer(value) and value > 0 -> value
+      value when is_integer(value) and value > 0 ->
+        value
+
       value when is_binary(value) ->
         case Integer.parse(value) do
           {int, _} when int > 0 -> int
@@ -326,8 +332,7 @@ defmodule Quire.Editing.Mark do
   defp hex_color("#" <> rest) when byte_size(rest) == 6 do
     case Integer.parse(rest, 16) do
       {value, ""} ->
-        {band(Bitwise.bsr(value, 16), 0xFF), band(Bitwise.bsr(value, 8), 0xFF),
-         band(value, 0xFF)}
+        {band(Bitwise.bsr(value, 16), 0xFF), band(Bitwise.bsr(value, 8), 0xFF), band(value, 0xFF)}
 
       _ ->
         :error
