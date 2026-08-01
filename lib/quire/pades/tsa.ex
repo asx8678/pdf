@@ -165,7 +165,8 @@ defmodule Quire.Pades.Tsa do
 
   defp split_tlv(_), do: :error
 
-  defp tlvs(bin), do: read_tlvs(bin, [])
+  @doc false
+  def tlvs(bin), do: read_tlvs(bin, [])
 
   defp read_tlvs(<<>>, acc), do: Enum.reverse(acc)
 
@@ -348,7 +349,8 @@ defmodule Quire.Pades.Tsa do
 
   # Attribute ::= SEQUENCE { attrType OID, attrValues SET OF }. messageDigest
   # is OID 1.2.840.113549.1.9.4.
-  defp attribute_message_digest(attrs_content) do
+  @doc false
+  def attribute_message_digest(attrs_content) do
     attrs_content
     |> tlvs()
     |> Enum.find_value(fn {0x30, attr} ->

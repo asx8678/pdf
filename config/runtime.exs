@@ -39,6 +39,17 @@ if config_env() == :dev do
     ]
 end
 
+if config_env() in [:dev, :prod] do
+  # PAdES TSA URL — configured per environment so it can point at a local
+  # stub in dev/test and the real provider in production.
+  tsa_url =
+    System.get_env("PADES_TSA_URL") ||
+      Application.get_env(:quire, :pades, [])[:tsa_url] ||
+      ""
+
+  config :quire, :pades, tsa_url: tsa_url
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
