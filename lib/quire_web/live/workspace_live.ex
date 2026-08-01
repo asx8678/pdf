@@ -297,6 +297,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:form_field_group, nil)
       |> assign(:form_field_label, "Button")
       |> assign(:form_field_count, 0)
+      |> assign(:form_field_list, [])
+      |> assign(:form_field_list_loading, false)
       |> load_user_settings()
       |> load_saved_signatures()
       |> load_saved_initials()
@@ -2007,7 +2009,9 @@ defmodule QuireWeb.WorkspaceLive do
     socket =
       cond do
         tab == "forms" ->
-          assign(socket, :has_form_fields, check_form_fields(socket))
+          socket
+          |> assign(:has_form_fields, check_form_fields(socket))
+          |> maybe_load_form_field_list()
 
         tab == "fill-sign" ->
           maybe_run_fill_sign_detection(socket)
