@@ -67,7 +67,12 @@ defmodule Quire.Forms.AutoDetectTest do
     test "detects fields on the acroform.pdf fixture (§9.4 done-when)" do
       ref = store(@acros)
 
-      assert {:ok, %{total: total, fields: fields}} = Detect.detect_ref(ref, dpi: 150)
+      # autodetect/2 prefers the real AcroForm (PDFium form_fields) when one
+      # exists — the done-when for §9.4 — so the fixture's five fields must
+      # surface with names and on page 0.
+      assert {:ok, %{source: :acroform, total: total, fields: fields}} =
+               Detect.autodetect(ref, dpi: 150)
+
       assert total == 5
       assert Enum.all?(fields, &(&1.page_index == 0))
     end

@@ -1,39 +1,96 @@
 %PDF-1.7
-%ÿÿÿÿ
+%¡³Å×
 1 0 obj
-<< /Type /Catalog /Pages 2 0 R /AcroForm << /Fields [6 0 R] /DR << /Font << /F1 4 0 R >> >> /NeedAppearances true >> >>
+<</Type/Catalog/Pages 2 0 R/AcroForm 7 0 R>>
 endobj
 2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+<</Count 1/Kids[4 0 R]/Type/Pages>>
 endobj
 3 0 obj
-<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
-   /Resources << /Font << /F1 4 0 R >> >>
-   /Contents 5 0 R >>
+<</CreationDate(D:20260801041553)/Creator(PDFium)>>
 endobj
 4 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+<</Type/Page/Rotate 0/Annots[5 0 R 9 0 R 11 0 R 13 0 R 16 0 R]/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>
 endobj
 5 0 obj
-<< /Length 36 >>
-stream
-BT /F1 12 Tf 72 720 Td (Form) Tj ET
-endstream
+<</Subtype/Widget/T(text1)/Type/Annot/Rect[72 700 200 720]/DA(/Helv 12 Tf 0 g)/F 4/P 4 0 R/FT/Tx/AP<</N 8 0 R>>/MK<</BG[0.96 0.96 0.92]>>>>
 endobj
 6 0 obj
-<< /Type /Annot /Subtype /Widget /FT /Tx /T (text1) /Rect [72 700 200 720] /P 3 0 R >>
+<</Subtype/Type1/BaseFont/Helvetica/Type/Font>>
+endobj
+7 0 obj
+<</Fields[5 0 R 9 0 R 11 0 R 13 0 R 16 0 R]/DR<</Font<</Helv 6 0 R>>>>/NeedAppearances true>>
+endobj
+8 0 obj
+<</BBox[ 0.0 0.0 128.0 20.0]/Length 3>>stream
+q Q
+endstream 
+endobj
+9 0 obj
+<</P 4 0 R/Subtype/Widget/MK<</BG[0.96 0.96 0.92]>>/DA(/Helv 12 Tf 0 g)/Rect[72 660 200 680]/AP<</N 10 0 R>>/FT/Tx/T(text2)/Type/Annot/F 4>>
+endobj
+10 0 obj
+<</BBox[ 0.0 0.0 128.0 20.0]/Length 3>>stream
+q Q
+endstream 
+endobj
+11 0 obj
+<</DA(/Helv 12 Tf 0 g)/P 4 0 R/T(text3)/Type/Annot/Rect[72 620 200 640]/F 4/Subtype/Widget/FT/Tx/MK<</BG[0.96 0.96 0.92]>>/AP<</N 12 0 R>>>>
+endobj
+12 0 obj
+<</BBox[ 0.0 0.0 128.0 0.01]/Length 3>>stream
+q Q
+endstream 
+endobj
+13 0 obj
+<</Rect[72 580 92 600]/FT/Btn/P 4 0 R/T(checkbox4)/AP<</N<</Off 14 0 R/On 15 0 R>>>>/MK<</BC[ 0.0 0.0 0.0]/BG[ 1.0 1.0 1.0]/CA(4)>>/Subtype/Widget/AS/Off/V/Off/Type/Annot/F 4>>
+endobj
+14 0 obj
+<</BBox[ 0.0 0.0 20.0 20.0]/Length 3>>stream
+q Q
+endstream 
+endobj
+15 0 obj
+<</BBox[ 0.0 0.0 20.0 20.0]/Length 62>>stream
+q 0.2 w 1 1 1 RG 1.2 4.2 m 4.6 8.4 l 9.8 14.2 l 15.6 1.4 l S Q
+endstream 
+endobj
+16 0 obj
+<</MK<</CA(4)/BG[ 1.0 1.0 1.0]/BC[ 0.0 0.0 0.0]>>/Rect[72 540 92 560]/Subtype/Widget/P 4 0 R/AP<</N<</On 18 0 R/Off 17 0 R>>>>/T(checkbox5)/AS/Off/F 4/FT/Btn/V/Off/Type/Annot>>
+endobj
+17 0 obj
+<</BBox[ 0.0 0.0 20.0 20.0]/Length 3>>stream
+q Q
+endstream 
+endobj
+18 0 obj
+<</BBox[ 0.0 0.0 20.0 20.0]/Length 62>>stream
+q 0.2 w 1 1 1 RG 1.2 4.2 m 4.6 8.4 l 9.8 14.2 l 15.6 1.4 l S Q
+endstream 
 endobj
 xref
-0 7
+0 19
 0000000000 65535 f 
-0000000015 00000 n
-0000000150 00000 n
-0000000207 00000 n
-0000000339 00000 n
-0000000409 00000 n
-0000000494 00000 n
+0000000015 00000 n 
+0000000075 00000 n 
+0000000126 00000 n 
+0000000193 00000 n 
+0000000322 00000 n 
+0000000477 00000 n 
+0000000540 00000 n 
+0000000649 00000 n 
+0000000725 00000 n 
+0000000881 00000 n 
+0000000958 00000 n 
+0000001115 00000 n 
+0000001192 00000 n 
+0000001385 00000 n 
+0000001461 00000 n 
+0000001597 00000 n 
+0000001790 00000 n 
+0000001866 00000 n 
 trailer
-<< /Size 7 /Root 1 0 R >>
+<</Root 1 0 R/Info 3 0 R/Size 19/ID[<5C7271627945F907E02FD2A979A55577><5C7271627945F907E02FD2A979A55577>]>>
 startxref
-596
-%%%%EOF
+2002
+%%EOF
