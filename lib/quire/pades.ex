@@ -78,6 +78,11 @@ defmodule Quire.Pades do
           warnings: [String.t()]
         }
 
+  @callback sign(pdf_bytes :: binary(), signer :: map(), opts :: keyword()) ::
+              {:ok, map()} | {:error, term()}
+
+  @callback verify(pdf_bytes :: binary()) :: {:ok, list(map())} | {:error, term()}
+
   @placeholder_size 8192
 
   # Signature field attributes (reserved for future appearance generation)
