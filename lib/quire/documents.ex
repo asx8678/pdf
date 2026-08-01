@@ -287,4 +287,38 @@ defmodule Quire.Documents do
     # The migration already creates the unique index.
     :ok
   end
+
+  # ── Secure Operations ──────────────────────────────────────────────────
+
+  @doc """
+  Enqueue a redaction-apply job for the given document.
+
+  The worker (`Quire.Workers.SecureWorker`) applies the marks, verifies
+  redacted strings are absent from text extraction, and on success creates
+  a new revision with `redactions.applied` metadata on the document.
+
+  Returns `{:ok, job}` or `{:error, reason}`.
+  """
+  @spec redact_document(Document.t(), [map()], keyword()) ::
+          {:ok, Oban.Job.t()} | {:error, term()}
+  def redact_document(%Document{} = doc, marks, opts \\ []) when is_list(marks) do
+    operation_id = Keyword.get(opts, :operation_id)
+
+    job_args = %{
+      "doc_id" => doc.id,
+      "operation" => "sec.redact_apply",
+      "marks" => marks
+    }
+
+    job_args =
+      if operation_id do
+        Map.put(job_args, "operation_id", operation_id)
+      else
+        job_args
+      end
+
+    job_args
+    |> Quire.Workers.SecureWorker.new([])
+    |> Oban.insert()
+  end
 end

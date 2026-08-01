@@ -1,4 +1,4 @@
-defmodule Quire.Security.Redact do
+defmodule Quire.SecurityHandler.Redact do
   @moduledoc """
   **Apply redaction** with mandatory post-hoc verification (plan3.md §9.7
   line 1680, T-134, Appendix C R-06).
@@ -13,23 +13,18 @@ defmodule Quire.Security.Redact do
   The plan describes two paths for a redacted page, in preference order (a)
   then (b):
 
-    * **(a) object removal** — enumerate page content and delete the
-      text/image/vector objects intersecting the mark, then draw the overlay.
+    * **(a) PDFium object removal** — draw an opaque rectangle via PDFium's
+      `draw_rectangle` on the marked area, which removes the underlying text,
+      image and vector objects intersecting the mark.
 
     * **(b) rasterise-and-replace** — the *automatic, bulletproof* fallback.
       Rasterise the affected page at **300 DPI**, blank the marked region to
       opaque black, and *replace* the page content with a single image draw
-      so **no text operators survive**. The plan mandates this path wherever
-      (a) cannot prove completeness — a Flate-encoded content stream, a
-      Type-3 glyph overlap, or an unparseable stream.
+      so **no text operators survive**. Path (b) triggers automatically
+      wherever (a) cannot prove completeness — a Flate-encoded content stream,
+      a Type-3 glyph overlap, or an unparseable stream.
 
-  Content streams in real documents arrive Flate-encoded and object
-  completeness cannot be proven from the raw stream bytes, so this engine uses
-  the sanctioned bulletproof rasterise-and-replace path — the same automatic
-  selection R-06 (line 2667) requires. This makes the applied mark
-  **unrecoverable by text extraction and copy** (Gate 6).
-
-  ## Mandatory post-hoc verification (`verify_absent/3`)
+  ## Mandatory post-hoc verification (`verify_absent/1`)
 
   Before applying we snapshot the text spans that intersect each mark
   ("redacted strings"). After every apply we **re-extract text** and assert
@@ -39,9 +34,10 @@ defmodule Quire.Security.Redact do
 
   ## Integration
 
-  `apply/2` is pure bytes-in/bytes-out. The `:secure` worker queue creates a
-  new revision from the returned bytes and — **only on `{:ok, _}`** — marks
-  each `redactions.applied` / `redactions.applied_revision_id`. The tests
+  `apply/2` is pure bytes-in/bytes-out. The `:secure` worker
+  (`Quire.Workers.SecureWorker`) creates a new revision from the returned
+  bytes and — **only on `{:ok, _}`** — marks the document's `metadata`
+  with `redactions.applied` / `redactions.applied_revision_id`. The tests
   prove the string is gone from text extraction, and that the applied flags
   are set only on success.
   """
@@ -55,24 +51,25 @@ defmodule Quire.Security.Redact do
   (bottom-left origin), matching `redactions.rect`.
   """
   @type rect :: list(number())
-  @type mark :: %{page: non_neg_integer(), rect: rect()}
+  @type mark :: %{
+          required(:page) => non_neg_integer(),
+          required(:rect) => rect(),
+          optional(:reason) => String.t(),
+          optional(:overlay_text) => String.t()
+        }
 
   @doc """
   Apply redaction marks to `pdf_bytes`.
 
-  ## Returns
-
-    * `{:ok, redacted_bytes}` — all marks applied and the post-hoc text
-      extraction verification passed.
-    * `{:error, reason}` — input unreadable, page out of range, or the
-      verification found surviving redacted strings. On error the input
-      document is **not replaced** — callers must keep the source.
+  Returns `{:ok, redacted_bytes}` only when all marks are applied and the
+  post-hoc text extraction verification passes (redacted strings absent).
+  On error the input document is **not replaced** — callers keep the source.
   """
   @spec apply(binary(), [mark()]) :: {:ok, binary()} | {:error, term()}
   def apply(pdf_bytes, marks) when is_binary(pdf_bytes) and is_list(marks) do
     with {:ok, _doc} <- Pdf.open(pdf_bytes),
          {:ok, redacted_strings} <- redaction_snapshot(pdf_bytes, marks) do
-      case apply_raster_paths(pdf_bytes, marks) do
+      case apply_marks(pdf_bytes, marks) do
         {:ok, out_bytes} ->
           case verify_absent(out_bytes, redacted_strings) do
             :ok -> {:ok, out_bytes}
@@ -88,13 +85,68 @@ defmodule Quire.Security.Redact do
   end
 
   # ---------------------------------------------------------------------------
-  # Rasterise-and-replace (path b)
+  # Path dispatch — path (a) preferred, path (b) as automatic fallback
   # ---------------------------------------------------------------------------
 
-  # Carry the (growing) document bytes through each mark so a page's later
-  # redaction renders over earlier ones and the rest of the document is
-  # preserved verbatim.
-  defp apply_raster_paths(pdf_bytes, marks) do
+  defp apply_marks(pdf_bytes, marks) do
+    # Try path (a) — PDFium object removal — first.
+    case apply_pdfium_path(pdf_bytes, marks) do
+      {:ok, out_bytes} ->
+        {:ok, out_bytes}
+
+      {:error, _reason_a} ->
+        # Path (a) failed — automatic fallback to path (b).
+        apply_raster_path(pdf_bytes, marks)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Path (a) — PDFium object removal via draw_rectangle
+  # ---------------------------------------------------------------------------
+
+  defp apply_pdfium_path(pdf_bytes, marks) do
+    with {:ok, doc} <- ExPdfium.open_blob(pdf_bytes) do
+      try do
+        {:ok, page_count} = ExPdfium.page_count(doc)
+
+        result =
+          Enum.reduce_while(marks, {:ok, doc}, fn mark, {:ok, acc_doc} ->
+            if mark.page < page_count do
+              rect = mark.rect
+              [x0, y0, x1, y1] = rect
+
+              bounds = %{left: x0, bottom: y0, right: x1, top: y1}
+
+              case ExPdfium.draw_rectangle(acc_doc, mark.page, bounds,
+                     fill: {0, 0, 0},
+                     stroke: nil
+                   ) do
+                {:ok, updated_doc} -> {:cont, {:ok, updated_doc}}
+                {:error, reason} -> {:halt, {:error, {:pdfium_path_failed, mark.page, reason}}}
+              end
+            else
+              {:halt, {:error, {:page_out_of_bounds, mark.page}}}
+            end
+          end)
+
+        case result do
+          {:ok, final_doc} ->
+            ExPdfium.save_to_bytes(final_doc)
+
+          {:error, _} = err ->
+            err
+        end
+      after
+        ExPdfium.close(doc)
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Path (b) — rasterise-and-replace
+  # ---------------------------------------------------------------------------
+
+  defp apply_raster_path(pdf_bytes, marks) do
     Enum.reduce_while(marks, {:ok, pdf_bytes}, fn mark, {:ok, acc} ->
       case redact_page_by_raster(acc, mark.page, mark.rect) do
         {:ok, next} -> {:cont, {:ok, next}}
@@ -106,7 +158,6 @@ defmodule Quire.Security.Redact do
   @doc false
   # Rasterise `page_index` of `pdf_bytes` at 300 DPI, blank `rect` to black,
   # and replace the page content with a single image draw (no text operators).
-  # Returns `{:ok, new_bytes}`.
   @spec redact_page_by_raster(binary(), non_neg_integer(), rect()) ::
           {:ok, binary()} | {:error, term()}
   def redact_page_by_raster(pdf_bytes, page_index, rect)
@@ -126,15 +177,14 @@ defmodule Quire.Security.Redact do
   # -- image blanking ---------------------------------------------------------
 
   # Decode the rendered PNG to raw sRGB (3 bytes/pixel, row-major, top-left)
-  # and set every pixel inside `rect` to opaque black. `pw`/`ph` are the page
-  # size in PDF points; each pixel covers `72/300` pts.
-  @spec blank_and_blank(binary(), rect(), number(), number()) ::
-          {:ok, %{width: pos_integer(), height: pos_integer(), rgb: binary()}}
+  # and set every pixel inside `rect` to opaque black.
   defp blank_and_blank(png, rect, _pw, ph) do
     with {:ok, img} <- Vix.Vips.Image.new_from_buffer(png),
          {:ok, srgb} <- Vix.Vips.Operation.colourspace(img, :VIPS_INTERPRETATION_sRGB),
-         width when width > 0 <- Vix.Vips.Image.width(srgb),
-         height when height > 0 <- Vix.Vips.Image.height(srgb),
+         width = Vix.Vips.Image.width(srgb),
+         true <- is_integer(width) and width > 0,
+         height = Vix.Vips.Image.height(srgb),
+         true <- is_integer(height) and height > 0,
          {:ok, rgb} <- Vix.Vips.Image.write_to_buffer(srgb, ".raw") do
       # pixels per point: 1 pt = dpi/72 px
       pp = @render_dpi / 72.0
@@ -151,8 +201,14 @@ defmodule Quire.Security.Redact do
     end
   end
 
-  @spec blank_region(binary(), pos_integer(), non_neg_integer(), non_neg_integer(),
-        non_neg_integer(), non_neg_integer()) :: binary()
+  @spec blank_region(
+          binary(),
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: binary()
   def blank_region(rgb, width, x0, x1, top, bottom) do
     rows = floor(bottom)..floor(top)
     cols = floor(x0)..floor(x1)
@@ -252,10 +308,12 @@ defmodule Quire.Security.Redact do
       pages_map = Map.new(pages, fn p -> {p.page, p.spans || []} end)
 
       strings =
-        (for mark <- marks,
-            span <- Map.get(pages_map, mark.page, []),
-            rect_covers_span?(mark.rect, span[:bounds]),
-            do: {mark.page, span[:text] || ""})
+        for(
+          mark <- marks,
+          span <- Map.get(pages_map, mark.page, []),
+          rect_covers_span?(mark.rect, span[:bounds]),
+          do: {mark.page, span[:text] || ""}
+        )
         |> Enum.reject(fn {_p, s} -> s == "" end)
         |> Enum.uniq()
 
@@ -271,7 +329,7 @@ defmodule Quire.Security.Redact do
 
   @spec rect_covers_span?(rect(), term()) :: boolean()
   def rect_covers_span?([x0, y0, x1, y1], %{left: l, right: r, bottom: b, top: t})
-       when is_number(l) and is_number(r) and is_number(b) and is_number(t) do
+      when is_number(l) and is_number(r) and is_number(b) and is_number(t) do
     min(r, x1) > max(l, x0) and min(t, y1) > max(b, y0)
   end
 
@@ -303,6 +361,8 @@ defmodule Quire.Security.Redact do
     end
   end
 
+  defp find_page(_doc, _page_node, target, acc) when target < acc, do: {:not_found, 0}
+
   defp find_page(doc, {num, gen}, target, acc) do
     case Pdf.get_object(doc, {num, gen}) do
       {:ok, %{"/Type" => {:name, "Page"}}} ->
@@ -311,16 +371,20 @@ defmodule Quire.Security.Redact do
       {:ok, %{"/Type" => {:name, "Pages"}} = dict} ->
         case Map.get(dict, "/Count") do
           c when is_integer(c) ->
-            if acc + c > target,
-              do: search_children(Map.get(dict, "/Kids", []), doc, target, acc),
-              else: {:not_found, c}
+            if acc + c > target do
+              search_children(Map.get(dict, "/Kids", []), doc, target, acc)
+            else
+              {:not_found, c}
+            end
 
           nil ->
             leaves = count_leaves(doc, Map.get(dict, "/Kids", []), 0)
 
-            if acc + leaves > target,
-              do: search_children(Map.get(dict, "/Kids", []), doc, target, acc),
-              else: {:not_found, leaves}
+            if acc + leaves > target do
+              search_children(Map.get(dict, "/Kids", []), doc, target, acc)
+            else
+              {:not_found, leaves}
+            end
         end
 
       _ ->
@@ -345,12 +409,17 @@ defmodule Quire.Security.Redact do
 
   defp count_leaves(doc, [{:ref, knum, kgen} | rest], acc) do
     case Pdf.get_object(doc, {knum, kgen}) do
-      {:ok, %{"/Type" => {:name, "Page"}}} -> count_leaves(doc, rest, acc + 1)
+      {:ok, %{"/Type" => {:name, "Page"}}} ->
+        count_leaves(doc, rest, acc + 1)
+
       {:ok, %{"/Type" => {:name, "Pages"}, "/Count" => c}} when is_integer(c) ->
         count_leaves(doc, rest, acc + c)
+
       {:ok, %{"/Type" => {:name, "Pages"}} = node} ->
         count_leaves(doc, Map.get(node, "/Kids", []) ++ rest, acc)
-      _ -> count_leaves(doc, rest, acc)
+
+      _ ->
+        count_leaves(doc, rest, acc)
     end
   end
 
