@@ -52,7 +52,19 @@ defmodule Quire.Pades.Cms do
 
       with {:ok, signature} <- sign_fun.(digest) do
         unsigned_attrs = if token, do: build_unsigned_attrs(token), else: ""
-        cms = build_bes_cms(content_hash, signature, signer_cert_der, issuer, serial, sig_alg, signed_attrs_der, unsigned_attrs)
+
+        cms =
+          build_bes_cms(
+            content_hash,
+            signature,
+            signer_cert_der,
+            issuer,
+            serial,
+            sig_alg,
+            signed_attrs_der,
+            unsigned_attrs
+          )
+
         {:ok, cms}
       end
     end
@@ -75,11 +87,22 @@ defmodule Quire.Pades.Cms do
   defp build_unsigned_attrs(token) do
     encode_tag(
       0xA1,
-      encode_set_der(encode_attribute(@oid_signature_time_stamp_token, encode_octet_string(token)))
+      encode_set_der(
+        encode_attribute(@oid_signature_time_stamp_token, encode_octet_string(token))
+      )
     )
   end
 
-  defp build_bes_cms(_content_hash, signature, cert_der, issuer, serial, sig_alg, signed_attrs_der, unsigned_attrs) do
+  defp build_bes_cms(
+         _content_hash,
+         signature,
+         cert_der,
+         issuer,
+         serial,
+         sig_alg,
+         signed_attrs_der,
+         unsigned_attrs
+       ) do
     digest_alg_oid = @oid_sha256
     signature_alg_oid = signature_oid(sig_alg)
     digest_alg_id = encode_algorithm_id(digest_alg_oid)
@@ -91,13 +114,19 @@ defmodule Quire.Pades.Cms do
       encode_sequence(
         Enum.reject(
           [
-            encode_integer(1),           # version
-            signer_id,                    # sid
-            digest_alg_id,                # digestAlgorithm
-            nonempty(signed_attrs_der),   # signedAttrs [0]
-            sig_alg_id,                   # signatureAlgorithm
+            # version
+            encode_integer(1),
+            # sid
+            signer_id,
+            # digestAlgorithm
+            digest_alg_id,
+            # signedAttrs [0]
+            nonempty(signed_attrs_der),
+            # signatureAlgorithm
+            sig_alg_id,
             encode_octet_string(signature),
-            nonempty(unsigned_attrs)      # unsignedAttrs [1]
+            # unsignedAttrs [1]
+            nonempty(unsigned_attrs)
           ],
           &is_nil/1
         )
@@ -108,7 +137,8 @@ defmodule Quire.Pades.Cms do
 
     signed_data_der =
       encode_sequence([
-        encode_integer(3),                # version — BES uses CMS version 3
+        # version — BES uses CMS version 3
+        encode_integer(3),
         encode_set([digest_alg_id]),
         encap_content_info,
         cert_set_tagged,
@@ -134,7 +164,8 @@ defmodule Quire.Pades.Cms do
     # DER UTCTime ::= YYMMDDHHMMSSZ (UTC, no seconds fraction)
     dt = DateTime.truncate(dt, :second) |> DateTime.shift_zone!("Etc/UTC")
 
-    <<year::binary-size(2), _rest::binary>> = String.pad_leading(Integer.to_string(dt.year), 4, "0")
+    <<year::binary-size(2), _rest::binary>> =
+      String.pad_leading(Integer.to_string(dt.year), 4, "0")
 
     s =
       year <> "#{pad(dt.month)}#{pad(dt.day)}#{pad(dt.hour)}#{pad(dt.minute)}#{pad(dt.second)}Z"

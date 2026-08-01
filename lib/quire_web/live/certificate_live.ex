@@ -395,8 +395,7 @@ defmodule QuireWeb.CertificateLive do
             {:noreply, assign(socket, :errors, ["Invalid file encoding."])}
 
           {:error, reason} when is_atom(reason) ->
-            {:noreply,
-             assign(socket, :errors, ["Failed to parse keystore: #{inspect(reason)}"])}
+            {:noreply, assign(socket, :errors, ["Failed to parse keystore: #{inspect(reason)}"])}
 
           {:error, reason} ->
             {:noreply, assign(socket, :errors, [to_string(reason)])}
@@ -435,16 +434,23 @@ defmodule QuireWeb.CertificateLive do
 
     {valid_from, valid_to} =
       case elem(validity, 1) do
-        {:utcTime, from} -> {parse_utc_time(from), parse_utc_time(elem(elem(validity, 2), 1) |> elem(1))}
+        {:utcTime, from} ->
+          {parse_utc_time(from), parse_utc_time(elem(elem(validity, 2), 1) |> elem(1))}
+
         from ->
           {parse_validity_time(from), parse_validity_time(elem(validity, 2))}
       end
 
     key_algo =
       case elem(tbs, 7) do
-        {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, {1, 2, 840, 113_549, 1, 1, 1}, _}, _} -> :rsa
-        {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, {1, 2, 840, 100_045, 2, 1}, _}, _} -> :ecdsa
-        _ -> :unknown
+        {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, {1, 2, 840, 113_549, 1, 1, 1}, _}, _} ->
+          :rsa
+
+        {:SubjectPublicKeyInfo, {:AlgorithmIdentifier, {1, 2, 840, 100_045, 2, 1}, _}, _} ->
+          :ecdsa
+
+        _ ->
+          :unknown
       end
 
     %{
@@ -458,16 +464,17 @@ defmodule QuireWeb.CertificateLive do
       valid_to: valid_to
     }
   rescue
-    _ -> %{
-      der: cert_der,
-      key_id: key_id,
-      subject_cn: "Unknown",
-      issuer_cn: "Unknown",
-      serial: "0",
-      algorithm: :unknown,
-      valid_from: nil,
-      valid_to: nil
-    }
+    _ ->
+      %{
+        der: cert_der,
+        key_id: key_id,
+        subject_cn: "Unknown",
+        issuer_cn: "Unknown",
+        serial: "0",
+        algorithm: :unknown,
+        valid_from: nil,
+        valid_to: nil
+      }
   end
 
   defp extract_cn({:rdnSequence, rdns}) do
@@ -484,8 +491,8 @@ defmodule QuireWeb.CertificateLive do
   end
 
   defp parse_utc_time(s) when is_binary(s) and byte_size(s) == 13 do
-    <<yy::binary-size(2), mm::binary-size(2), dd::binary-size(2),
-      hh::binary-size(2), min::binary-size(2), ss::binary-size(2), "Z">> = s
+    <<yy::binary-size(2), mm::binary-size(2), dd::binary-size(2), hh::binary-size(2),
+      min::binary-size(2), ss::binary-size(2), "Z">> = s
 
     year = if String.to_integer(yy) >= 50, do: "19#{yy}", else: "20#{yy}"
 

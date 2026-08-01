@@ -198,8 +198,9 @@ defmodule Quire.Pades.Tsa do
     with {:ok, sd_content} <- signed_data_content(token_der),
          {:ok, econtent} <- encapsulated_content(sd_content),
          {:ok, tst_info} <- parse_tst_info(econtent),
-         true <- tst_info.message_imprint == expected_digest or
-                 {:error, :message_imprint_mismatch},
+         true <-
+           tst_info.message_imprint == expected_digest or
+             {:error, :message_imprint_mismatch},
          :ok <- verify_cms_signature(econtent, sd_content) do
       {:ok, Map.put(tst_info, :signature_valid, true)}
     else

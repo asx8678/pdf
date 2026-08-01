@@ -211,7 +211,7 @@ defmodule Quire.Pades.Validation do
         binary_part(pdf_bytes, offset2, len2)
 
     # The CMS itself sits in the gap
-    cms_in_gap = byte_size(cms_der) <= (offset2 - (offset1 + len1))
+    cms_in_gap = byte_size(cms_der) <= offset2 - (offset1 + len1)
 
     cms_in_gap
   end

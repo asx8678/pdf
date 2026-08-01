@@ -119,7 +119,16 @@ defmodule Quire.Pades do
          {:ok, byte_range, content_hash} <-
            compute_byte_range(pre_save, @placeholder_size),
          {:ok, cms_der} <-
-           build_cms(content_hash, signer, field_name, pades_level, reason, location, contact, tsa_url_override),
+           build_cms(
+             content_hash,
+             signer,
+             field_name,
+             pades_level,
+             reason,
+             location,
+             contact,
+             tsa_url_override
+           ),
          :ok <- validate_cms_fits(cms_der, @placeholder_size),
          final_bytes <- replace_placeholder(pre_save, byte_range, cms_der, @placeholder_size),
          {:ok, verifications} <- Validation.verify(final_bytes) do
@@ -439,7 +448,10 @@ defmodule Quire.Pades do
       after_part = binary_part(pre_save, after_start, byte_size(pre_save) - after_start)
 
       # Replace /ByteRange [...] with actual byte range
-      after_part = String.replace(after_part, "/ByteRange [0 0 0 0]", "/ByteRange #{byte_range_str}", global: false)
+      after_part =
+        String.replace(after_part, "/ByteRange [0 0 0 0]", "/ByteRange #{byte_range_str}",
+          global: false
+        )
 
       # Replace /Contents <00...> with actual signature
       # The placeholder in the PDF is hex-encoded zeros, e.g. <0000...>
@@ -454,7 +466,16 @@ defmodule Quire.Pades do
 
   # ── CMS construction ─────────────────────────────────────────────────
 
-  defp build_cms(content_hash, signer, _field_name, pades_level, _reason, _location, _contact, tsa_url_override) do
+  defp build_cms(
+         content_hash,
+         signer,
+         _field_name,
+         pades_level,
+         _reason,
+         _location,
+         _contact,
+         tsa_url_override
+       ) do
     sign_fun = fn digest ->
       signer_key = decode_private_key(signer.private_key_der, signer.algorithm)
 

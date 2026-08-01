@@ -74,7 +74,10 @@ defmodule QuireWeb.Chrome.DigitalSignaturePanel do
 
             <%= if @certificates == [] do %>
               <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-4 text-center">
-                <.icon name="hero-shield-exclamation" class="size-6 text-gray-300 dark:text-gray-500 mx-auto mb-2" />
+                <.icon
+                  name="hero-shield-exclamation"
+                  class="size-6 text-gray-300 dark:text-gray-500 mx-auto mb-2"
+                />
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   No certificates available.
                 </p>
@@ -203,7 +206,10 @@ defmodule QuireWeb.Chrome.DigitalSignaturePanel do
               </div>
             <% else %>
               <div class="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-4 text-center">
-                <.icon name="hero-cursor-arrow-rays" class="size-6 text-gray-300 dark:text-gray-500 mx-auto mb-2" />
+                <.icon
+                  name="hero-cursor-arrow-rays"
+                  class="size-6 text-gray-300 dark:text-gray-500 mx-auto mb-2"
+                />
                 <p class="text-xs text-gray-500 dark:text-gray-400">
                   Click "Place Field" then drag on the document
                 </p>
@@ -233,14 +239,31 @@ defmodule QuireWeb.Chrome.DigitalSignaturePanel do
             ]}
           >
             <%= if @signing do %>
-              <svg class="animate-spin size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+              <svg
+                class="animate-spin size-4"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                >
+                </circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                >
+                </path>
               </svg>
               Signing...
             <% else %>
-              <.icon name="hero-lock-closed" class="size-4" />
-              Apply PAdES Signature
+              <.icon name="hero-lock-closed" class="size-4" /> Apply PAdES Signature
             <% end %>
           </button>
 
