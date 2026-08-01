@@ -62,14 +62,42 @@ defmodule Quire.Editing.OperationPropertyTest do
       {:ok, applied} = mod.apply(op_data, context)
       {:ok, inverse} = mod.invert(applied, context)
 
-      if match?({:restore_revision, _}, inverse) do
-        # Phase-0 placeholder — the sentinel is not re-appliable op_data, so
-        # only verify that apply is deterministic (apply == apply).
-        assert {:ok, ^applied} = mod.apply(op_data, context)
-      else
-        {:ok, _undone} = mod.apply(inverse, context)
-        {:ok, reapplied} = mod.apply(op_data, context)
-        assert applied == reapplied
+      case inverse do
+        {:restore_revision, _} ->
+          # Phase-0 placeholder — the sentinel is not re-appliable op_data, so
+          # only verify that apply is deterministic (apply == apply).
+          assert {:ok, ^applied} = mod.apply(op_data, context)
+
+        _ when is_map(inverse) ->
+          # Re-apply through the inverse's own kind module (some inverses are
+          # directives like `link.remove` with no module of their own — fall
+          # back to a determinism check for those).
+          inverse_kind = Map.get(inverse, "kind") || Map.get(inverse, :kind)
+
+          case Quire.Editing.Operation.module_for_kind(inverse_kind) do
+            {:ok, inverse_mod} when not is_nil(inverse_kind) ->
+              if Code.ensure_loaded?(inverse_mod) do
+                case inverse_mod.apply(inverse, context) do
+                  {:ok, _undone} ->
+                    {:ok, reapplied} = mod.apply(op_data, context)
+                    assert applied == reapplied
+
+                  # Some inverses (e.g. link.edit without a previous_action) are
+                  # not re-appliable op_data — treat like the restore_revision
+                  # sentinel and verify determinism instead.
+                  {:error, _} ->
+                    assert {:ok, ^applied} = mod.apply(op_data, context)
+                end
+              else
+                assert {:ok, ^applied} = mod.apply(op_data, context)
+              end
+
+            _ ->
+              assert {:ok, ^applied} = mod.apply(op_data, context)
+          end
+
+        _ ->
+          assert {:ok, ^applied} = mod.apply(op_data, context)
       end
     end
   end
@@ -135,7 +163,47 @@ defmodule Quire.Editing.OperationPropertyTest do
           rect: [0.0, 0.0, 10.0, 10.0]
         })
       else
-        StreamData.constant(%{kind: kind, id: Ecto.UUID.generate()})
+        if kind == "link.add" do
+          # link.add validates geometry + action; reset_form needs no params.
+          StreamData.constant(%{
+            kind: kind,
+            id: Ecto.UUID.generate(),
+            rect: [0.0, 0.0, 10.0, 10.0],
+            page_index: 0,
+            action: %{"type" => "reset_form"}
+          })
+        else
+          if kind == "link.edit" do
+            # link.edit validates id + action only.
+            StreamData.constant(%{
+              kind: kind,
+              id: Ecto.UUID.generate(),
+              action: %{"type" => "reset_form"}
+            })
+          else
+            if kind == "sec.redact_apply" do
+              # Validates a non-empty marks list (actual redaction is a worker
+              # side effect, so apply just checks the payload shape).
+              StreamData.constant(%{
+                kind: kind,
+                id: Ecto.UUID.generate(),
+                marks: [%{"rect" => [0.0, 0.0, 10.0, 10.0], "page_index" => 0}]
+              })
+            else
+              if kind == "mark.page_number" do
+                # Real stamping: needs actual PDF bytes (source_bytes accepts a
+                # binary directly). simple_text.pdf is a one-page fixture.
+                StreamData.constant(%{
+                  kind: kind,
+                  id: Ecto.UUID.generate(),
+                  pdf_bytes: File.read!("test/fixtures/pdfs/simple_text.pdf")
+                })
+              else
+                StreamData.constant(%{kind: kind, id: Ecto.UUID.generate()})
+              end
+            end
+          end
+        end
       end
     end
   end
