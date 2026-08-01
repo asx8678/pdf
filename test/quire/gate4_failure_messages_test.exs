@@ -34,6 +34,13 @@ defmodule Quire.Gate4FailureMessagesTest do
   # ── 1. corrupt / encrypted / unsupported input (open/ingest) ───────────
 
   describe "PDF open / ingest failure paths surface plain language" do
+    setup do
+      # ingest/2 inserts a Document row, so it needs a real owning user (the
+      # previous synthetic `%{id: Ecto.UUID.generate()}` tripped the
+      # documents_user_id_fkey constraint). Create one via the fixture.
+      %{user: user_fixture()}
+    end
+
     test "corrupt PDF bytes return :invalid_pdf and a plain message" do
       # A %PDF- header with garbage body — Quire.Pdf.open rejects it
       corrupt = <<37, 80, 68, 70, 45, 49, 46, 52, 10, "not really a pdf", 0, 1, 2, 3>>
@@ -42,20 +49,20 @@ defmodule Quire.Gate4FailureMessagesTest do
       assert "The file is not a readable PDF" = Operations.friendly_error(:invalid_pdf)
     end
 
-    test "non-PDF bytes are rejected with a plain message" do
+    test "non-PDF bytes are rejected with a plain message", %{user: user} do
       assert {:error, :invalid_pdf} = Quire.Pdf.open("hello world this is not a pdf")
 
       assert {:error, :invalid_pdf} =
-               Documents.ingest("hello world", %{user: %{id: Ecto.UUID.generate()}})
+               Documents.ingest("hello world", %{user: user})
     end
 
-    test "encrypted fixture without a password maps to password_required" do
+    test "encrypted fixture without a password maps to password_required", %{user: user} do
       # These fixtures carry a real /Encrypt dict; Quire.Pdf.open refuses to
       # open them without a password. Documents.ingest translates that to
       # :password_required so the UI can prompt.
       {:ok, encrypted} = File.read(Path.join(@fixtures, "encrypted_user_pw.pdf"))
 
-      assert {:error, reason} = Documents.ingest(encrypted, %{user: %{id: Ecto.UUID.generate()}})
+      assert {:error, reason} = Documents.ingest(encrypted, %{user: user})
       assert reason == :password_required or reason == :invalid_pdf
     end
 

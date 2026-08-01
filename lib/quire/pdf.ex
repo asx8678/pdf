@@ -224,9 +224,24 @@ defmodule Quire.Pdf do
   @spec open(binary()) :: {:ok, t()} | {:error, atom()}
   def open(bytes) when is_binary(bytes) do
     case Native.open(bytes) do
-      {:error, :invalid_pdf} -> open_via_pdfium(bytes)
-      other -> other
+      {:error, :invalid_pdf} ->
+        # The PDFium round-trip opens encrypted documents (PDFium tolerates the
+        # /Encrypt dict even without the owner password in some cases), which
+        # would silently rewrite a file we must surface as password-protected.
+        # Skip the normalization for anything carrying an /Encrypt entry so an
+        # encrypted PDF still maps to :password_required/unreadable.
+        if encrypted?(bytes), do: {:error, :invalid_pdf}, else: open_via_pdfium(bytes)
+
+      other ->
+        other
     end
+  end
+
+  # Scans the raw trailer / objects for the /Encrypt indirect-reference key.
+  # This is a coarse byte probe — good enough to gate the PDFium normalization,
+  # which is the only call site.
+  defp encrypted?(bytes) do
+    bytes =~ "/Encrypt"
   end
 
   # lopdf's strict xref/EOF checks reject spec-nonconforming documents that
