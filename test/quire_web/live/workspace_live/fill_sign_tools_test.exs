@@ -128,6 +128,77 @@ defmodule QuireWeb.WorkspaceLive.FillSignToolsTest do
     end
   end
 
+  # Fill & Sign auto-detection + auto-fill (§9.4, T-116). Detection runs off
+  # the LiveView process (a plain Task broadcasting on PubSub); these tests
+  # wait for it to land and then exercise the "Fill automatically" action.
+  defp open_workspace_with(conn, fixture) do
+    user = user_fixture()
+    doc = document_fixture(user)
+    doc = revision_fixture(doc, fixture)
+    {:ok, conn} = {:ok, log_in_user(conn, user)}
+
+    {:ok, lv, _html} = live(conn, ~p"/workspace/#{doc.id}")
+    lv
+  end
+
+  defp wait_for_assign(lv, key, fun, timeout \\ 2000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_wait_assign(lv, key, fun, deadline)
+  end
+
+  defp do_wait_assign(lv, key, fun, deadline) do
+    value = :sys.get_state(lv.pid).socket.assigns[key]
+
+    cond do
+      fun.(value) ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        flunk("timed out waiting for #{key}")
+
+      true ->
+        render(lv)
+        Process.sleep(20)
+        do_wait_assign(lv, key, fun, deadline)
+    end
+  end
+
+  describe "Fill & Sign auto-detect + auto-fill (T-116 §9.4)" do
+    @fill_auto_btn ~s{button[phx-click="fill_automatically"]}
+
+    test "entering the tab runs detection and reports the field count", %{conn: conn} do
+      lv = open_workspace_with(conn, "../../../fixtures/pdfs/acroform.pdf")
+
+      select_fill_sign_tab(lv)
+
+      # Detection is off the LiveView process (a Task); poll until it lands.
+      wait_for_assign(lv, :fill_sign_field_count, &(&1 == 5))
+
+      a = assigns(lv)
+      refute a.fill_sign_detecting
+      assert a.fill_sign_field_count == 5
+      assert length(a.fill_sign_detections) == 5
+
+      # The palette surfaces the count in the UI.
+      assert render(lv) =~ "5 field(s) detected"
+    end
+
+    test "Fill automatically pushes the detected fields for placement", %{conn: conn} do
+      lv = open_workspace_with(conn, "../../../fixtures/pdfs/acroform.pdf")
+      select_fill_sign_tab(lv)
+
+      wait_for_assign(lv, :fill_sign_field_count, &(&1 == 5))
+
+      assert has_element?(lv, @fill_auto_btn)
+      refute has_element?(lv, ~s{#{@fill_auto_btn}[disabled]})
+
+      lv |> element(@fill_auto_btn) |> render_click()
+      assert assigns(lv).fill_sign_tool == nil
+      assert length(assigns(lv).fill_sign_detections) == 5
+    end
+  end
+
+
   # --- fixtures (mirrors workspace_live/edit_tools_test.exs) ---
 
   defp user_fixture do
@@ -148,9 +219,9 @@ defmodule QuireWeb.WorkspaceLive.FillSignToolsTest do
     |> Repo.insert!()
   end
 
-  defp revision_fixture(doc) do
-    {:ok, ex_doc} =
-      ExPdfium.open(File.read!(Path.expand("../../../fixtures/pdfs/simple_text.pdf", __DIR__)))
+  defp revision_fixture(doc, fixture \\ "../../../fixtures/pdfs/simple_text.pdf") do
+    path = Path.expand(fixture, __DIR__)
+    {:ok, ex_doc} = ExPdfium.open(File.read!(path))
 
     {:ok, pdf} = ExPdfium.save_to_bytes(ex_doc)
 
@@ -170,11 +241,25 @@ defmodule QuireWeb.WorkspaceLive.FillSignToolsTest do
 
     {:ok, rev} = Quire.Documents.create_revision(doc, label: "v1", source: source)
 
+    page_count =
+      case ExPdfium.page_count(ex_doc) do
+        {:ok, c} -> c
+        _ -> 1
+      end
+
     {:ok, updated} =
       doc
-      |> Ecto.Changeset.change(%{current_revision_id: rev.id, page_count: 1})
+      |> Ecto.Changeset.change(%{current_revision_id: rev.id, page_count: page_count})
       |> Quire.Repo.update()
 
     updated
+  end
+
+  defp select_fill_sign_tab(lv) do
+    lv
+    |> element(~s{button[role="tab"][phx-value-tab="fill-sign"]})
+    |> render_click()
+
+    lv
   end
 end

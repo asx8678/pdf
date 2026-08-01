@@ -290,6 +290,9 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:fill_sign_glyph_color, "#1f2937")
       |> assign(:fill_sign_line_weight, "2")
       |> assign(:fill_sign_line_color, "#1f2937")
+      |> assign(:fill_sign_detecting, false)
+      |> assign(:fill_sign_field_count, 0)
+      |> assign(:fill_sign_detections, [])
       |> load_user_settings()
       |> load_saved_signatures()
       |> load_saved_initials()
@@ -1273,6 +1276,28 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, socket}
   end
 
+  # ── Fill & Sign auto-fill (T-118 §9.4) ────────────────────────────────────
+  #
+  # Detection runs off the LiveView process (see maybe_run_fill_sign_detection/1,
+  # kicked on tab entry). This handler is the placement half: hand every
+  # detected field rect to the client so it can drop a positioned text box over
+  # each one.
+  def handle_event("fill_automatically", _params, socket) do
+    fields = socket.assigns.fill_sign_detections
+
+    if fields == [] do
+      {:noreply,
+       socket
+       |> put_flash(:info, "No fields to fill — run auto-detect on the tab first")}
+    else
+      {:noreply,
+       socket
+       |> assign(:fill_sign_tool, nil)
+       |> push_event("toggle_fill_sign_tool", %{tool: "", active: false})
+       |> push_event("fill_automatically", %{fields: fields})}
+    end
+  end
+
   # ── Fill & Sign option controls (font / size / colour / weight) ─────────
 
   def handle_event("set_fill_sign_font", %{"value" => font}, socket)
@@ -1826,10 +1851,15 @@ defmodule QuireWeb.WorkspaceLive do
   @impl true
   def handle_event("select_tab", %{"tab" => tab}, socket) do
     socket =
-      if tab == "forms" do
-        assign(socket, :has_form_fields, check_form_fields(socket))
-      else
-        socket
+      cond do
+        tab == "forms" ->
+          assign(socket, :has_form_fields, check_form_fields(socket))
+
+        tab == "fill-sign" ->
+          maybe_run_fill_sign_detection(socket)
+
+        true ->
+          socket
       end
 
     {:noreply, assign(socket, :active_tab, tab)}
@@ -3426,17 +3456,35 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
+  # Fill & Sign auto-detect result (T-116 §9.4): a background Task ran
+  # `Quire.Forms.Detect.autodetect/2` off the LiveView process and broadcast
+  # the per-page field rects. Surface a count for the palette so the user can
+  # choose "Fill automatically".
+  def handle_info({:fill_sign_detections, {:ok, %{fields: fields}}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:fill_sign_detecting, false)
+     |> assign(:fill_sign_field_count, length(fields))
+     |> assign(:fill_sign_detections, fields)}
+  end
+
+  def handle_info({:fill_sign_detections, {:error, _reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:fill_sign_detecting, false)
+     |> assign(:fill_sign_field_count, 0)
+     |> assign(:fill_sign_detections, [])
+     |> put_flash(:error, "Field detection failed")}
+  end
+
   @impl true
   def handle_info({:run_ocr, options}, socket) do
-    # Options from the LiveComponent have atom keys; convert to string keys
-    # for Oban job args (JSON serialisation).
-    options =
-      options
-      |> Enum.map(fn
-        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-        {k, v} -> {k, v}
-      end)
-      |> Map.new()
+    options
+    |> Enum.map(fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+      {k, v} -> {k, v}
+    end)
+    |> Map.new()
 
     enqueue_ocr(socket, options)
   end
@@ -4044,6 +4092,9 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:fill_sign_glyph_color, fn -> "#1f2937" end)
       |> assign_new(:fill_sign_line_weight, fn -> "2" end)
       |> assign_new(:fill_sign_line_color, fn -> "#1f2937" end)
+      |> assign_new(:fill_sign_detecting, fn -> false end)
+      |> assign_new(:fill_sign_field_count, fn -> 0 end)
+      |> assign_new(:fill_sign_detections, fn -> [] end)
 
     ~H"""
     <div
@@ -4849,6 +4900,28 @@ defmodule QuireWeb.WorkspaceLive do
             tooltip="Line — straight line with adjustable weight and colour; shift-constrains to horizontal/vertical"
           />
         </.ribbon_group>
+        <.ribbon_group label="Detected Fields">
+          <div class="flex items-center gap-2">
+            <.ribbon_button
+              icon="hero-sparkles"
+              label="Fill automatically"
+              phx-click="fill_automatically"
+              tooltip="Place text boxes over every detected field"
+              disabled={@fill_sign_detecting || @fill_sign_detections == []}
+            />
+            <div class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">
+              <%= if @fill_sign_detecting do %>
+                <span class="flex items-center gap-1.5">
+                  <.icon name="hero-arrow-path" class="size-3.5 animate-spin" /> Detecting…
+                </span>
+              <% else %>
+                <span id="fill-sign-field-count">
+                  Detected {@fill_sign_field_count} field(s)
+                </span>
+              <% end %>
+            </div>
+          </div>
+        </.ribbon_group>
       </div>
 
       <.fill_sign_palette
@@ -4860,6 +4933,8 @@ defmodule QuireWeb.WorkspaceLive do
         glyph_color={@fill_sign_glyph_color}
         line_weight={@fill_sign_line_weight}
         line_color={@fill_sign_line_color}
+        detecting={@fill_sign_detecting}
+        field_count={@fill_sign_field_count}
       />
 
       <div :if={
@@ -4891,6 +4966,8 @@ defmodule QuireWeb.WorkspaceLive do
   attr :glyph_color, :string, default: "#1f2937"
   attr :line_weight, :string, default: "2"
   attr :line_color, :string, default: "#1f2937"
+  attr :detecting, :boolean, default: false
+  attr :field_count, :integer, default: 0
   attr :fonts, :list, default: @fill_sign_fonts
 
   def fill_sign_palette(assigns) do
@@ -5032,9 +5109,23 @@ defmodule QuireWeb.WorkspaceLive do
           Select a tool to start signing.
         </span>
         <span class="flex-1" />
-        <span class="text-[11px] whitespace-nowrap text-gray-400 dark:text-gray-500">
-          Esc to deactivate
-        </span>
+        <%= cond do %>
+          <% @detecting -> %>
+            <span class="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+              <.icon name="hero-arrow-path" class="size-3.5 animate-spin" /> Detecting fields…
+            </span>
+          <% @field_count > 0 -> %>
+            <span
+              id="fill-sign-palette-count"
+              class="text-[11px] whitespace-nowrap text-gray-400 dark:text-gray-500"
+            >
+              {@field_count} field(s) detected
+            </span>
+          <% true -> %>
+            <span class="text-[11px] whitespace-nowrap text-gray-400 dark:text-gray-500">
+              Esc to deactivate
+            </span>
+        <% end %>
       <% end %>
     </div>
     """
@@ -5322,6 +5413,62 @@ defmodule QuireWeb.WorkspaceLive do
       end
     else
       _ -> false
+    end
+  end
+
+  # ── Fill & Sign auto-detect (T-116 §9.4) ──────────────────────────────────
+  #
+  # Entering the tab kicks this off. Detection is slow (raster analysis per
+  # page, or a PDFium AcroForm walk), so it is pushed onto a plain Task and the
+  # result broadcast back on the document's PubSub topic — never computed on
+  # the LiveView process. Telemetry (start/completed/failed) mirrors the other
+  # workers so the duration and field count are observable.
+  defp maybe_run_fill_sign_detection(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev) do
+      start_time = System.monotonic_time(:millisecond)
+
+      :telemetry.execute([:quire, :forms, :autodetect, :start], %{}, %{doc_id: doc_id})
+
+      Task.start(fn ->
+        result = Quire.Forms.Detect.autodetect(ref, dpi: 150)
+        duration = System.monotonic_time(:millisecond) - start_time
+
+        case result do
+          {:ok, detection} ->
+            :telemetry.execute(
+              [:quire, :forms, :autodetect, :completed],
+              %{duration: duration, total: detection.total, source: detection.source},
+              %{doc_id: doc_id}
+            )
+
+          {:error, reason} ->
+            :telemetry.execute(
+              [:quire, :forms, :autodetect, :failed],
+              %{duration: duration, reason: inspect(reason)},
+              %{doc_id: doc_id}
+            )
+        end
+
+        Phoenix.PubSub.broadcast(
+          Quire.PubSub,
+          "document:#{doc_id}",
+          {:fill_sign_detections, result}
+        )
+      end)
+
+      socket
+      |> assign(:fill_sign_detecting, true)
+    else
+      _ ->
+        socket
+        |> assign(:fill_sign_detecting, false)
+        |> assign(:fill_sign_field_count, 0)
+        |> assign(:fill_sign_detections, [])
     end
   end
 

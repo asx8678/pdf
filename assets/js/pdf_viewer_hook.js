@@ -190,6 +190,33 @@ const PdfViewerHook = {
       if (this._fillSignTool === "text") this._applyFillTextOptions();
     });
 
+    // Fill & Sign auto-fill (T-116): the user asked to fill every detected
+    // field. The server sends per-page field rects (PDF user-space points);
+    // place an empty text box anchored at the centre of each one.
+    this.handleEvent("fill_automatically", ({ fields }) => {
+      this._clearFillSignLayer();
+      this._fillSignItems = [];
+      if (!fields || !fields.length) return;
+      const o = this._fillSignOptions;
+      const pts = Math.max(8, parseFloat(o.font_size) || 12);
+      for (const f of fields) {
+        const pv = this._viewer?._pages?.[f.page_index];
+        if (!pv || !f.rect || f.rect.length !== 4) continue;
+        const r = f.rect;
+        this._fillSignItems.push({
+          id: "af-" + this._fillId(),
+          kind: "text",
+          pageIndex: f.page_index,
+          pt: [(r[0] + r[2]) / 2, (r[1] + r[3]) / 2],
+          font: o.font,
+          size: pts,
+          color: o.text_color,
+          text: ""
+        });
+      }
+      for (const item of this._fillSignItems) this._renderFillText(item);
+    });
+
     // Toggle annotation editor mode (FreeText, etc.)
     this.handleEvent("toggle_editing", ({ mode }) => {
       if (!this._viewer) return;
