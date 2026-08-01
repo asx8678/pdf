@@ -26,7 +26,10 @@ config :quire,
   storage_adapter: Quire.Storage.Web,
   translation_provider: Quire.Translation.Provider.Null,
   storage_backend: Quire.Storage.Web.Filesystem,
-  render_adapter: Quire.Render.Pdfium
+  render_adapter: Quire.Render.Pdfium,
+  pades: [
+    tsa_url: System.get_env("PADES_TSA_URL") || ""
+  ]
 
 config :quire, Oban,
   repo: Quire.Repo,
