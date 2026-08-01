@@ -1,0 +1,306 @@
+[
+  {
+    "kind": "highlight",
+    "file": "highlight.pdf",
+    "subtype": "Highlight",
+    "expected_type": "highlight",
+    "expected_nm": "hl-001",
+    "expected_contents": "Highlighted passage",
+    "author": "Ada",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind highlight"
+  },
+  {
+    "kind": "underline",
+    "file": "underline.pdf",
+    "subtype": "Underline",
+    "expected_type": "underline",
+    "expected_nm": "ul-001",
+    "expected_contents": "Underlined passage",
+    "author": "Ada",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind underline"
+  },
+  {
+    "kind": "strikethrough",
+    "file": "strikethrough.pdf",
+    "subtype": "StrikeOut",
+    "expected_type": "strikeout",
+    "expected_nm": "so-001",
+    "expected_contents": "Struck passage",
+    "author": "Bob",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind strikethrough"
+  },
+  {
+    "kind": "squiggly",
+    "file": "squiggly.pdf",
+    "subtype": "Squiggly",
+    "expected_type": "squiggly",
+    "expected_nm": "sq-001",
+    "expected_contents": "Squiggled passage",
+    "author": "Bob",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind squiggly"
+  },
+  {
+    "kind": "sticky_note",
+    "file": "sticky_note.pdf",
+    "subtype": "Text",
+    "expected_type": "text",
+    "expected_nm": "tn-001",
+    "expected_contents": "A sticky note",
+    "author": "Carol",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind sticky_note"
+  },
+  {
+    "kind": "free_text",
+    "file": "free_text.pdf",
+    "subtype": "FreeText",
+    "expected_type": "free_text",
+    "expected_nm": "ft-001",
+    "expected_contents": "Free text callout",
+    "author": "Carol",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind free_text"
+  },
+  {
+    "kind": "ink",
+    "file": "ink.pdf",
+    "subtype": "Ink",
+    "expected_type": "ink",
+    "expected_nm": "ink-001",
+    "expected_contents": "Freehand stroke",
+    "author": "Dana",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind ink"
+  },
+  {
+    "kind": "stamp",
+    "file": "stamp.pdf",
+    "subtype": "Stamp",
+    "expected_type": "stamp",
+    "expected_nm": "stp-001",
+    "expected_contents": "Approved",
+    "author": "Dana",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind stamp"
+  },
+  {
+    "kind": "line",
+    "file": "line.pdf",
+    "subtype": "Line",
+    "expected_type": "line",
+    "expected_nm": "ln-001",
+    "expected_contents": "Straight line",
+    "author": "Dana",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind line"
+  },
+  {
+    "kind": "arrow",
+    "file": "arrow.pdf",
+    "subtype": "Line",
+    "expected_type": "line",
+    "expected_nm": "ar-001",
+    "expected_contents": "Arrow",
+    "author": "Dana",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind arrow"
+  },
+  {
+    "kind": "double_arrow",
+    "file": "double_arrow.pdf",
+    "subtype": "Line",
+    "expected_type": "line",
+    "expected_nm": "da-001",
+    "expected_contents": "Double arrow",
+    "author": "Dana",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind double_arrow"
+  },
+  {
+    "kind": "dimension",
+    "file": "dimension.pdf",
+    "subtype": "Line",
+    "expected_type": "line",
+    "expected_nm": "dim-001",
+    "expected_contents": "123 mm",
+    "author": "Dana",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind dimension"
+  },
+  {
+    "kind": "oval",
+    "file": "oval.pdf",
+    "subtype": "Circle",
+    "expected_type": "circle",
+    "expected_nm": "ov-001",
+    "expected_contents": "Oval",
+    "author": "Erin",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind oval"
+  },
+  {
+    "kind": "rectangle",
+    "file": "rectangle.pdf",
+    "subtype": "Square",
+    "expected_type": "square",
+    "expected_nm": "rc-001",
+    "expected_contents": "Rectangle",
+    "author": "Erin",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind rectangle"
+  },
+  {
+    "kind": "polygon",
+    "file": "polygon.pdf",
+    "subtype": "Polygon",
+    "expected_type": "polygon",
+    "expected_nm": "pg-001",
+    "expected_contents": "Triangle",
+    "author": "Erin",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind polygon"
+  },
+  {
+    "kind": "cloud",
+    "file": "cloud.pdf",
+    "subtype": "Polygon",
+    "expected_type": "polygon",
+    "expected_nm": "cl-001",
+    "expected_contents": "Cloud",
+    "author": "Erin",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind cloud"
+  },
+  {
+    "kind": "polyline",
+    "file": "polyline.pdf",
+    "subtype": "Polyline",
+    "expected_type": "polyline",
+    "expected_nm": "pl-001",
+    "expected_contents": "Polyline",
+    "author": "Erin",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind polyline"
+  },
+  {
+    "kind": "file_attachment",
+    "file": "file_attachment.pdf",
+    "subtype": "FileAttachment",
+    "expected_type": "file_attachment",
+    "expected_nm": "fa-001",
+    "expected_contents": "attached note",
+    "author": "Fay",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind file_attachment"
+  },
+  {
+    "kind": "whiteout",
+    "file": "whiteout.pdf",
+    "subtype": "Square",
+    "expected_type": "square",
+    "expected_nm": "wo-001",
+    "expected_contents": "Whiteout",
+    "author": "Fay",
+    "expected_bounds": {
+      "left": 100,
+      "bottom": 100,
+      "right": 400,
+      "top": 120
+    },
+    "note": "Round-trip fixture for kind whiteout"
+  }
+]
