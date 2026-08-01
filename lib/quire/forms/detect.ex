@@ -86,6 +86,78 @@ defmodule Quire.Forms.Detect do
     end
   end
 
+  @doc """
+  Reads AcroForm fields via the PDFium layer (§9.4), normalized to the same
+  per-page detection shape `detect_ref/2` produces: `%{page_index, kind,
+  name, rect}` where `rect` is `[x0, y0, x1, y1]` in PDF user-space points
+  (y-up, crop-origin included).
+
+  Unlike `detect_ref/2` this only surfaces fields a real `/AcroForm` already
+  declares — digitised fillable PDFs.  Scanned paper forms have no AcroForm,
+  so they return `{:ok, []}`.
+  """
+  @spec form_fields(Ref.t()) :: {:ok, [field]} | {:error, term()}
+  def form_fields(ref) do
+    case Quire.Render.form_fields(ref) do
+      {:ok, fields} -> {:ok, Enum.map(fields, &normalise_acro_field/1)}
+      {:error, _} = err -> err
+    end
+  end
+
+  @doc """
+  Auto-detect the fields to offer "Fill automatically" over (§9.4).
+
+  Priority: a real AcroForm (PDFium `form_fields`) wins — its rects are
+  authoritative.  When the document has none (a scanned form), fall back to
+  the heuristic line/box detector over the rendered pages.
+
+  Returns `{:ok, %{total: n, fields: [field], source: :acroform | :scanned}}`.
+  """
+  @spec autodetect(Ref.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def autodetect(ref, opts \\ []) do
+    case form_fields(ref) do
+      {:ok, []} ->
+        case detect_ref(ref, opts) do
+          {:ok, %{total: total, fields: fields}} ->
+            {:ok, %{total: total, fields: fields, source: :scanned}}
+
+          {:error, _} = err ->
+            err
+        end
+
+      {:ok, fields} ->
+        {:ok, %{total: length(fields), fields: fields, source: :acroform}}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  # PDFium exposes field bounds as a `%{left, bottom, right, top}` map; the
+  # detector's shape is a flat `[x0, y0, x1, y1]` list in the same space.
+  defp normalise_acro_field(%{bounds: nil}) do
+    %{kind: :text, page_index: 0, name: nil, rect: [0, 0, 0, 0]}
+  end
+
+  defp normalise_acro_field(f) do
+    %{left: l, bottom: b0, right: r, top: t} = f.bounds
+
+    %{
+      kind: acro_kind(f.type),
+      page_index: f.page,
+      name: f.name,
+      rect: [to_f(l), to_f(b0), to_f(r), to_f(t)]
+    }
+  end
+
+  defp acro_kind(:text), do: :text
+  defp acro_kind(:checkbox), do: :checkbox
+  defp acro_kind(:radio), do: :radio
+  defp acro_kind(_), do: :text
+
+  defp to_f(n) when is_integer(n), do: n * 1.0
+  defp to_f(n) when is_float(n), do: n
+
   # ── Page loop ───────────────────────────────────────────────────────────
 
   defp detect_doc(doc, dpi, opts) do
