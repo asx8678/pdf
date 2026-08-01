@@ -260,6 +260,15 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:pdfa_running, false)
       |> assign(:pdfa_error, nil)
       |> assign(:pdfa_report, nil)
+      |> assign(:show_search_redact_wizard, false)
+      |> assign(:search_redact_presets, Quire.SearchRedact.presets())
+      |> assign(:search_redact_preset, nil)
+      |> assign(:search_redact_query, "")
+      |> assign(:search_redact_regex, false)
+      |> assign(:search_redact_running, false)
+      |> assign(:search_redact_applying, false)
+      |> assign(:search_redact_error, nil)
+      |> assign(:search_redact_hits, [])
       |> assign(:show_compress_wizard, false)
       |> assign(:compress_preset, "medium")
       |> assign(:compress_custom_quality, "60")
@@ -3349,6 +3358,84 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, run_pdfa_convert(socket)}
   end
 
+  # ── Search & Redact (T-135) ──────────────────────────────────────────────
+
+  @impl true
+  def handle_event("open_search_redact_wizard", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_search_redact_wizard, true)
+     |> assign(:search_redact_preset, nil)
+     |> assign(:search_redact_query, "")
+     |> assign(:search_redact_regex, false)
+     |> assign(:search_redact_running, false)
+     |> assign(:search_redact_applying, false)
+     |> assign(:search_redact_error, nil)
+     |> assign(:search_redact_hits, [])}
+  end
+
+  @impl true
+  def handle_event("close_search_redact_wizard", _params, socket) do
+    {:noreply, assign(socket, :show_search_redact_wizard, false)}
+  end
+
+  @impl true
+  def handle_event("search_redact_preset", %{"preset" => preset}, socket) do
+    {:noreply,
+     socket
+     |> assign(:search_redact_preset, preset)
+     |> assign(:search_redact_query, "")
+     |> assign(:search_redact_error, nil)
+     |> assign(:search_redact_hits, [])}
+  end
+
+  @impl true
+  def handle_event("search_redact_query_changed", %{"value" => value}, socket) do
+    {:noreply,
+     socket
+     |> assign(:search_redact_query, value)
+     |> assign(:search_redact_preset, nil)
+     |> assign(:search_redact_error, nil)
+     |> assign(:search_redact_hits, [])}
+  end
+
+  @impl true
+  def handle_event("search_redact_toggle_regex", _params, socket) do
+    {:noreply, update(socket, :search_redact_regex, &(!&1))}
+  end
+
+  @impl true
+  def handle_event("search_redact_run", _params, socket) do
+    run_search_redact(socket)
+  end
+
+  @impl true
+  def handle_event("search_redact_toggle", %{"id" => id}, socket) do
+    hits =
+      Enum.map(socket.assigns.search_redact_hits, fn hit ->
+        if hit.id == id, do: Map.update!(hit, :accepted, &(!&1)), else: hit
+      end)
+
+    {:noreply, assign(socket, :search_redact_hits, hits)}
+  end
+
+  @impl true
+  def handle_event("search_redact_accept_all", _params, socket) do
+    hits = Enum.map(socket.assigns.search_redact_hits, &Map.put(&1, :accepted, true))
+    {:noreply, assign(socket, :search_redact_hits, hits)}
+  end
+
+  @impl true
+  def handle_event("search_redact_reject_all", _params, socket) do
+    hits = Enum.map(socket.assigns.search_redact_hits, &Map.put(&1, :accepted, false))
+    {:noreply, assign(socket, :search_redact_hits, hits)}
+  end
+
+  @impl true
+  def handle_event("search_redact_apply", _params, socket) do
+    run_search_redact_apply(socket)
+  end
+
   @impl true
   def handle_event("toggle_new_menu", _params, socket) do
     {:noreply, update(socket, :show_new_menu, &(!&1))}
@@ -3761,6 +3848,24 @@ defmodule QuireWeb.WorkspaceLive do
   @impl true
   def handle_info({:request_camera}, socket) do
     {:noreply, push_event(socket, "start_camera", %{})}
+  end
+
+  # T-135: result of a background search-and-redact scan. The task ref is
+  # matched so a stale result from a superseded search is dropped.
+  @impl true
+  def handle_info({ref, result}, socket)
+      when is_reference(ref) do
+    if socket.assigns[:search_redact_task] == ref do
+      handle_search_redact_result(socket, result)
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, socket)
+      when is_reference(ref) do
+    {:noreply, socket}
   end
 
   # Checks whether the document has any extractable text and assigns
@@ -4696,6 +4801,12 @@ defmodule QuireWeb.WorkspaceLive do
             label="PDF/A"
             phx-click="open_pdfa_wizard"
             tooltip="Best-effort PDF/A-2b conversion with a structural conformance report"
+          />
+          <.ribbon_button
+            icon="hero-eye-slash"
+            label="Search &amp; Redact"
+            phx-click="open_search_redact_wizard"
+            tooltip="Find text (literal, regex or SSN / card / email / phone / IBAN presets), review each hit, and permanently redact the accepted ones"
           />
         </.ribbon_group>
 
@@ -6501,6 +6612,136 @@ defmodule QuireWeb.WorkspaceLive do
         |> assign(:pdfa_running, false)
         |> assign(:pdfa_error, "No current document to convert")
     end
+  end
+
+  # ── Search & Redact helpers (T-135) ──────────────────────────────────────
+
+  # Runs the search in a background task so a 500-page document never blocks
+  # the LiveView (§9.7 line 1681: "does not block the LiveView"). The task
+  # sends itself the result, which is handled in handle_info below.
+  defp run_search_redact(socket) do
+    with {:ok, doc} <-
+           Quire.Documents.get_document(
+             socket.assigns.active_document_id,
+             socket.assigns.current_scope
+           ),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         ref when not is_nil(ref) <- Quire.Documents.Revision.storage_ref(rev) do
+      preset = socket.assigns.search_redact_preset
+      query = socket.assigns.search_redact_query
+      regex? = socket.assigns.search_redact_regex
+
+      {search_fun, label} =
+        if preset do
+          {fn -> Quire.SearchRedact.search_preset(ref, preset) end,
+           Quire.SearchRedact.preset_label(preset) || preset}
+        else
+          {fn -> Quire.SearchRedact.search(ref, query, regex: regex?) end, query}
+        end
+
+      task =
+        Task.async(fn ->
+          case search_fun.() do
+            {:ok, hits} -> {:ok, hits}
+            {:error, reason} -> {:error, reason}
+          end
+        end)
+
+      {:noreply,
+       socket
+       |> assign(:search_redact_running, true)
+       |> assign(:search_redact_error, nil)
+       |> assign(:search_redact_hits, [])
+       |> assign(:search_redact_search_label, label)
+       |> assign(:search_redact_task, task.ref)}
+    else
+      _ ->
+        {:noreply,
+         socket
+         |> assign(:search_redact_running, false)
+         |> assign(:search_redact_error, "No current document to search")}
+    end
+  end
+
+  defp run_search_redact_apply(socket) do
+    accepted = accepted_search_redact_hits(socket.assigns.search_redact_hits)
+
+    if accepted == [] do
+      {:noreply,
+       socket
+       |> assign(:search_redact_error, "Select at least one hit to redact")}
+    else
+      with {:ok, doc} <-
+             Quire.Documents.get_document(
+               socket.assigns.active_document_id,
+               socket.assigns.current_scope
+             ) do
+        marks = Quire.SearchRedact.marks_for_hits(accepted)
+
+        case Quire.Documents.redact_document(doc, marks) do
+          {:ok, _job} ->
+            {:noreply,
+             socket
+             |> assign(:search_redact_applying, true)
+             |> assign(:search_redact_error, nil)
+             |> put_flash(
+               :info,
+               "Redaction started — #{length(marks)} mark(s) are being permanently removed with post-hoc verification (T-134)"
+             )}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(:search_redact_applying, false)
+             |> assign(:search_redact_error, "Redaction failed: #{inspect(reason)}")}
+        end
+      else
+        _ ->
+          {:noreply,
+           socket
+           |> assign(:search_redact_applying, false)
+           |> assign(:search_redact_error, "No current document to redact")}
+      end
+    end
+  end
+
+  defp handle_search_redact_result(socket, result) do
+    socket =
+      socket
+      |> assign(:search_redact_running, false)
+      |> assign(:search_redact_applying, false)
+      |> assign(:search_redact_task, nil)
+
+    case result do
+      {:ok, hits} ->
+        hits =
+          hits
+          |> Enum.map(&Map.put_new(&1, :accepted, true))
+          |> Enum.map(&Map.put(&1, :preset, Map.get(&1, :preset)))
+
+        {:noreply,
+         socket
+         |> assign(:search_redact_hits, hits)
+         |> assign(:search_redact_error, nil)
+         |> put_flash(:info, "Found #{length(hits)} hit(s)")}
+
+      {:error, {:invalid_regex, msg}} ->
+        {:noreply, assign(socket, :search_redact_error, "Invalid regular expression: #{msg}")}
+
+      {:error, :unknown_preset} ->
+        {:noreply, assign(socket, :search_redact_error, "Unknown preset")}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :search_redact_error, "Search failed: #{inspect(reason)}")}
+    end
+  end
+
+  defp accepted_search_redact_hits(hits) do
+    Enum.filter(hits, & &1.accepted)
+  end
+
+  defp label_for_preset(preset) do
+    Quire.SearchRedact.preset_label(preset) || to_string(preset)
   end
 
   defp save_pdfa_revision(doc, out_bytes) do

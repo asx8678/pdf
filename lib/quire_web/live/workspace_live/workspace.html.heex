@@ -904,6 +904,198 @@
     </.modal>
 
     <.modal
+      :if={@show_search_redact_wizard}
+      title="Search &amp; Redact"
+      on_close="close_search_redact_wizard"
+      open={@show_search_redact_wizard}
+      size="large"
+    >
+      <div id="search-redact-wizard" class="space-y-4">
+        <p class="text-sm text-gray-600 dark:text-gray-300">
+          Search the whole document for text to permanently remove. Presets find common
+          personal data (SSN, credit card, email, phone, IBAN); you can also search a
+          literal string or a regular expression. Review every hit and accept only the
+          ones you want redacted — redaction is <span class="font-semibold">permanent and
+          unrecoverable</span>.
+        </p>
+
+        <div :if={@search_redact_error} class="text-sm text-red-600" role="alert">
+          {@search_redact_error}
+        </div>
+
+        <%!-- Preset buttons --%>
+        <div>
+          <span class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1.5">
+            Presets
+          </span>
+          <div class="flex flex-wrap gap-2">
+            <button
+              :for={{name, label, _regex} <- @search_redact_presets}
+              type="button"
+              phx-click="search_redact_preset"
+              phx-value-preset={name}
+              id={"sr-preset-" <> to_string(name)}
+              class={[
+                "px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer",
+                @search_redact_preset == to_string(name) &&
+                  "bg-accent text-white border-accent",
+                @search_redact_preset != to_string(name) &&
+                  "border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+              ]}
+            >
+              {label}
+            </button>
+          </div>
+        </div>
+
+        <%!-- Query input --%>
+        <div class="flex items-end gap-2">
+          <div class="flex-1">
+            <label
+              class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1.5"
+              for="search-redact-query"
+            >
+              {if @search_redact_preset,
+                do: "Custom query (preset selected)",
+                else: "Literal or regex query"}
+            </label>
+            <input
+              id="search-redact-query"
+              type="text"
+              value={@search_redact_query}
+              phx-change="search_redact_query_changed"
+              placeholder="Search text…"
+              class="w-full rounded-lg border border-chrome-border dark:border-gray-600 bg-white dark:bg-gray-800 px-3 py-2 text-sm text-gray-700 dark:text-gray-200"
+            />
+          </div>
+          <label class="flex items-center gap-1.5 text-sm text-gray-600 dark:text-gray-300 pb-2.5">
+            <input
+              type="checkbox"
+              checked={@search_redact_regex}
+              phx-click="search_redact_toggle_regex"
+              class="rounded border-chrome-border dark:border-gray-600"
+            /> Regex
+          </label>
+          <button
+            type="button"
+            id="search-redact-run-btn"
+            phx-click="search_redact_run"
+            disabled={@search_redact_running}
+            class="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <.icon
+              :if={@search_redact_running}
+              name="hero-arrow-path"
+              class="size-4 animate-spin"
+            />
+            <span>Search</span>
+          </button>
+        </div>
+
+        <%!-- Progress while searching a large document --%>
+        <div
+          :if={@search_redact_running}
+          class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400"
+          id="search-redact-progress"
+        >
+          <span class="size-2 rounded-full bg-accent animate-pulse"></span>
+          Searching across {@total_pages} pages… (you can keep working — this runs in the
+          background)
+        </div>
+
+        <%!-- Hit review list --%>
+        <div :if={@search_redact_hits != []}>
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-200">
+              {length(@search_redact_hits)} hit(s) — {@search_redact_hits
+              |> Enum.count(& &1.accepted)} accepted
+            </span>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                phx-click="search_redact_accept_all"
+                class="text-xs text-accent hover:underline cursor-pointer"
+              >
+                Accept all
+              </button>
+              <button
+                type="button"
+                phx-click="search_redact_reject_all"
+                class="text-xs text-gray-500 hover:underline cursor-pointer"
+              >
+                Reject all
+              </button>
+            </div>
+          </div>
+          <div
+            id="search-redact-hits"
+            class="max-h-72 overflow-y-auto rounded-xl border border-chrome-border dark:border-gray-700 divide-y divide-chrome-border dark:divide-gray-700"
+          >
+            <label
+              :for={hit <- @search_redact_hits}
+              class="flex items-start gap-3 px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
+              id={"sr-hit-" <> hit.id}
+            >
+              <input
+                type="checkbox"
+                class="mt-1 rounded border-chrome-border dark:border-gray-600"
+                checked={hit.accepted}
+                phx-click="search_redact_toggle"
+                phx-value-id={hit.id}
+                aria-label={"Accept hit on page " <> Integer.to_string(hit.page + 1)}
+              />
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+                  <span>Page {hit.page + 1}</span>
+                  <span :if={hit.preset}>· {label_for_preset(hit.preset)}</span>
+                </div>
+                <p class="text-sm font-medium text-gray-800 dark:text-gray-100 break-all">
+                  {hit.text}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{hit.snippet}</p>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div
+          :if={@search_redact_hits == [] and not @search_redact_running}
+          class="text-sm text-gray-400"
+          id="search-redact-empty"
+        >
+          Run a search to list hits here.
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2">
+          <button
+            type="button"
+            phx-click="close_search_redact_wizard"
+            class="px-4 py-2 rounded-lg text-sm font-medium border border-chrome-border dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          >
+            Close
+          </button>
+          <button
+            type="button"
+            id="search-redact-apply-btn"
+            phx-click="search_redact_apply"
+            disabled={
+              @search_redact_applying or
+                length(accepted_search_redact_hits(@search_redact_hits)) == 0
+            }
+            class="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium bg-red-600 text-white hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <.icon
+              :if={@search_redact_applying}
+              name="hero-arrow-path"
+              class="size-4 animate-spin"
+            />
+            <span>Redact accepted ({length(accepted_search_redact_hits(@search_redact_hits))})</span>
+          </button>
+        </div>
+      </div>
+    </.modal>
+
+    <.modal
       :if={@show_blank_wizard}
       title="New blank document"
       on_close="close_blank_wizard"
