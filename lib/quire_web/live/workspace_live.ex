@@ -293,6 +293,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:fill_sign_detecting, false)
       |> assign(:fill_sign_field_count, 0)
       |> assign(:fill_sign_detections, [])
+      |> assign(:form_field_tool, nil)
+      |> assign(:form_field_group, nil)
+      |> assign(:form_field_label, "Button")
+      |> assign(:form_field_count, 0)
       |> load_user_settings()
       |> load_saved_signatures()
       |> load_saved_initials()
@@ -1272,6 +1276,74 @@ defmodule QuireWeb.WorkspaceLive do
       |> push_event("toggle_fill_sign_tool", %{tool: "", active: false})
 
     {:noreply, socket}
+  end
+
+  # ── Forms authoring (T-119 §9.8) ─────────────────────────────────────────
+  #
+  # The Forms tab lets the user drag to place one of seven AcroForm field
+  # kinds. Arming a tool is exclusive; the client (pdf_viewer_hook) owns the
+  # drag rect and reports it back via place_form_field, which writes a real
+  # AcroForm widget (Quire.Pdf.AcroForm.add_field/6) and saves a new revision.
+
+  @form_field_kinds ~w(text combo list checkbox radio button signature)
+
+  def handle_event("toggle_form_field_tool", %{"kind" => kind}, socket)
+      when kind in @form_field_kinds do
+    active = socket.assigns.form_field_tool != kind
+
+    socket =
+      socket
+      |> assign(:form_field_tool, if(active, do: kind, else: nil))
+      |> push_event("toggle_form_field_tool", %{kind: kind, active: active})
+
+    {:noreply, socket}
+  end
+
+  def handle_event("toggle_form_field_tool", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("deactivate_form_field_tool", _params, socket) do
+    socket =
+      socket
+      |> assign(:form_field_tool, nil)
+      |> push_event("toggle_form_field_tool", %{kind: "", active: false})
+
+    {:noreply, socket}
+  end
+
+  # Client reports a dragged field rect (PDF points, y-up) for the armed kind.
+  # Persist it as a real AcroForm widget in a new revision.
+  def handle_event("place_form_field", params, socket) do
+    kind = params["kind"] || socket.assigns.form_field_tool
+    page_index = String.to_integer(params["page"] || "0")
+
+    rect =
+      Enum.map(["x0", "y0", "x1", "y1"], fn k -> to_f_param(params[k]) end)
+
+    with {:ok, doc} <- current_pdf_doc(socket),
+         true <- kind in @form_field_kinds,
+         name <- form_field_name(socket, kind),
+         opts <- form_field_opts(kind, params),
+         {:ok, _ref} <- Quire.Pdf.AcroForm.add_field(doc, page_index, rect, name, String.to_atom(kind), opts) do
+      case save_new_revision(socket, doc, "Add #{kind} field") do
+        {:ok, _rev} ->
+          {:noreply,
+           socket
+           |> assign(:form_field_tool, nil)
+           |> assign(:form_field_count, (socket.assigns.form_field_count || 0) + 1)
+           |> put_flash(:info, "Added #{kind} field \"#{name}\"")}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Could not save field: #{inspect(reason)}")}
+      end
+    else
+      {:error, _} = err ->
+        {:noreply, put_flash(socket, :error, "Could not add field: #{inspect(err)}")}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   # ── Fill & Sign auto-fill (T-118 §9.4) ────────────────────────────────────
@@ -2795,6 +2867,95 @@ defmodule QuireWeb.WorkspaceLive do
      |> put_flash(:info, "Detection discarded")}
   end
 
+  # ── Forms authoring helpers (T-119) ─────────────────────────────────────
+
+  # Open the current revision's PDF as a mutable Quire.Pdf doc.
+  defp current_pdf_doc(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, rev} <- Quire.Documents.current_revision(doc),
+         %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+         {:ok, bytes} <- Quire.Storage.get(ref),
+         {:ok, qdoc} <- Quire.Pdf.open(bytes) do
+      {:ok, qdoc}
+    else
+      {:error, _} = err -> err
+      nil -> {:error, :no_revision}
+      _ -> {:error, :no_revision}
+    end
+  end
+
+  # Save the mutated doc as a new revision and switch the current pointer.
+  defp save_new_revision(socket, qdoc, label) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+         {:ok, bytes} <- Quire.Pdf.save(qdoc),
+         {:ok, ref} <-
+           Quire.Storage.put(bytes,
+             name: doc.title || "form.pdf",
+             content_type: "application/pdf"
+           ) do
+      source = %{
+        "storage_ref" => %{
+          "adapter" => to_string(ref.adapter),
+          "key" => ref.key,
+          "name" => ref.name,
+          "content_type" => ref.content_type,
+          "byte_size" => ref.byte_size
+        },
+        "filename" => doc.title || "form.pdf"
+      }
+
+      Quire.Documents.create_revision(doc, label: label, source: source)
+    end
+  end
+
+  # Monotonic field name: kind + 1-based sequence so radios share a name per
+  # group (the group name is a "radioN" family) and everything else is unique.
+  defp form_field_name(socket, kind) do
+    count = socket.assigns.form_field_count || 0
+    n = count + 1
+    "#{kind}#{n}"
+  end
+
+  defp to_f_param(nil), do: 0.0
+  defp to_f_param(s) when is_binary(s) do
+    case Float.parse(s) do
+      {f, _} -> f
+      :error -> 0.0
+    end
+  end
+  defp to_f_param(n) when is_number(n), do: n * 1.0
+
+  # Per-kind creation options passed to AcroForm.add_field/6.
+  defp form_field_opts(kind, params) do
+    case kind do
+      "combo" -> [options: field_options(params)]
+      "list" -> [options: field_options(params)]
+      "button" -> [label: params["label"] || "Button"]
+      "radio" -> [export_value: params["export_value"] || "1"]
+      _ -> []
+    end
+  end
+
+  defp field_options(params) do
+    case params["options"] do
+      nil ->
+        []
+
+      opts when is_list(opts) ->
+        opts
+
+      s when is_binary(s) ->
+        s |> String.split("
+") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    end
+  end
+
   @impl true
   def handle_event("upload_image_ocr_submit", _params, socket) do
     [%{meta: meta, bytes: image_bytes}] =
@@ -4093,6 +4254,10 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:fill_sign_detecting, fn -> false end)
       |> assign_new(:fill_sign_field_count, fn -> 0 end)
       |> assign_new(:fill_sign_detections, fn -> [] end)
+      |> assign_new(:form_field_tool, fn -> nil end)
+      |> assign_new(:form_field_group, fn -> nil end)
+      |> assign_new(:form_field_label, fn -> "Button" end)
+      |> assign_new(:form_field_count, fn -> 0 end)
 
     ~H"""
     <div
@@ -4696,6 +4861,75 @@ defmodule QuireWeb.WorkspaceLive do
               Detecting… {@form_detect_progress && @form_detect_progress.pct}%
             </div>
           </div>
+        </.ribbon_group>
+
+        <.ribbon_group label="Fields">
+          <.ribbon_button
+            icon="hero-minus"
+            label="Text"
+            active={@form_field_tool == "text"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="text"
+            tooltip="Text field — drag to place a text input"
+          />
+          <.ribbon_button
+            icon="hero-chevron-down"
+            label="Combo"
+            active={@form_field_tool == "combo"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="combo"
+            tooltip="Combo box — drag to place a dropdown"
+          />
+          <.ribbon_button
+            icon="hero-bars-3"
+            label="List"
+            active={@form_field_tool == "list"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="list"
+            tooltip="List box — drag to place a multi-line list"
+          />
+          <.ribbon_button
+            icon="hero-check-circle"
+            label="Check"
+            active={@form_field_tool == "checkbox"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="checkbox"
+            tooltip="Check box — drag to place"
+          />
+          <.ribbon_button
+            icon="hero-check-circle"
+            label="Radio"
+            active={@form_field_tool == "radio"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="radio"
+            tooltip="Radio button — drag to place; same group name forms one group"
+          />
+          <.ribbon_button
+            icon="hero-cursor-arrow-ripple"
+            label="Button"
+            active={@form_field_tool == "button"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="button"
+            tooltip="Push button — drag to place; label and action editable in properties"
+          />
+          <.ribbon_button
+            icon="hero-pencil"
+            label="Signature"
+            active={@form_field_tool == "signature"}
+            phx-click="toggle_form_field_tool"
+            phx-value-kind="signature"
+            tooltip="Signature field — drag to place a placeholder that can be assigned to an e-sign signer"
+          />
+          <button
+            :if={@form_field_tool != nil}
+            type="button"
+            phx-click="deactivate_form_field_tool"
+            aria-label="Stop placing fields"
+            class="ml-1 inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border border-chrome-border dark:border-gray-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer"
+          >
+            <.icon name="hero-x-mark" class="size-3" />
+            <span>Stop</span>
+          </button>
         </.ribbon_group>
       </div>
 

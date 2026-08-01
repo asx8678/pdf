@@ -123,9 +123,16 @@ defmodule Quire.Pdf.AcroForm do
 
   Returns `{:ok, field_ref}`.
   """
-  @spec add_field(Pdf.t(), non_neg_integer(), [number()], String.t(), :text | :checkbox) ::
-          {:ok, tuple()} | {:error, term()}
-  def add_field(doc, page_index, rect, name, kind \\ :text) when is_reference(doc) do
+  @spec add_field(
+          Pdf.t(),
+          non_neg_integer(),
+          [number()],
+          String.t(),
+          :text | :checkbox | :combo | :list | :radio | :button | :signature,
+          keyword()
+        ) :: {:ok, tuple()} | {:error, term()}
+  def add_field(doc, page_index, rect, name, kind \\ :text, opts \\ [])
+      when is_reference(doc) and is_list(opts) do
     with {:ok, page_ref} <- page_ref_at(doc, page_index) do
       base = %{
         "/Type" => {:name, "Annot"},
@@ -136,7 +143,10 @@ defmodule Quire.Pdf.AcroForm do
         "/T" => escape_pdf_string(name)
       }
 
-      field_dict = kind_dict(kind, rect) |> Map.merge(base)
+      field_dict =
+        kind_dict(kind, rect, opts)
+        |> Map.merge(base)
+        |> maybe_apply_field_opts(kind, opts)
 
       with {:ok, field_id} <- Pdf.allocate_object_id(doc),
            :ok <- Pdf.set_object(doc, {field_id, 0}, field_dict),
@@ -148,7 +158,7 @@ defmodule Quire.Pdf.AcroForm do
     end
   end
 
-  defp kind_dict(:checkbox, _rect) do
+  defp kind_dict(:checkbox, _rect, _opts) do
     %{
       "/FT" => {:name, "Btn"},
       "/V" => {:name, "Off"},
@@ -157,13 +167,100 @@ defmodule Quire.Pdf.AcroForm do
     }
   end
 
-  defp kind_dict(_text, _rect) do
+  defp kind_dict(:combo, _rect, _opts) do
+    %{
+      "/FT" => {:name, "Ch"},
+      "/Opt" => ["", ""],
+      "/V" => "",
+      "/Ff" => 131_072,
+      "/DA" => "/Helv 12 Tf 0 g",
+      "/MK" => %{"/BC" => [0.0, 0.0, 0.0], "/BG" => [1.0, 1.0, 1.0]}
+    }
+  end
+
+  defp kind_dict(:list, _rect, _opts) do
+    %{
+      "/FT" => {:name, "Ch"},
+      "/Opt" => ["", ""],
+      "/V" => "",
+      "/Ff" => 0,
+      "/DA" => "/Helv 12 Tf 0 g",
+      "/MK" => %{"/BC" => [0.0, 0.0, 0.0], "/BG" => [1.0, 1.0, 1.0]}
+    }
+  end
+
+  defp kind_dict(:radio, _rect, _opts) do
+    %{
+      "/FT" => {:name, "Btn"},
+      "/Ff" => 32_768,
+      "/V" => {:name, "Off"},
+      "/AS" => {:name, "Off"},
+      "/MK" => %{"/CA" => "l", "/BC" => [0.0, 0.0, 0.0], "/BG" => [1.0, 1.0, 1.0]}
+    }
+  end
+
+  defp kind_dict(:button, _rect, _opts) do
+    %{
+      "/FT" => {:name, "Btn"},
+      "/Ff" => 65_536,
+      "/A" => %{"/S" => {:name, "JavaScript"}, "/JS" => "(this.resetForm())"},
+      "/MK" => %{"/CA" => "Button", "/BC" => [0.0, 0.0, 0.0], "/BG" => [0.86, 0.86, 0.86]}
+    }
+  end
+
+  defp kind_dict(:signature, _rect, _opts) do
+    %{
+      "/FT" => {:name, "Sig"},
+      "/Ff" => 0,
+      "/MK" => %{"/BC" => [0.0, 0.0, 0.0], "/BG" => [1.0, 1.0, 1.0]}
+    }
+  end
+
+  defp kind_dict(_text, _rect, _opts) do
     %{
       "/FT" => {:name, "Tx"},
       "/DA" => "/Helv 12 Tf 0 g",
       "/MK" => %{"/BG" => [0.96, 0.96, 0.92]}
     }
   end
+
+  # Apply per-field creation options from add_field/6: combo/list /Opt entries,
+  # a button label (/MK /CA) and action, and a radio /AS export value. Options
+  # are never user atoms (string keys only).
+  defp maybe_apply_field_opts(field, :combo, opts) do
+    opts
+    |> Keyword.get(:options, [])
+    |> case do
+      [] -> field
+      options -> Map.put(field, "/Opt", options)
+    end
+  end
+
+  defp maybe_apply_field_opts(field, :list, opts) do
+    maybe_apply_field_opts(field, :combo, opts)
+  end
+
+  defp maybe_apply_field_opts(field, :button, opts) do
+    label = Keyword.get(opts, :label, "Button")
+    mk = Map.get(field, "/MK", %{}) |> Map.put("/CA", label)
+
+    field =
+      case Keyword.get(opts, :action) do
+        nil -> Map.delete(field, "/A")
+        action -> Map.put(field, "/A", action)
+      end
+
+    Map.put(field, "/MK", mk)
+  end
+
+  defp maybe_apply_field_opts(field, :radio, opts) do
+    case Keyword.get(opts, :export_value) do
+      nil -> field
+      value -> field |> Map.put("/AS", {:name, value}) |> Map.put("/V", {:name, "Off"})
+    end
+  end
+
+  defp maybe_apply_field_opts(field, _kind, _opts), do: field
 
   # Nth leaf page ref (zero-based), in document order.
   defp page_ref_at(doc, page_index) do

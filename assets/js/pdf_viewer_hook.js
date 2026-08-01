@@ -217,6 +217,18 @@ const PdfViewerHook = {
       for (const item of this._fillSignItems) this._renderFillText(item);
     });
 
+    // Forms authoring (T-119): the user armed one of the seven field kinds
+    // (text/combo/list/checkbox/radio/button/signature). Drag on the page to
+    // place a rect; the server writes a real AcroForm widget and saves a new
+    // revision.
+    this.handleEvent("toggle_form_field_tool", ({ kind, active }) => {
+      if (!active || !kind) {
+        this._disableFormFieldTool();
+        return;
+      }
+      this._enableFormFieldTool(kind);
+    });
+
     // Toggle annotation editor mode (FreeText, etc.)
     this.handleEvent("toggle_editing", ({ mode }) => {
       if (!this._viewer) return;
@@ -362,6 +374,133 @@ const PdfViewerHook = {
         findPrevious: false,
       });
     });
+  },
+
+  // ── Forms authoring drag-to-place (T-119) ─────────────────────────
+  _enableFormFieldTool(kind) {
+    this._formFieldKind = kind;
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.classList.add("form-field-armed");
+    container.style.cursor = "crosshair";
+    this._bindFormFieldDrag();
+  },
+
+  _disableFormFieldTool() {
+    this._formFieldKind = null;
+    this._unbindFormFieldDrag();
+    this._clearFormFieldDraft();
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    container.classList.remove("form-field-armed");
+    container.style.cursor = "";
+  },
+
+  _bindFormFieldDrag() {
+    this._unbindFormFieldDrag();
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    let start = null;
+
+    const down = (e) => {
+      if (e.button !== 0 || !this._formFieldKind) return;
+      const pt = this._viewportPointFromEvent(e);
+      if (!pt) return;
+      start = pt;
+      this._clearFormFieldDraft();
+      this._formFieldDraft = this._makeFormFieldDraft(pt);
+      container.addEventListener("mousemove", move);
+      container.addEventListener("mouseup", up);
+      e.preventDefault();
+    };
+    const move = (e) => {
+      if (!start) return;
+      const pt = this._viewportPointFromEvent(e);
+      if (!pt) return;
+      const d = this._formFieldDraft;
+      d.x = Math.min(start[0], pt[0]);
+      d.y = Math.min(start[1], pt[1]);
+      d.w = Math.abs(pt[0] - start[0]);
+      d.h = Math.abs(pt[1] - start[1]);
+      this._drawFormFieldDraft(d);
+    };
+    const up = () => {
+      container.removeEventListener("mousemove", move);
+      container.removeEventListener("mouseup", up);
+      const d = this._formFieldDraft;
+      start = null;
+      if (!d || d.w < 4 || d.h < 4) {
+        this._clearFormFieldDraft();
+        return;
+      }
+      this._commitFormField(d);
+    };
+
+    this._formFieldDragDown = down;
+    container.addEventListener("mousedown", down);
+  },
+
+  _unbindFormFieldDrag() {
+    const container = this.el.querySelector("#pdf-viewer-container") || this.el;
+    if (this._formFieldDragDown) {
+      container.removeEventListener("mousedown", this._formFieldDragDown);
+      this._formFieldDragDown = null;
+    }
+  },
+
+  // Convert a page event to PDF user-space points [x0, y0] on the page.
+  _viewportPointFromEvent(e) {
+    const pv = this._viewer?._pages?.[this._viewer.currentPageNumber - 1];
+    if (!pv || !pv.viewport) return null;
+    const vp = pv.viewport;
+    const rect = this.el.querySelector("#pdf-viewer-container")?.getBoundingClientRect();
+    const x = (e.clientX - (rect?.left || 0)) * (vp.width / (rect?.width || 1));
+    const y = (rect?.bottom - e.clientY) * (vp.height / (rect?.height || 1));
+    return [x, y];
+  },
+
+  _makeFormFieldDraft(pt) {
+    const d = { x: pt[0], y: pt[1], w: 0, h: 0 };
+    const el = document.createElement("div");
+    el.className = "form-field-draft";
+    el.id = "form-field-draft";
+    const container = this.el.querySelector("#pdf-viewer-container");
+    container?.appendChild(el);
+    this._formFieldDraftEl = el;
+    return d;
+  },
+
+  _drawFormFieldDraft(d) {
+    if (!this._formFieldDraftEl || !this._viewer) return;
+    const pv = this._viewer._pages?.[this._viewer.currentPageNumber - 1];
+    if (!pv?.viewport) return;
+    const vp = pv.viewport;
+    const scaleX = (vp.width / (this.el.querySelector("#pdf-viewer-container")?.getBoundingClientRect().width || 1));
+    const scaleY = (vp.height / (this.el.querySelector("#pdf-viewer-container")?.getBoundingClientRect().height || 1));
+    const left = d.x * scaleX;
+    const top = (vp.height - d.y - d.h) * scaleY;
+    this._formFieldDraftEl.style.left = left + "px";
+    this._formFieldDraftEl.style.top = top + "px";
+    this._formFieldDraftEl.style.width = d.w * scaleX + "px";
+    this._formFieldDraftEl.style.height = d.h * scaleY + "px";
+  },
+
+  _clearFormFieldDraft() {
+    this._formFieldDraftEl?.remove();
+    this._formFieldDraftEl = null;
+    this._formFieldDraft = null;
+  },
+
+  // Send the placed rect to the server to write the AcroForm widget.
+  _commitFormField(d) {
+    const page = (this._viewer?.currentPageNumber || 1) - 1;
+    this.pushEvent("place_form_field", {
+      kind: this._formFieldKind,
+      page: String(page),
+      x0: String(d.x),
+      y0: String(d.y),
+      x1: String(d.x + d.w),
+      y1: String(d.y + d.h),
+      label: "Button"
+    });
+    this._disableFormFieldTool();
   },
 
   destroyed() {

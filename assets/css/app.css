@@ -232,3 +232,22 @@ svg.fill-sign-line-layer {
 #fill-sign-palette {
   font-feature-settings: normal;
 }
+
+/* Forms authoring (T-119): armed crosshair while placing a field. */
+#pdf-viewer-container.form-field-armed {
+  cursor: crosshair;
+}
+#pdf-viewer-container.form-field-armed .annotationEditorLayer,
+#pdf-viewer-container.form-field-armed .textLayer {
+  pointer-events: none;
+}
+
+/* Drag-to-place draft rectangle. */
+.form-field-draft {
+  position: absolute;
+  border: 1.5px solid #4f46e5;
+  background: rgba(79, 70, 229, 0.12);
+  pointer-events: none;
+  z-index: 45;
+  border-radius: 2px;
+}
