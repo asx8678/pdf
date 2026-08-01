@@ -198,7 +198,6 @@ defmodule QuireWeb.WorkspaceLive.FillSignToolsTest do
     end
   end
 
-
   # --- fixtures (mirrors workspace_live/edit_tools_test.exs) ---
 
   defp user_fixture do

@@ -76,7 +76,11 @@ defmodule Quire.Forms.AutoDetectTest do
   # ── helpers ────────────────────────────────────────────────────────────
 
   defp store(path_or_bytes) do
-    bytes = if is_binary(path_or_bytes) and String.ends_with?(path_or_bytes, ".pdf"), do: File.read!(path_or_bytes), else: path_or_bytes
+    bytes =
+      if is_binary(path_or_bytes) and String.ends_with?(path_or_bytes, ".pdf"),
+        do: File.read!(path_or_bytes),
+        else: path_or_bytes
+
     {:ok, ref} = Quire.Storage.put(bytes, name: "autodetect.pdf")
     ref
   end

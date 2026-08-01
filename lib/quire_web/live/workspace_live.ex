@@ -1218,9 +1218,7 @@ defmodule QuireWeb.WorkspaceLive do
 
     if enabled do
       socket =
-        assign(socket, :action,
-          Map.put(socket.assigns.action || %{}, "code", "")
-        )
+        assign(socket, :action, Map.put(socket.assigns.action || %{}, "code", ""))
 
       {:noreply, socket}
     else

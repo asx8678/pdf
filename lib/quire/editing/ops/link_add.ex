@@ -82,8 +82,9 @@ defmodule Quire.Editing.Ops.LinkAdd do
 
   defp validate_geometry(op) do
     case op["rect"] do
-      [x0, y0, x1, y1] when is_number(x0) and is_number(y0) and is_number(x1) and
-                              is_number(y1) ->
+      [x0, y0, x1, y1]
+      when is_number(x0) and is_number(y0) and is_number(x1) and
+             is_number(y1) ->
         case op["page_index"] do
           page when is_integer(page) and page >= 0 ->
             {:ok, [x0, y0, x1, y1]}
