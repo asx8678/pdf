@@ -23,7 +23,7 @@ defmodule QuireWeb.Chrome.RibbonButton do
       type="button"
       disabled={@disabled}
       aria-label={@tooltip || @label}
-      aria-disabled={if @disabled, do: "true"}
+      aria-disabled={if @disabled, do: "true", else: "false"}
       title={@tooltip}
       class={[
         "relative flex flex-col items-center justify-center gap-1 min-w-[64px] px-2 py-1.5 rounded-lg text-xs transition-colors",

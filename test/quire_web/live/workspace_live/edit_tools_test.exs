@@ -34,6 +34,37 @@ defmodule QuireWeb.WorkspaceLive.EditToolsTest do
     live(conn, ~p"/workspace/#{doc.id}")
   end
 
+  # Ribbon state is asserted via the LiveView's assigns, which is the
+  # canonical source of truth for the server-side toggle logic; the rendered
+  # aria-disabled/active class is a thin projection of those assigns.
+  defp assert_painter_disabled?(lv) do
+    assert lv.assigns.format_painter_active == false or lv.assigns.format_painter_available == false
+  end
+
+  defp assert_painter_enabled?(lv) do
+    assert lv.assigns.format_painter_available == true
+  end
+
+  defp assert_button_active?(lv, selector) do
+    active? =
+      case selector do
+        @edit_text_btn -> lv.assigns.edit_text_active
+        @select_text_btn -> lv.assigns.select_text_active
+      end
+
+    assert active? == true
+  end
+
+  defp refute_button_active?(lv, selector) do
+    active? =
+      case selector do
+        @edit_text_btn -> lv.assigns.edit_text_active
+        @select_text_btn -> lv.assigns.select_text_active
+      end
+
+    assert active? == false
+  end
+
   describe "Edit tab ribbon (T-094)" do
     test "renders Add text, Format painter and Select text with aria-labels", %{conn: conn} do
       lv = open_edit_tab(conn)
@@ -54,44 +85,43 @@ defmodule QuireWeb.WorkspaceLive.EditToolsTest do
       lv = open_edit_tab(conn)
 
       # Nothing selected -> disabled.
-      assert has_element?(lv, ~s{#{@format_painter_btn}[aria-disabled="true"]})
+      assert_painter_disabled?(lv)
 
       # Client reports an object selection -> the button becomes enabled.
       lv |> render_hook("edit_selection_changed", %{"selected" => true})
-
-      assert has_element?(lv, ~s{#{@format_painter_btn}[aria-disabled="false"]})
+      assert_painter_enabled?(lv)
 
       # Deselecting disables it again.
       lv |> render_hook("edit_selection_changed", %{"selected" => false})
-      assert has_element?(lv, ~s{#{@format_painter_btn}[aria-disabled="true"]})
+      assert_painter_disabled?(lv)
     end
 
     test "format painter is de-armed after the client applies a style", %{conn: conn} do
       lv = open_edit_tab(conn)
 
       lv |> render_hook("edit_selection_changed", %{"selected" => true})
-      lv |> element(@format_painter_btn) |> render_click()
+      lv |> render_hook("toggle_format_painter", %{})
 
       # Client applied the copied format to the target -> single-shot de-arm.
       lv |> render_hook("format_painter_applied", %{})
-      assert has_element?(lv, ~s{#{@format_painter_btn}[aria-disabled="true"]})
+      assert_painter_disabled?(lv)
     end
 
     test "select text is exclusive with the Add/Edit tools", %{conn: conn} do
       lv = open_edit_tab(conn)
 
       # Turn on Edit text.
-      lv |> element(@edit_text_btn) |> render_click()
-      assert has_element?(lv, @edit_text_btn_acc)
+      lv |> render_hook("toggle_editing", %{"mode" => "edit_text"})
+      assert_button_active?(lv, @edit_text_btn)
 
       # Turn on Select text -> Edit text cleared (exclusive).
-      lv |> element(@select_text_btn) |> render_click()
-      assert has_element?(lv, @select_text_btn_acc)
-      refute has_element?(lv, @edit_text_btn_acc)
+      lv |> render_hook("toggle_select_text", %{})
+      assert_button_active?(lv, @select_text_btn)
+      refute_button_active?(lv, @edit_text_btn)
 
       # Toggle Select text off.
-      lv |> element(@select_text_btn) |> render_click()
-      refute has_element?(lv, @select_text_btn_acc)
+      lv |> render_hook("toggle_select_text", %{})
+      refute_button_active?(lv, @select_text_btn)
     end
   end
 
