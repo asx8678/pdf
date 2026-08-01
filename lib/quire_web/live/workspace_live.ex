@@ -4300,6 +4300,8 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:form_field_group, fn -> nil end)
       |> assign_new(:form_field_label, fn -> "Button" end)
       |> assign_new(:form_field_count, fn -> 0 end)
+      |> assign_new(:form_field_list, fn -> [] end)
+      |> assign_new(:form_field_list_loading, fn -> false end)
 
     ~H"""
     <div
