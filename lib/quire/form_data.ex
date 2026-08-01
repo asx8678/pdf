@@ -383,6 +383,22 @@ defmodule Quire.FormData do
   defp normalize_default({:name, n}), do: n
   defp normalize_default(_), do: nil
 
+  # Write one field's value. Checkbox/radio (Btn) fields store their on-state
+  # as a PDF *name* (/Yes) in both /V and /AS - a plain string confuses
+  # viewers (pdfium reads /AS and the /AP on-state key). Text/combo/list
+  # fields keep their literal string value.
+  defp set_field_value(field, value) do
+    case Map.get(field, "/FT") do
+      {:name, "Btn"} ->
+        field
+        |> Map.put("/V", {:name, value})
+        |> Map.put("/AS", {:name, value})
+
+      _ ->
+        Map.put(field, "/V", value)
+    end
+  end
+
   defp walk_and_set(_qdoc, [], _values), do: :ok
 
   defp walk_and_set(qdoc, [{:ref, num, gen} | rest], values) do
@@ -395,7 +411,8 @@ defmodule Quire.FormData do
             name = Map.get(field, "/T")
 
             if Map.has_key?(values, name) do
-              Pdf.set_object(qdoc, {num, gen}, Map.put(field, "/V", values[name]))
+              updated = set_field_value(field, values[name])
+              Pdf.set_object(qdoc, {num, gen}, updated)
             else
               :ok
             end

@@ -105,7 +105,7 @@ defmodule Quire.Test.SevenFieldForm do
 
     refs = write_fields(qdoc, specs)
     _ = refs
-    save(qdoc)
+    {:ok, save(qdoc)}
   end
 
   # ── Low-level construction ────────────────────────────────────────────────
@@ -166,7 +166,12 @@ defmodule Quire.Test.SevenFieldForm do
       Enum.with_index(field_specs, 30)
       |> Enum.map(fn {spec, id} ->
         {kind, name, rect} = spec
-        :ok = Pdf.set_object(qdoc, {id, 0}, field_dict(kind, name, rect, page_obj))
+
+        dict =
+          field_dict(kind, name, rect, page_obj)
+          |> maybe_add_ap(qdoc, kind)
+
+        :ok = Pdf.set_object(qdoc, {id, 0}, dict)
         {:ref, id, 0}
       end)
 
@@ -187,6 +192,21 @@ defmodule Quire.Test.SevenFieldForm do
 
     refs
   end
+
+  # Checkbox/radio (Btn) fields carry an /AP /N dictionary with /Off and the
+  # on-state key so viewers (pdfium, Acrobat, Chrome) can resolve the value.
+  defp maybe_add_ap(dict, qdoc, kind) when kind in [:checkbox, :radio] do
+    {:ok, off_id} = Pdf.allocate_object_id(qdoc)
+    {:ok, on_id} = Pdf.allocate_object_id(qdoc)
+
+    :ok = Pdf.set_object(qdoc, {off_id, 0}, {:stream, %{"/BBox" => [0, 0, 20, 20]}, "q Q"})
+    :ok = Pdf.set_object(qdoc, {on_id, 0}, {:stream, %{"/BBox" => [0, 0, 20, 20]}, "q Q"})
+
+    on_key = if kind == :radio, do: "ChoiceA", else: "Yes"
+    Map.put(dict, "/AP", %{"/N" => %{"/Off" => {:ref, off_id, 0}, on_key => {:ref, on_id, 0}}})
+  end
+
+  defp maybe_add_ap(dict, _qdoc, _kind), do: dict
 
   defp save(qdoc) do
     {:ok, saved} = Pdf.save(qdoc)
@@ -212,7 +232,7 @@ defmodule Quire.Test.SevenFieldForm do
         base
         |> Map.merge(%{
           "/FT" => {:name, "Btn"},
-          "/V" => {:name, "Yes"},
+          "/V" => {:name, "Off"},
           "/AS" => {:name, "Off"},
           "/MK" => %{"/CA" => "Yes", "/BC" => [0, 0, 0], "/BG" => [1, 1, 1]}
         })
