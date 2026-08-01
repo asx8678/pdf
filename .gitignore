@@ -59,3 +59,4 @@ npm-debug.log
 # "seed first" hint when absent).
 /test/visual/fixture_urls.json
 .pi/
+.DS_Store
