@@ -86,6 +86,17 @@ defmodule QuireWeb.WorkspaceLive do
   @fill_sign_font_sizes ~w(8 10 12 14 18 24 32)
   @fill_sign_line_weights ~w(1 2 3 4 6)
 
+  # Link tool / Add Action modal (T-093) action type catalogue and options.
+  @action_cards [
+    {"open", "Open web page", "hero-globe-alt"},
+    {"open_file", "Open file", "hero-document-text"},
+    {"page", "Go to page", "hero-book-open"}
+  ]
+  @action_overflow_types ~w(goto_destination menu_item submit_form reset_form show_hide_field javascript)
+  @zoom_options ~w(fit_width fit_height fit visible page actual)
+  @method_options ~w(post get)
+  @visibility_options ~w(show hide)
+
   @impl true
   def mount(%{"id" => id}, _session, socket) do
     scope = socket.assigns.current_scope
@@ -150,6 +161,16 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign(:format_painter_active, false)
       |> assign(:format_painter_available, false)
       |> assign(:select_text_active, false)
+      |> assign(:link_mode_active, false)
+      |> assign(:link_selection, nil)
+      |> assign(:show_add_action, false)
+      |> assign(:add_action_editing_id, nil)
+      |> assign(:action_type, "open")
+      |> assign(:action_err, nil)
+      |> assign(:link_js_enabled, false)
+      |> assign(:action_saved, false)
+      |> assign(:action, default_action("open"))
+      |> assign(:action_overflow_open, false)
       |> assign(:read_only?, false)
       |> assign(:progress, nil)
       |> assign(:show_shortcuts, false)
@@ -302,9 +323,19 @@ defmodule QuireWeb.WorkspaceLive do
 
   @impl true
   def render(assigns) do
+    action = assigns[:action] || default_action("open")
+
     assigns
     |> assign(:left_items, rail_items(@left_rail_items, assigns.left_panel))
     |> assign(:right_items, rail_items(@right_rail_items, assigns.right_panel))
+    |> assign(:action_valid, action_valid?(assigns))
+    |> assign(:action_form, to_form(action))
+    |> assign(:action_cards, @action_cards)
+    |> assign(:action_overflow_types, @action_overflow_types)
+    |> assign(:allowed_schemes_text, Enum.join(Quire.Editing.Ops.Link.url_schemes(), ", "))
+    |> assign(:zoom_options, @zoom_options)
+    |> assign(:method_options, @method_options)
+    |> assign(:visibility_options, @visibility_options)
     |> workspace()
   end
 
@@ -1070,6 +1101,134 @@ defmodule QuireWeb.WorkspaceLive do
   # single-shot format painter in the ribbon.
   def handle_event("format_painter_applied", _params, socket) do
     {:noreply, assign(socket, :format_painter_active, false)}
+  end
+
+  # ── Link tool + Add Action modal (T-093) ────────────────────────────────
+  #
+  # The Link tool is exclusive with the other Edit tools. Toggling it arms
+  # the client hook's link-pointer: dragging a rectangle or selecting text
+  # commits a `link_selection` event back here, which opens the **Add Action**
+  # modal on top of a pending geometry. Apply emits a `link.add` op; the same
+  # modal opened on an existing link emits `link.edit`.
+
+  def handle_event("toggle_link_tool", _params, socket) do
+    active = not socket.assigns.link_mode_active
+
+    socket =
+      socket
+      |> assign(:link_mode_active, active)
+      |> assign(:add_text_active, false)
+      |> assign(:edit_text_active, false)
+      |> assign(:select_text_active, false)
+      |> assign(:format_painter_active, false)
+      |> push_event("toggle_link_tool", %{active: active})
+
+    {:noreply, socket}
+  end
+
+  # Received from the client hook when the user drags a rectangle or selects
+  # text in link mode. `source` is "rect" (drag) or "text" (selected text).
+  # `editing_id` is present when applying the modal to an existing link.
+  def handle_event("link_selection_committed", params, socket) do
+    rect = Map.get(params, "rect") || Map.get(params, :rect)
+    page_index = Map.get(params, "page_index") || Map.get(params, :page_index)
+    source = Map.get(params, "source") || Map.get(params, :source) || "rect"
+    editing_id = Map.get(params, "editing_id") || Map.get(params, :editing_id)
+
+    socket =
+      socket
+      |> assign(:link_selection, %{
+        rect: rect,
+        page_index: page_index_and_string(page_index),
+        source: source
+      })
+      |> assign(:add_action_editing_id, editing_id)
+      |> assign(:show_add_action, true)
+      |> assign(:action_type, "open")
+      |> assign(:action, default_action("open"))
+      |> assign(:action_err, nil)
+      |> assign(:link_js_enabled, false)
+
+    {:noreply, socket}
+  end
+
+  # Card grid / overflow: pick an action type (resets the type form).
+  def handle_event("select_action_type", %{"type" => type}, socket) do
+    type = String.downcase(to_string(type))
+
+    if type in Quire.Editing.Ops.Link.all_types() do
+      {:noreply,
+       socket
+       |> assign(:action_type, type)
+       |> assign(:action, default_action(type))
+       |> assign(:action_err, nil)
+       |> assign(:link_js_enabled, type == "javascript")}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_event("select_action_type", _params, socket), do: {:noreply, socket}
+
+  # phx-change on the action form: writes the changed field(s) into the
+  # current action map.
+  def handle_event("set_action_field", params, socket) do
+    new_action = Map.get(params, "action") || normalize_string(params)
+    action = Map.merge(socket.assigns.action || %{}, normalize_string(new_action))
+
+    {:noreply,
+     socket
+     |> assign(:action, action)
+     |> assign(:action_err, nil)}
+  end
+
+  # Apply — validate the action, then emit link.add (new) or link.edit (edit).
+  def handle_event("apply_action", params, socket) do
+    case build_action(socket, params) do
+      {:ok, socket2} -> emit_link_op(socket2)
+      {:error, socket2, msg} -> {:noreply, assign(socket2, :action_err, msg)}
+    end
+  end
+
+  def handle_event("cancel_add_action", _params, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_add_action, false)
+     |> assign(:action_err, nil)}
+  end
+
+  # Toggle the ⋮ overflow list of the six remaining action types.
+  def handle_event("toggle_action_overflow", _params, socket) do
+    {:noreply, assign(socket, :action_overflow_open, not socket.assigns.action_overflow_open)}
+  end
+
+  # Run JavaScript — OFF by default. The checkbox only flips the client-facing
+  # gate; the script itself is carried as opaque viewer-sandbox data and is
+  # never evaluated or persisted in a form the server would run.
+  def handle_event("set_action_js", params, socket) do
+    enabled = Map.get(params, "js_enabled", "") in ["true", true]
+
+    socket =
+      socket
+      |> assign(:link_js_enabled, enabled)
+      |> assign(:action_err, nil)
+
+    if enabled do
+      socket =
+        assign(socket, :action,
+          Map.put(socket.assigns.action || %{}, "code", "")
+        )
+
+      {:noreply, socket}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Open file picker for the "Open file" action — opens the Attachments panel
+  # so the user can choose an attached/embedded file (T-093).
+  def handle_event("pick_action_file", _params, socket) do
+    {:noreply, assign(socket, :right_panel, :attachments)}
   end
 
   # Fill & Sign tab palette (T-117). The five lightweight self-signing tools
@@ -3595,6 +3754,152 @@ defmodule QuireWeb.WorkspaceLive do
     |> push_event("fill_sign_options", %{event_key => color})
   end
 
+  # ── Link tool / Add Action helpers (T-093) ────────────────────────────
+
+  defp page_index_and_string(page_index) when is_integer(page_index), do: page_index
+
+  defp page_index_and_string(page_index) when is_binary(page_index) do
+    case Integer.parse(page_index) do
+      {int, _} -> int
+      :error -> nil
+    end
+  end
+
+  defp page_index_and_string(_), do: nil
+
+  defp default_action(type) do
+    %{
+      "url" => "",
+      "open_in_new_window" => "false",
+      "ref" => "",
+      "file" => "",
+      "page_number" => "",
+      "zoom" => "fit",
+      "named_destination" => "",
+      "name" => "",
+      "method" => "post",
+      "field" => "",
+      "visibility" => "show",
+      "code" => ""
+    }
+    |> Map.put("type", type)
+  end
+
+  # Read a value from the current action map (string keyed). Returns "" when
+  # absent so the form controls render cleanly.
+  defp action_field(action, key) when is_map(action) and is_binary(key) do
+    action[key] || ""
+  end
+
+  defp action_field(_action, _key), do: ""
+
+  defp action_type_label(type) do
+    case type do
+      "open" -> "Open web page"
+      "open_file" -> "Open file"
+      "page" -> "Go to page"
+      "goto_destination" -> "Go to named destination"
+      "menu_item" -> "Execute menu item"
+      "submit_form" -> "Submit form"
+      "reset_form" -> "Reset form"
+      "show_hide_field" -> "Show/hide field"
+      "javascript" -> "Run JavaScript"
+      _ -> type
+    end
+  end
+
+  # True when the action (for the current type) is complete/valid and can be
+  # applied. Unknown types or a blocked JavaScript action (JS off) are false.
+  defp action_valid?(assigns) do
+    type = Map.get(assigns, :action_type) || Map.get(assigns, "action_type") || "open"
+    action = Map.get(assigns, :action) || Map.get(assigns, "action") || %{}
+
+    case type do
+      "javascript" ->
+        Map.get(assigns, :link_js_enabled, false) and
+          Quire.Editing.Ops.Link.valid_action?(action)
+
+      _ ->
+        Quire.Editing.Ops.Link.valid_action?(Map.put(action, "type", type))
+    end
+  end
+
+  defp build_action(socket, params) do
+    type = socket.assigns.action_type
+    base = Map.get(params, "action") || socket.assigns.action || %{}
+    action = Map.merge(default_action(type), normalize_string(base)) |> Map.put("type", type)
+
+    cond do
+      type == "javascript" and not socket.assigns.link_js_enabled ->
+        {:error, socket,
+         "Run JavaScript is disabled. Enable it in the Add Action modal to attach a script."}
+
+      not Quire.Editing.Ops.Link.valid_action?(action) ->
+        {:error, socket, "Complete the action before applying."}
+
+      type == "open" ->
+        case Quire.Editing.Ops.Link.validate_url(action["url"]) do
+          {:ok, _} ->
+            {:ok, assign(socket, :action, action)}
+
+          {:error, :disallowed_scheme} ->
+            {:error, socket,
+             "URL scheme not allowed. Use one of: #{Enum.join(Quire.Editing.Ops.Link.url_schemes(), ", ")}"}
+
+          {:error, _} ->
+            {:error, socket, "Enter a valid URL."}
+        end
+
+      true ->
+        {:ok, assign(socket, :action, action)}
+    end
+  end
+
+  defp normalize_string(map) when is_map(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  end
+
+  defp normalize_string(other), do: other
+
+  defp emit_link_op(socket) do
+    document_id = socket.assigns.active_document_id
+    user_id = socket.assigns.current_scope.user.id
+
+    {kind, id} =
+      if socket.assigns.add_action_editing_id do
+        {"link.edit", socket.assigns.add_action_editing_id}
+      else
+        {"link.add", nil}
+      end
+
+    selection = socket.assigns.link_selection
+
+    data = %{
+      "id" => id,
+      "action" => socket.assigns.action,
+      "source" => Map.get(selection, :source, "rect"),
+      "page_index" => Map.get(selection, :page_index),
+      "rect" => Map.get(selection, :rect)
+    }
+
+    op = %{kind: kind, data: data}
+
+    with {:ok, session_pid} <- Quire.Editing.open_session(document_id, user_id),
+         {:ok, _} <- Quire.Editing.apply(session_pid, op) do
+      socket =
+        socket
+        |> assign(:show_add_action, false)
+        |> assign(:action_err, nil)
+        |> assign(:link_mode_active, false)
+        |> push_event(kind, %{data: data})
+
+      {:noreply, socket}
+    else
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Could not apply link: #{inspect(reason)}")}
+    end
+  end
+
   attr :ocr_running, :boolean, default: false
   attr :ocr_progress, :map, default: nil
 
@@ -3710,6 +4015,16 @@ defmodule QuireWeb.WorkspaceLive do
       |> assign_new(:format_painter_active, fn -> false end)
       |> assign_new(:format_painter_available, fn -> false end)
       |> assign_new(:select_text_active, fn -> false end)
+      |> assign_new(:link_mode_active, fn -> false end)
+      |> assign_new(:link_selection, fn -> nil end)
+      |> assign_new(:show_add_action, fn -> false end)
+      |> assign_new(:add_action_editing_id, fn -> nil end)
+      |> assign_new(:action_type, fn -> "open" end)
+      |> assign_new(:action_err, fn -> nil end)
+      |> assign_new(:link_js_enabled, fn -> false end)
+      |> assign_new(:action_saved, fn -> false end)
+      |> assign_new(:action, fn -> default_action("open") end)
+      |> assign_new(:action_overflow_open, fn -> false end)
       |> assign_new(:calibrating, fn -> false end)
       |> assign_new(:convert_running, fn -> false end)
       |> assign_new(:convert_format, fn -> nil end)
@@ -3847,6 +4162,13 @@ defmodule QuireWeb.WorkspaceLive do
             phx-click="toggle_editing"
             phx-value-mode="add_text"
             tooltip="Add text — click or drag to place a text box (opens the format bar)"
+          />
+          <.ribbon_button
+            icon="hero-link"
+            label="Link"
+            active={@link_mode_active}
+            phx-click="toggle_link_tool"
+            tooltip="Link — drag a rectangle or select text to link it; opens the Add Action dialog"
           />
         </.ribbon_group>
 
