@@ -32,13 +32,14 @@ import ImportFile from "./hooks/import_file_hook.js"
 import ReadAloudHook from "./read_aloud_hook.js"
 import SnapshotHook from "./snapshot_hook.js"
 import { ClipboardPdf, ClipboardPasteTarget } from "./clipboard_pdf_hook.js"
+import FieldListDrag from "./hooks/field_list_drag_hook.js"
 import topbar from "../vendor/topbar"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, WorkspaceCanvasHook, PdfViewerHook, SnapshotHook, ReadAloudHook, DocMutateHook, AnnotEditHook, SignatureDraw, SignatureDrawClear, SignatureDrawSave, SignatureTypeSave, SignatureUploadSave, ImportFile, ClipboardPdf, ClipboardPasteTarget},
+  hooks: {...colocatedHooks, WorkspaceCanvasHook, PdfViewerHook, SnapshotHook, ReadAloudHook, DocMutateHook, AnnotEditHook, SignatureDraw, SignatureDrawClear, SignatureDrawSave, SignatureTypeSave, SignatureUploadSave, ImportFile, ClipboardPdf, ClipboardPasteTarget, FieldListDrag},
 })
 
 // Show progress bar on live navigation and form submits

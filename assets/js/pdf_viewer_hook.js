@@ -221,6 +221,27 @@ const PdfViewerHook = {
     // (text/combo/list/checkbox/radio/button/signature). Drag on the page to
     // place a rect; the server writes a real AcroForm widget and saves a new
     // revision.
+    // Field list panel (T-121): highlight the selected field on the page.
+    this.handleEvent("highlight_form_field", ({ page, rect }) => {
+      this._clearFormFieldHighlight();
+      const pv = this._viewer?._pages?.[page];
+      if (!pv?.viewport || !rect || rect.length !== 4) return;
+      const vp = pv.viewport;
+      const container = this.el.querySelector("#pdf-viewer-container");
+      if (!container) return;
+      const el = document.createElement("div");
+      el.className = "form-field-highlight";
+      el.id = "form-field-highlight";
+      const cr = container.getBoundingClientRect();
+      const sx = vp.width / (cr.width || 1);
+      const sy = vp.height / (cr.height || 1);
+      el.style.left = rect[0] * sx + "px";
+      el.style.top = (vp.height - rect[3]) * sy + "px";
+      el.style.width = (rect[2] - rect[0]) * sx + "px";
+      el.style.height = (rect[3] - rect[1]) * sy + "px";
+      container.appendChild(el);
+    });
+
     this.handleEvent("toggle_form_field_tool", ({ kind, active }) => {
       if (!active || !kind) {
         this._disableFormFieldTool();
@@ -480,6 +501,10 @@ const PdfViewerHook = {
     this._formFieldDraftEl.style.top = top + "px";
     this._formFieldDraftEl.style.width = d.w * scaleX + "px";
     this._formFieldDraftEl.style.height = d.h * scaleY + "px";
+  },
+
+  _clearFormFieldHighlight() {
+    document.getElementById("form-field-highlight")?.remove();
   },
 
   _clearFormFieldDraft() {

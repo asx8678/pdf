@@ -1409,6 +1409,32 @@ defmodule QuireWeb.WorkspaceLive do
     {:noreply, assign(socket, :show_field_props, false)}
   end
 
+  def handle_event("select_form_field", params, socket) do
+    page = String.to_integer(params["page"] || "0")
+    rect = Enum.map(["x0", "y0", "x1", "y1"], fn k -> to_f_param(params[k]) end)
+
+    {:noreply,
+     socket
+     |> push_event("highlight_form_field", %{page: page, rect: rect})}
+  end
+
+  def handle_event("reorder_form_fields", params, socket) do
+    refs = params["refs"] || []
+
+    with {:ok, doc} <- current_pdf_doc(socket),
+         {:ok, _} <- reorder_acro_fields(doc, refs) do
+      case save_new_revision(socket, doc, "Reorder form fields") do
+        {:ok, _rev} ->
+          {:noreply, put_flash(socket, :info, "Field tab order updated")}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, "Could not save tab order: #{inspect(reason)}")}
+      end
+    else
+      _ -> {:noreply, socket}
+    end
+  end
+
   # Live-edits the dialog draft (phx-change from each input).
   def handle_event("update_field_props_draft", params, socket) do
     props = socket.assigns.field_props
@@ -1431,6 +1457,8 @@ defmodule QuireWeb.WorkspaceLive do
       {:noreply, assign(socket, :field_props, updated)}
     end
   end
+
+  # ── Field list panel + tab order (T-121 §9.8) ───────────────────────────
 
   # ── Fill & Sign auto-fill (T-118 §9.4) ────────────────────────────────────
   #
@@ -3498,6 +3526,21 @@ defmodule QuireWeb.WorkspaceLive do
 
   # Delivers a finished HTML export as a browser download and clears the
   # convert-progress state.
+
+  def handle_info({:form_field_list, {:ok, fields}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:form_field_list, fields)
+     |> assign(:form_field_list_loading, false)}
+  end
+
+  def handle_info({:form_field_list, {:error, _reason}}, socket) do
+    {:noreply,
+     socket
+     |> assign(:form_field_list, [])
+     |> assign(:form_field_list_loading, false)}
+  end
+
   def handle_info({:html_export_done, filename, html}, socket) do
     {:noreply,
      socket
@@ -4955,6 +4998,66 @@ defmodule QuireWeb.WorkspaceLive do
         >
           Discard
         </button>
+      </div>
+
+      <!-- Field list panel + tab order (T-121) -->
+      <div
+        :if={@active_tab == "forms"}
+        class="border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-4 py-3"
+        id="form-field-list-panel"
+      >
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-sm font-medium text-gray-700 dark:text-gray-200">Fields</span>
+          <span
+            :if={@form_field_list_loading}
+            class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400"
+          >
+            <.icon name="hero-arrow-path" class="size-3.5 animate-spin" /> Loading…
+          </span>
+          <span :if={not @form_field_list_loading} class="text-xs text-gray-500 dark:text-gray-400">
+            {length(@form_field_list)} field(s) — drag to set tab order
+          </span>
+        </div>
+
+        <div
+          :if={@form_field_list == [] and not @form_field_list_loading}
+          class="text-xs text-gray-400"
+        >
+          No fields yet — create one with the ribbon tools, or auto-create from a scan.
+        </div>
+
+        <ul
+          :if={@form_field_list != []}
+          id="form-field-list"
+          class="flex flex-wrap gap-2"
+        >
+          <li
+            :for={{field, idx} <- Enum.with_index(@form_field_list)}
+            id={"form-field-" <> Integer.to_string(idx)}
+            draggable="true"
+            phx-hook="FieldListDrag"
+            data-ref={Integer.to_string(idx)}
+            data-name={field.name}
+            data-page={Integer.to_string(field.page)}
+            data-rect={inspect(field.rect)}
+            class="flex items-center gap-2 px-2.5 py-1 text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 cursor-grab select-none"
+          >
+            <span class="text-gray-400">☰</span>
+            <button
+              type="button"
+              phx-click="select_form_field"
+              phx-value-page={field.page}
+              phx-value-x0={Enum.at(field.rect, 0)}
+              phx-value-y0={Enum.at(field.rect, 1)}
+              phx-value-x1={Enum.at(field.rect, 2)}
+              phx-value-y1={Enum.at(field.rect, 3)}
+              class="text-gray-700 dark:text-gray-200 hover:text-accent transition-colors cursor-pointer"
+            >
+              {field.name}
+            </button>
+            <span class="text-gray-400">{field.kind} · p{field.page + 1}</span>
+          </li>
+        </ul>
       </div>
 
       <!-- Translate tab ribbon (T-157) -->
@@ -7015,6 +7118,67 @@ defmodule QuireWeb.WorkspaceLive do
 
   defp parse_field_ref({num, _gen}), do: {:ok, num}
   defp parse_field_ref(n) when is_integer(n), do: {:ok, n}
+
+  defp normalise_field_list(fields) do
+    Enum.map(fields, fn f ->
+      bounds = f.bounds || %{left: 0, bottom: 0, right: 0, top: 0}
+
+      %{
+        name: f.name || "field",
+        kind: to_string(f.type || :text),
+        page: f.page || 0,
+        rect: [bounds.left, bounds.bottom, bounds.right, bounds.top]
+      }
+    end)
+  end
+
+  defp reorder_acro_fields(doc, refs) do
+    with {:ok, catalog} <- Quire.Pdf.catalog(doc) do
+      case catalog do
+        %{"/AcroForm" => {:ref, num, gen}} ->
+          with {:ok, acroform} <- Quire.Pdf.get_object(doc, {num, gen}) do
+            ordered =
+              Enum.map(refs, fn ref_str ->
+                case Integer.parse(to_string(ref_str)) do
+                  {n, _} -> {:ref, n, 0}
+                  :error -> nil
+                end
+              end)
+              |> Enum.reject(&is_nil/1)
+
+            :ok = Quire.Pdf.set_object(doc, {num, gen}, Map.put(acroform, "/Fields", ordered))
+            {:ok, :ok}
+          end
+
+        _ ->
+          {:error, :no_acroform}
+      end
+    end
+  end
+
+  defp maybe_load_form_field_list(socket) do
+    doc_id = socket.assigns.active_document_id
+    scope = socket.assigns.current_scope
+
+    socket = assign(socket, :form_field_list_loading, true)
+
+    Task.start(fn ->
+      result =
+        with {:ok, doc} <- Quire.Documents.get_document(doc_id, scope),
+             {:ok, rev} <- Quire.Documents.current_revision(doc),
+             %Quire.Storage.Ref{} = ref <- Quire.Documents.Revision.storage_ref(rev),
+             {:ok, fields} <- Quire.Render.form_fields(ref) do
+          {:ok, normalise_field_list(fields)}
+        else
+          {:error, _} = err -> err
+          _ -> {:error, :no_fields}
+        end
+
+      Phoenix.PubSub.broadcast(Quire.PubSub, "document:#{doc_id}", {:form_field_list, result})
+    end)
+
+    socket
+  end
 
   defp apply_field_props(doc, field_id, props, params) do
     name = props.name || params["name"]

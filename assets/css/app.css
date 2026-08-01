@@ -251,3 +251,13 @@ svg.fill-sign-line-layer {
   z-index: 45;
   border-radius: 2px;
 }
+
+/* Field list panel highlight overlay (T-121). */
+.form-field-highlight {
+  position: absolute;
+  border: 2px solid #4f46e5;
+  background: rgba(79, 70, 229, 0.15);
+  pointer-events: none;
+  z-index: 46;
+  border-radius: 2px;
+}
