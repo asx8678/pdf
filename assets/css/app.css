@@ -164,3 +164,71 @@
 #pdf-viewer-container.format-painter-armed .annotationEditorLayer {
   cursor: copy;
 }
+
+/* ── Fill & Sign tab (T-117) — palette draw layer ────────────────────── */
+
+/* While a Fill & Sign tool is active, use a crosshair-ish pointer hint. */
+#pdf-viewer-container.fill-sign-tool-active,
+#pdf-viewer-container.fill-sign-tool-active .page {
+  cursor: crosshair;
+}
+
+/* Resizable, movable wrapper box for a glyph (crossmark / check / dot). */
+.fill-sign-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  z-index: 45;
+  touch-action: none;
+}
+.fill-sign-box:hover { border-color: rgba(79, 70, 229, 0.6); }
+.fill-sign-box .fill-sign-glyph { width: 100%; height: 100%; overflow: visible; }
+.fill-sign-box .fill-sign-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 2px solid #4f46e5;
+  border-radius: 2px;
+  cursor: nwse-resize;
+  display: none;
+}
+.fill-sign-box:hover .fill-sign-handle { display: block; }
+
+/* Text draw layer: anchored at the click point, grows with content. */
+.fill-sign-text-wrap {
+  position: absolute;
+  z-index: 45;
+  min-width: 60px;
+  transform-origin: left top;
+}
+.fill-sign-text-wrap .fill-sign-text {
+  outline: none;
+  border-bottom: 1px dashed rgba(79, 70, 229, 0.5);
+  line-height: 1.2;
+  white-space: pre-wrap;
+  word-break: break-word;
+  display: inline;
+}
+.fill-sign-text-wrap .fill-sign-text:focus {
+  border-bottom-color: #4f46e5;
+}
+
+/* Full-page SVG layer collecting all Fill & Sign lines on a page. */
+svg.fill-sign-line-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 44;
+  overflow: visible;
+}
+
+/* The floating palette below the ribbon (server-rendered in the ribbon). */
+#fill-sign-palette {
+  font-feature-settings: normal;
+}
