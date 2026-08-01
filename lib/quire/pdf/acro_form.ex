@@ -404,6 +404,32 @@ defmodule Quire.Pdf.AcroForm do
   # ── Field rebuild after page import ────────────────────────────────────────
 
   @doc """
+  Updates an existing AcroForm field widget's properties in place.
+
+  `field_id` is the widget object id (`{num, gen}` or a plain num). `props`
+  is a string-keyed map of `/Key` => value entries merged over the widget
+  dict. Nil or empty-string values delete the key. Returns `:ok` or
+  `{:error, :not_found}`.
+  """
+  @spec update_field(Pdf.t(), tuple() | pos_integer(), map()) :: :ok | {:error, atom()}
+  def update_field(doc, field_id, props) when is_reference(doc) and is_map(props) do
+    id = ref_to_id(field_id)
+
+    with {:ok, widget} <- Pdf.get_object(doc, id) do
+      updated =
+        Enum.reduce(props, widget, fn {key, value}, acc ->
+          case value do
+            nil -> Map.delete(acc, key)
+            "" -> Map.delete(acc, key)
+            v -> Map.put(acc, key, v)
+          end
+        end)
+
+      Pdf.set_object(doc, id, updated)
+    end
+  end
+
+  @doc """
   Walk every page in the document, discover widget annotations, and rebuild
   the `/AcroForm /Fields` array in the catalog.
 
@@ -434,31 +460,6 @@ defmodule Quire.Pdf.AcroForm do
     array lives on the field-level dictionary (not on page `/Annots`) are
     handled because each kid is a separate widget annotation on a page.
   """
-  @doc """
-  Updates an existing AcroForm field widget's properties in place.
-
-  `field_id` is the widget object id (`{num, gen}` or a plain num). `props`
-  is a string-keyed map of `/Key` => value entries merged over the widget
-  dict. Nil or empty-string values delete the key. Returns `:ok` or
-  `{:error, :not_found}`.
-  """
-  @spec update_field(Pdf.t(), tuple() | pos_integer(), map()) :: :ok | {:error, atom()}
-  def update_field(doc, field_id, props) when is_reference(doc) and is_map(props) do
-    id = ref_to_id(field_id)
-
-    with {:ok, widget} <- Pdf.get_object(doc, id) do
-      updated =
-        Enum.reduce(props, widget, fn {key, value}, acc ->
-          case value do
-            nil -> Map.delete(acc, key)
-            "" -> Map.delete(acc, key)
-            v -> Map.put(acc, key, v)
-          end
-        end)
-
-      Pdf.set_object(doc, id, updated)
-    end
-  end
 
   @spec rebuild_fields(Pdf.t()) :: :ok | {:error, atom()}
   def rebuild_fields(doc) when is_reference(doc) do
