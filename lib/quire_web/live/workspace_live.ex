@@ -1430,66 +1430,6 @@ defmodule QuireWeb.WorkspaceLive do
     end
   end
 
-  defp parse_field_ref(nil), do: {:error, :no_ref}
-
-  defp parse_field_ref(ref) when is_binary(ref) do
-    case Integer.parse(ref) do
-      {n, _} -> {:ok, n}
-      :error -> {:error, :bad_ref}
-    end
-  end
-
-  defp parse_field_ref({num, _gen}), do: {:ok, num}
-  defp parse_field_ref(n) when is_integer(n), do: {:ok, n}
-
-  defp apply_field_props(doc, field_id, props, params) do
-    name = props.name || params["name"]
-    tooltip = props.tooltip || params["tooltip"]
-    default = props.default || params["default"]
-    required = props.required || params["required"] == "true"
-    read_only = props.read_only || params["read_only"] == "true"
-    max_length = props.max_length || params["max_length"]
-
-    flags = 0
-    flags = if required, do: flags + 2, else: flags
-    flags = if read_only, do: flags + 1, else: flags
-
-    updates =
-      %{}
-      |> Map.put("/T", name || "Field")
-      |> maybe_put("/TU", tooltip)
-      |> maybe_put("/V", default)
-      |> maybe_put("/MaxLen", parse_int(max_length))
-      |> maybe_put("/Ff", if(flags > 0, do: flags, else: nil))
-      |> maybe_put("/Opt", build_opt(props.options))
-      |> maybe_put("/A", build_button_action(params["action"]))
-
-    Quire.Pdf.AcroForm.update_field(doc, field_id, updates)
-  end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, _key, ""), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
-
-  defp parse_int(""), do: nil
-  defp parse_int(nil), do: nil
-
-  defp parse_int(s) when is_binary(s) do
-    case Integer.parse(s) do
-      {n, _} -> n
-      :error -> nil
-    end
-  end
-
-  defp build_opt([]), do: nil
-  defp build_opt(options), do: Enum.map(options, &to_string/1)
-
-  defp build_button_action(nil), do: nil
-  defp build_button_action(""), do: nil
-  defp build_button_action("submit"), do: %{"/S" => {:name, "SubmitForm"}}
-  defp build_button_action("reset"), do: %{"/S" => {:name, "ResetForm"}}
-  defp build_button_action(_), do: nil
-
   # ── Fill & Sign auto-fill (T-118 §9.4) ────────────────────────────────────
   #
   # Detection runs off the LiveView process (see maybe_run_fill_sign_detection/1,
@@ -7059,4 +6999,64 @@ defmodule QuireWeb.WorkspaceLive do
 ") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
     end
   end
+
+  defp parse_field_ref(nil), do: {:error, :no_ref}
+
+  defp parse_field_ref(ref) when is_binary(ref) do
+    case Integer.parse(ref) do
+      {n, _} -> {:ok, n}
+      :error -> {:error, :bad_ref}
+    end
+  end
+
+  defp parse_field_ref({num, _gen}), do: {:ok, num}
+  defp parse_field_ref(n) when is_integer(n), do: {:ok, n}
+
+  defp apply_field_props(doc, field_id, props, params) do
+    name = props.name || params["name"]
+    tooltip = props.tooltip || params["tooltip"]
+    default = props.default || params["default"]
+    required = props.required || params["required"] == "true"
+    read_only = props.read_only || params["read_only"] == "true"
+    max_length = props.max_length || params["max_length"]
+
+    flags = 0
+    flags = if required, do: flags + 2, else: flags
+    flags = if read_only, do: flags + 1, else: flags
+
+    updates =
+      %{}
+      |> Map.put("/T", name || "Field")
+      |> maybe_put("/TU", tooltip)
+      |> maybe_put("/V", default)
+      |> maybe_put("/MaxLen", parse_int(max_length))
+      |> maybe_put("/Ff", if(flags > 0, do: flags, else: nil))
+      |> maybe_put("/Opt", build_opt(props.options))
+      |> maybe_put("/A", build_button_action(params["action"]))
+
+    Quire.Pdf.AcroForm.update_field(doc, field_id, updates)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, _key, ""), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp parse_int(""), do: nil
+  defp parse_int(nil), do: nil
+
+  defp parse_int(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, _} -> n
+      :error -> nil
+    end
+  end
+
+  defp build_opt([]), do: nil
+  defp build_opt(options), do: Enum.map(options, &to_string/1)
+
+  defp build_button_action(nil), do: nil
+  defp build_button_action(""), do: nil
+  defp build_button_action("submit"), do: %{"/S" => {:name, "SubmitForm"}}
+  defp build_button_action("reset"), do: %{"/S" => {:name, "ResetForm"}}
+  defp build_button_action(_), do: nil
 end
