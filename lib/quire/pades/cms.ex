@@ -15,6 +15,149 @@ defmodule Quire.Pades.Cms do
   @oid_ecdsa_with_sha256 {1, 2, 840, 100_045, 4, 3, 2}
   @oid_data {1, 2, 840, 113_549, 1, 7, 1}
   @oid_signed_data {1, 2, 840, 113_549, 1, 7, 2}
+  @oid_content_type {1, 2, 840, 113_549, 1, 9, 3}
+  @oid_message_digest {1, 2, 840, 113_549, 1, 9, 4}
+  @oid_signing_time {1, 2, 840, 113_549, 1, 9, 5}
+  @oid_signature_time_stamp_token {1, 2, 840, 113_549, 1, 9, 16, 2, 14}
+
+  @doc """
+  Build a PAdES **BES / EPES** detached SignedData with signed attributes
+  (contentType, messageDigest, and optional signingTime) and optional unsigned
+  attributes (an RFC 3161 `signatureTimeStampToken` for B-T).
+
+  ## Parameters
+    - `content_hash`: SHA-256 of the PDF byte range(s)
+    - `signer_cert_der`: DER X.509 certificate of the signer
+    - `sign_fun`: `fn(digest) -> {:ok, signature_binary} end` — signs the digest
+      with the signer's private key (RSA or ECDSA). The signature is computed
+      over the DER encoding of the signed attributes, per CMS/PAdES-BES.
+    - `opts`:
+        - `:signature_algorithm` (`:rsa` | `:ecdsa`, default `:rsa`)
+        - `:signing_time` (DateTime, default now)
+        - `:timestamp_token` (binary DER TimeStampToken, optional — when
+          present it is attached as the `signatureTimeStampToken` unsigned
+          attribute → B-T profile)
+
+  Returns `{:ok, der_binary}` or `{:error, term()}`.
+  """
+  def build_bes_signed_data(content_hash, signer_cert_der, sign_fun, opts \\ []) do
+    sig_alg = Keyword.get(opts, :signature_algorithm, :rsa)
+    signing_time = Keyword.get(opts, :signing_time, DateTime.utc_now())
+    token = Keyword.get(opts, :timestamp_token)
+
+    with {:ok, {issuer, serial}} <- extract_issuer_and_serial(signer_cert_der) do
+      signed_attrs = build_signed_attrs(content_hash, signing_time)
+      signed_attrs_der = encode_tag(0xA0, signed_attrs)
+      digest = :crypto.hash(:sha256, signed_attrs_der)
+
+      with {:ok, signature} <- sign_fun.(digest) do
+        unsigned_attrs = if token, do: build_unsigned_attrs(token), else: ""
+        cms = build_bes_cms(content_hash, signature, signer_cert_der, issuer, serial, sig_alg, signed_attrs_der, unsigned_attrs)
+        {:ok, cms}
+      end
+    end
+  end
+
+  # SignedAttributes ::= [0] IMPLICIT SET OF Attribute (POST-sorted by DER).
+  defp build_signed_attrs(content_hash, signing_time) do
+    attrs =
+      [
+        encode_attribute(@oid_content_type, encode_oid(@oid_data)),
+        encode_attribute(@oid_message_digest, encode_octet_string(content_hash)),
+        encode_attribute(@oid_signing_time, encode_utc_time(signing_time))
+      ]
+      |> IO.iodata_to_binary()
+
+    encode_set_der(attrs)
+  end
+
+  # unsignedAttrs ::= [1] IMPLICIT SET OF Attribute
+  defp build_unsigned_attrs(token) do
+    encode_tag(
+      0xA1,
+      encode_set_der(encode_attribute(@oid_signature_time_stamp_token, encode_octet_string(token)))
+    )
+  end
+
+  defp build_bes_cms(_content_hash, signature, cert_der, issuer, serial, sig_alg, signed_attrs_der, unsigned_attrs) do
+    digest_alg_oid = @oid_sha256
+    signature_alg_oid = signature_oid(sig_alg)
+    digest_alg_id = encode_algorithm_id(digest_alg_oid)
+    sig_alg_id = encode_algorithm_id(signature_alg_oid)
+
+    signer_id = encode_sequence([issuer, encode_integer(serial)])
+
+    signer_info_der =
+      encode_sequence(
+        Enum.reject(
+          [
+            encode_integer(1),           # version
+            signer_id,                    # sid
+            digest_alg_id,                # digestAlgorithm
+            nonempty(signed_attrs_der),   # signedAttrs [0]
+            sig_alg_id,                   # signatureAlgorithm
+            encode_octet_string(signature),
+            nonempty(unsigned_attrs)      # unsignedAttrs [1]
+          ],
+          &is_nil/1
+        )
+      )
+
+    encap_content_info = encode_sequence([encode_oid(@oid_data)])
+    cert_set_tagged = encode_tag(0xA0, encode_set([cert_der]))
+
+    signed_data_der =
+      encode_sequence([
+        encode_integer(3),                # version — BES uses CMS version 3
+        encode_set([digest_alg_id]),
+        encap_content_info,
+        cert_set_tagged,
+        encode_set([signer_info_der])
+      ])
+
+    encode_sequence([
+      encode_oid(@oid_signed_data),
+      encode_tag(0xA0, signed_data_der)
+    ])
+  end
+
+  defp nonempty(""), do: nil
+  defp nonempty(bin) when is_binary(bin), do: bin
+
+  @doc false
+  def encode_attribute(oid, value) do
+    encode_sequence([encode_oid(oid), encode_set([value])])
+  end
+
+  @doc false
+  def encode_utc_time(%DateTime{} = dt) do
+    # DER UTCTime ::= YYMMDDHHMMSSZ (UTC, no seconds fraction)
+    dt = DateTime.truncate(dt, :second) |> DateTime.shift_zone!("Etc/UTC")
+
+    <<year::binary-size(2), _rest::binary>> = String.pad_leading(Integer.to_string(dt.year), 4, "0")
+
+    s =
+      year <> "#{pad(dt.month)}#{pad(dt.day)}#{pad(dt.hour)}#{pad(dt.minute)}#{pad(dt.second)}Z"
+
+    encode_tag(0x17, s)
+  end
+
+  defp pad(n) when n < 10, do: "0#{n}"
+  defp pad(n), do: Integer.to_string(n)
+
+  defp encode_set_der(attrs_bin) do
+    # SET OF requires canonical order — sort the embedded Attribute elements.
+    encode_set(parse_elements(attrs_bin, []))
+  end
+
+  # Re-serialize the SET OF Attribute with DER canonical ordering by re-reading
+  # each Attribute TLV from the pre-encoded stream.
+  defp parse_elements(<<>>, acc), do: Enum.reverse(acc)
+
+  defp parse_elements(bin, acc) do
+    {{tag, content}, rest} = decode_tlv(bin)
+    parse_elements(rest, [encode_tag(tag, content) | acc])
+  end
 
   @doc """
   Build a detached CMS SignedData suitable for embedding in a PDF signature field.
@@ -219,6 +362,10 @@ defmodule Quire.Pades.Cms do
 
   @doc false
   def encode_null, do: encode_tag(0x05, <<>>)
+
+  @doc false
+  def encode_boolean(true), do: encode_tag(0x01, <<0xFF>>)
+  def encode_boolean(false), do: encode_tag(0x01, <<0x00>>)
 
   @doc false
   def encode_sequence(elements) when is_list(elements) do
