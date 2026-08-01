@@ -150,9 +150,15 @@ defmodule Quire.Forms.Detect do
     }
   end
 
+  # pdfium-render exposes these as atoms on AcroForm fields (see
+  # `document_form_fields` in ex_pdfium's Rust NIF — form_field_type_atom).
+  # We surface a smaller, UI-friendly taxonomy: anything the user "fills
+  # by typing" is :text, anything they "tick" is :checkbox.
   defp acro_kind(:text), do: :text
+  defp acro_kind(:combo_box), do: :text
+  defp acro_kind(:list_box), do: :text
   defp acro_kind(:checkbox), do: :checkbox
-  defp acro_kind(:radio), do: :radio
+  defp acro_kind(:radio_button), do: :checkbox
   defp acro_kind(_), do: :text
 
   defp to_f(n) when is_integer(n), do: n * 1.0
@@ -210,16 +216,31 @@ defmodule Quire.Forms.Detect do
 
   # Row-major binary of 0/1 bytes, one byte per pixel, honouring the bitmap
   # stride (pdfium rows can be padded).  Luminance is the channel average so
-  # coloured ink still registers as dark.
-  defp build_mask(%ExPdfium.Bitmap{data: data, width: w, height: h, stride: stride}, threshold) do
-    bands = div(stride, max(w, 1))
-    bands = if bands in [1, 3, 4], do: bands, else: 3
+  # coloured ink still registers as dark.  We trust the bitmap's `:format`
+  # for the channel count (the fallback infers from `stride/width` and is
+  # only reached for very old bitmaps built before the format field existed).
+  defp build_mask(
+         %ExPdfium.Bitmap{data: data, width: w, height: h, stride: stride, format: fmt},
+         threshold
+       ) do
+    bands = bands_for(fmt, stride, w)
 
     for y <- 0..(h - 1) do
       row = binary_part(data, y * stride, w * bands)
       mask_row(row, bands, threshold)
     end
     |> Enum.join()
+  end
+
+  # :bgrx carries a 4th padding byte that does not encode a colour channel —
+  # we still average 3 samples to get a luminance, not 4.
+  defp bands_for(:gray, _stride, _w), do: 1
+  defp bands_for(:bgr, _stride, _w), do: 3
+  defp bands_for(:bgrx, _stride, _w), do: 3
+
+  defp bands_for(_rgba_or_unknown, stride, w) do
+    bands = div(stride, max(w, 1))
+    if bands in [1, 3, 4], do: bands, else: 3
   end
 
   defp mask_row(row, bands, threshold) do
