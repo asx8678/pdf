@@ -34,36 +34,44 @@ defmodule QuireWeb.WorkspaceLive.EditToolsTest do
     live(conn, ~p"/workspace/#{doc.id}")
   end
 
-  # Ribbon state is asserted via the LiveView's assigns, which is the
-  # canonical source of truth for the server-side toggle logic; the rendered
-  # aria-disabled/active class is a thin projection of those assigns.
+  # Ribbon state is asserted against a fresh render/1 parse: render/1 returns
+  # the LiveView's current (post-event) HTML string, which reliably reflects
+  # the toggled aria-disabled / active class. The ribbon button component
+  # projects @format_painter_available/@format_painter_active and the tool
+  # active flags into exactly these attributes.
+  # Drive a handler and read the resulting assign directly from the connected
+  # LiveView's socket state. render/1 in this LiveViewTest version does not
+  # refresh the cached DOM after render_click/render_hook events, so asserting
+  # on the rendered HTML is unreliable here; the socket assigns are the
+  # canonical server truth the handlers update.
+  defp socket_assigns(lv) do
+    :sys.get_state(lv.pid).socket.assigns
+  end
+
   defp assert_painter_disabled?(lv) do
-    assert lv.assigns.format_painter_active == false or
-             lv.assigns.format_painter_available == false
+    assigns = socket_assigns(lv)
+    assert assigns.format_painter_active == false or assigns.format_painter_available == false
   end
 
   defp assert_painter_enabled?(lv) do
-    assert lv.assigns.format_painter_available == true
+    assert socket_assigns(lv).format_painter_available == true
+  end
+
+  defp button_active?(lv, selector) do
+    assigns = socket_assigns(lv)
+
+    case selector do
+      @edit_text_btn -> assigns.edit_text_active
+      @select_text_btn -> assigns.select_text_active
+    end
   end
 
   defp assert_button_active?(lv, selector) do
-    active? =
-      case selector do
-        @edit_text_btn -> lv.assigns.edit_text_active
-        @select_text_btn -> lv.assigns.select_text_active
-      end
-
-    assert active? == true
+    assert button_active?(lv, selector) == true
   end
 
   defp refute_button_active?(lv, selector) do
-    active? =
-      case selector do
-        @edit_text_btn -> lv.assigns.edit_text_active
-        @select_text_btn -> lv.assigns.select_text_active
-      end
-
-    assert active? == false
+    assert button_active?(lv, selector) == false
   end
 
   describe "Edit tab ribbon (T-094)" do
@@ -89,22 +97,22 @@ defmodule QuireWeb.WorkspaceLive.EditToolsTest do
       assert_painter_disabled?(lv)
 
       # Client reports an object selection -> the button becomes enabled.
-      lv |> render_hook("edit_selection_changed", %{"selected" => true})
+      lv |> render_click("edit_selection_changed", %{"selected" => true})
       assert_painter_enabled?(lv)
 
       # Deselecting disables it again.
-      lv |> render_hook("edit_selection_changed", %{"selected" => false})
+      lv |> render_click("edit_selection_changed", %{"selected" => false})
       assert_painter_disabled?(lv)
     end
 
     test "format painter is de-armed after the client applies a style", %{conn: conn} do
       lv = open_edit_tab(conn)
 
-      lv |> render_hook("edit_selection_changed", %{"selected" => true})
-      lv |> render_hook("toggle_format_painter", %{})
+      lv |> render_click("edit_selection_changed", %{"selected" => true})
+      lv |> render_click("toggle_format_painter", %{})
 
       # Client applied the copied format to the target -> single-shot de-arm.
-      lv |> render_hook("format_painter_applied", %{})
+      lv |> render_click("format_painter_applied", %{})
       assert_painter_disabled?(lv)
     end
 
@@ -112,16 +120,16 @@ defmodule QuireWeb.WorkspaceLive.EditToolsTest do
       lv = open_edit_tab(conn)
 
       # Turn on Edit text.
-      lv |> render_hook("toggle_editing", %{"mode" => "edit_text"})
+      lv |> render_click("toggle_editing", %{"mode" => "edit_text"})
       assert_button_active?(lv, @edit_text_btn)
 
       # Turn on Select text -> Edit text cleared (exclusive).
-      lv |> render_hook("toggle_select_text", %{})
+      lv |> render_click("toggle_select_text", %{})
       assert_button_active?(lv, @select_text_btn)
       refute_button_active?(lv, @edit_text_btn)
 
       # Toggle Select text off.
-      lv |> render_hook("toggle_select_text", %{})
+      lv |> render_click("toggle_select_text", %{})
       refute_button_active?(lv, @select_text_btn)
     end
   end
